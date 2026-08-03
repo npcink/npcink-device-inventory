@@ -89,9 +89,14 @@ class Npcink_Device_Inventory_Identity_Repository
 	public $claimed_asset_ids = array();
 	public $claimed_identities = array();
 	public $matched_asset_id;
+	public $matched_asset_ids = array();
 
-	public function find_asset_id_by_identity()
+	public function find_asset_id_by_identity($type = '', $value = '')
 	{
+		$key = $type . ':' . $value;
+		if (array_key_exists($key, $this->matched_asset_ids)) {
+			return $this->matched_asset_ids[$key];
+		}
 		return $this->matched_asset_id;
 	}
 
@@ -116,8 +121,8 @@ class Npcink_Device_Inventory_Identity_Repository
 			array(
 				'id' => 1,
 				'asset_id' => intval($asset_id),
-				'identity_type' => 'device_uuid_v1',
-				'identity_value' => 'device-v1-fixture',
+				'identity_type' => 'system_uuid_v2',
+				'identity_value' => 'system-v2-fixture',
 				'confidence' => 100,
 				'is_primary' => 1,
 				'source' => 'fixture',
@@ -168,25 +173,58 @@ class Npcink_Device_Inventory_Event_Service
 
 class Npcink_Device_Inventory_Device_Identity_Service
 {
-	const TYPE = 'device_uuid_v1';
-	const FALLBACK_TYPE = 'fallback_device_v1';
+	const TYPE = 'system_uuid_v2';
 
 	public function primary_identity()
 	{
 		return array(
 			'type' => self::TYPE,
-			'value' => 'device-v1-fixture',
+			'value' => 'system-v2-fixture',
 			'confidence' => 100,
 			'source' => 'server_recomputed',
 		);
+	}
+
+	public function identities()
+	{
+		return array($this->primary_identity());
+	}
+
+	public function legacy_primary_identity()
+	{
+		return array('type' => '', 'value' => '');
 	}
 }
 
 class Npcink_Missing_Device_Identity_Service extends Npcink_Device_Inventory_Device_Identity_Service
 {
+	public function identities()
+	{
+		return array();
+	}
+
 	public function primary_identity()
 	{
 		return array('type' => '', 'value' => '', 'reason' => 'fixture_missing');
+	}
+}
+
+class Npcink_Multiple_Device_Identity_Service extends Npcink_Device_Inventory_Device_Identity_Service
+{
+	public function identities()
+	{
+		return array(
+			$this->primary_identity(),
+			array('type' => 'baseboard_serial_v2', 'value' => 'board-v2-fixture', 'confidence' => 100, 'source' => 'server_recomputed'),
+		);
+	}
+}
+
+class Npcink_Legacy_Match_Device_Identity_Service extends Npcink_Device_Inventory_Device_Identity_Service
+{
+	public function legacy_primary_identity()
+	{
+		return array('type' => 'device_uuid_v1', 'value' => 'device-v1-existing');
 	}
 }
 
@@ -226,8 +264,8 @@ function npcink_ingest_claim($status, $owner_asset_id)
 	return array(
 		'status' => $status,
 		'ownerAssetId' => $owner_asset_id === null ? null : intval($owner_asset_id),
-		'identityType' => 'device_uuid_v1',
-		'identityValue' => 'device-v1-fixture',
+		'identityType' => 'system_uuid_v2',
+		'identityValue' => 'system-v2-fixture',
 	);
 }
 
@@ -311,5 +349,43 @@ $service = new Npcink_Device_Inventory_Observation_Ingest_Service(
 $result = $service->ingest(npcink_ingest_payload());
 npcink_ingest_assert($result instanceof WP_Error && $result->code === 'missing_identity', 'uploads without a server-computable identity must return 422 missing_identity');
 npcink_ingest_assert($wpdb->commands === array(), 'missing identities must fail before starting a transaction');
+
+$wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
+$assets = new Npcink_Device_Inventory_Asset_Repository(
+	array(
+		11 => npcink_ingest_asset_row(11, 'system-owner'),
+		22 => npcink_ingest_asset_row(22, 'board-owner'),
+	)
+);
+$identities = new Npcink_Device_Inventory_Identity_Repository();
+$identities->matched_asset_ids = array(
+	'system_uuid_v2:system-v2-fixture' => 11,
+	'baseboard_serial_v2:board-v2-fixture' => 22,
+);
+$service = new Npcink_Device_Inventory_Observation_Ingest_Service(
+	$assets,
+	$identities,
+	new Npcink_Device_Inventory_Observation_Repository(),
+	new Npcink_Device_Inventory_Event_Service(),
+	new Npcink_Multiple_Device_Identity_Service()
+);
+$result = $service->ingest(npcink_ingest_payload());
+npcink_ingest_assert($result instanceof WP_Error && $result->code === 'identity_evidence_conflict', 'conflicting strong identities must fail closed');
+npcink_ingest_assert($wpdb->commands === array(), 'identity evidence conflicts must fail before starting a transaction');
+
+$wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
+$assets = new Npcink_Device_Inventory_Asset_Repository(array(11 => npcink_ingest_asset_row(11, 'legacy-owner')));
+$identities = new Npcink_Device_Inventory_Identity_Repository();
+$identities->matched_asset_ids = array('device_uuid_v1:device-v1-existing' => 11);
+$service = new Npcink_Device_Inventory_Observation_Ingest_Service(
+	$assets,
+	$identities,
+	new Npcink_Device_Inventory_Observation_Repository(),
+	new Npcink_Device_Inventory_Event_Service(),
+	new Npcink_Legacy_Match_Device_Identity_Service()
+);
+$result = $service->ingest(npcink_ingest_payload());
+npcink_ingest_assert(is_array($result) && $result['data']['mode'] === 'matched', 'a v2 upload must attach to an existing v1 asset during the transition');
+npcink_ingest_assert($identities->claimed_asset_ids === array(11), 'the v2 identity must be backfilled onto the legacy asset');
 
 echo "Observation ingest fixture checks passed.\n";

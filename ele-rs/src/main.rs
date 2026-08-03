@@ -43,8 +43,8 @@ fn inspect(args: &[String]) -> Result<()> {
 
 fn device_id() -> Result<()> {
     let data = collector::collect_static_data()?;
-    let id = collector::device_uuid_v1(&data)
-        .or_else(|| collector::fallback_device_v1(&data))
+    let id = collector::hardware_identity_v2(&data)
+        .map(|(_, value)| value)
         .context("missing device identity")?;
     println!("{id}");
     Ok(())

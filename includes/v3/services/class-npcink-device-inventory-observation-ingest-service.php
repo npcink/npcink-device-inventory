@@ -35,8 +35,9 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 		$observation_payload = isset($payload['observation']) && is_array($payload['observation'])
 			? $payload['observation']
 			: $payload;
-		$primary_identity = $this->device_identity->primary_identity($observation_payload);
-		if (empty($primary_identity['type']) || empty($primary_identity['value'])) {
+		$identities = $this->device_identity->identities($observation_payload);
+		$primary_identity = !empty($identities) ? $identities[0] : $this->device_identity->primary_identity($observation_payload);
+		if (empty($identities) || empty($primary_identity['type']) || empty($primary_identity['value'])) {
 			return Npcink_Device_Inventory_V3_Response::error(
 				'missing_identity',
 				'Observation cannot produce a device identity.',
@@ -44,9 +45,17 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 				array('reason' => isset($primary_identity['reason']) ? $primary_identity['reason'] : 'insufficient_hardware_facts')
 			);
 		}
-		$identities = array($primary_identity);
-
-		$asset_id = $this->matching_asset_id($primary_identity);
+		$owner_ids = $this->matching_asset_ids($identities);
+		if (count($owner_ids) > 1) {
+			return Npcink_Device_Inventory_V3_Response::error('identity_evidence_conflict', 'Hardware identity signals belong to different assets.', 409);
+		}
+		$asset_id = !empty($owner_ids) ? $owner_ids[0] : null;
+		if (!$asset_id) {
+			$legacy_identity = $this->device_identity->legacy_primary_identity($observation_payload);
+			if (!empty($legacy_identity['type']) && !empty($legacy_identity['value'])) {
+				$asset_id = $this->identities->find_asset_id_by_identity($legacy_identity['type'], $legacy_identity['value']);
+			}
+		}
 		$mode = 'matched';
 		$asset = $asset_id ? $this->assets->find_by_id($asset_id) : null;
 
@@ -71,10 +80,13 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			return $claim_error;
 		}
 
-		$primary_claim = isset($claim_results[0]) ? $claim_results[0] : null;
-		if ($primary_claim && $primary_claim['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_CONFLICT) {
+		$conflict_owner_ids = $this->claim_conflict_owner_ids($claim_results);
+		if (!empty($conflict_owner_ids)) {
 			$this->rollback_transaction();
-			$asset = $this->assets->find_by_id($primary_claim['ownerAssetId']);
+			if (count($conflict_owner_ids) !== 1) {
+				return Npcink_Device_Inventory_V3_Response::error('identity_evidence_conflict', 'Hardware identity signals belong to different assets.', 409);
+			}
+			$asset = $this->assets->find_by_id($conflict_owner_ids[0]);
 			if (!$asset || !$this->begin_transaction()) {
 				return Npcink_Device_Inventory_V3_Response::error('identity_owner_unavailable', 'Identity owner could not be loaded.', 409);
 			}
@@ -86,8 +98,7 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 				$this->rollback_transaction();
 				return $claim_error;
 			}
-			$primary_claim = isset($claim_results[0]) ? $claim_results[0] : null;
-			if (!$primary_claim || $primary_claim['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_CONFLICT) {
+			if (!empty($this->claim_conflict_owner_ids($claim_results))) {
 				return $this->rollback_error('identity_claim_conflict', 'Authoritative identity could not be claimed.', 409);
 			}
 		}
@@ -185,9 +196,27 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 		return Npcink_Device_Inventory_V3_Response::error($code, $message, $status);
 	}
 
-	private function matching_asset_id($identity)
+	private function matching_asset_ids($identities)
 	{
-		return $this->identities->find_asset_id_by_identity($identity['type'], $identity['value']);
+		$owner_ids = array();
+		foreach ($identities as $identity) {
+			$asset_id = $this->identities->find_asset_id_by_identity($identity['type'], $identity['value']);
+			if ($asset_id) {
+				$owner_ids[] = intval($asset_id);
+			}
+		}
+		return array_values(array_unique($owner_ids));
+	}
+
+	private function claim_conflict_owner_ids($claim_results)
+	{
+		$owner_ids = array();
+		foreach ($claim_results as $claim) {
+			if ($claim['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_CONFLICT && !empty($claim['ownerAssetId'])) {
+				$owner_ids[] = intval($claim['ownerAssetId']);
+			}
+		}
+		return array_values(array_unique($owner_ids));
 	}
 
 	private function build_asset_input($payload)

@@ -121,13 +121,7 @@ fn collect_device_snapshot_inner() -> Result<DeviceSnapshot, String> {
     match collector::collect_static_data() {
         Ok(data) => {
             let (device_identity_type, device_identity) =
-                if let Some(value) = collector::device_uuid_v1(&data) {
-                    ("device_uuid_v1", value)
-                } else if let Some(value) = collector::fallback_device_v1(&data) {
-                    ("fallback_device_v1", value)
-                } else {
-                    ("", String::new())
-                };
+                collector::hardware_identity_v2(&data).unwrap_or(("", String::new()));
             write_app_log("info", "device.collect_static_succeeded", "");
             Ok(DeviceSnapshot {
                 data,

@@ -75,12 +75,20 @@ class Npcink_Identity_Claim_Fake_Wpdb
 			return 1;
 		}
 		if (strpos($query, 'UPDATE') === 0) {
-			$key = $args[2] . ':' . $args[3];
-			if (!isset($this->rows[$key]) || intval($this->rows[$key]['asset_id']) !== intval($args[1]) || $this->rows[$key]['is_primary'] === 1) {
-				return 0;
+			$key = $args[1] . ':' . $args[2];
+			$asset_id = intval($args[3]);
+			$changed = 0;
+			foreach ($this->rows as $row_key => $row) {
+				if (intval($row['asset_id']) !== $asset_id) {
+					continue;
+				}
+				$is_primary = $row_key === $key ? 1 : 0;
+				if (intval($row['is_primary']) !== $is_primary) {
+					$this->rows[$row_key]['is_primary'] = $is_primary;
+					$changed++;
+				}
 			}
-			$this->rows[$key]['is_primary'] = 1;
-			return 1;
+			return $changed;
 		}
 		return false;
 	}
@@ -125,6 +133,11 @@ npcink_claim_assert(strpos($wpdb->last_insert_sql, 'INSERT IGNORE') === false, '
 $owned = $repository->claim(11, $identity, true);
 npcink_claim_assert($owned['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_OWNED, 'repeating a claim for the owner must be idempotent');
 npcink_claim_assert($wpdb->rows['device_uuid_v1:device-v1-example']['is_primary'] === 1, 'an owned identity can be promoted to primary');
+
+$v2_primary = array('type' => 'system_uuid_v2', 'value' => 'system-v2-example', 'confidence' => 100, 'source' => 'fixture');
+$repository->claim(11, $v2_primary, true);
+npcink_claim_assert($wpdb->rows['system_uuid_v2:system-v2-example']['is_primary'] === 1, 'the new v2 identity must become primary');
+npcink_claim_assert($wpdb->rows['device_uuid_v1:device-v1-example']['is_primary'] === 0, 'promoting v2 must demote the legacy primary identity');
 
 $conflict = $repository->claim(22, $identity);
 npcink_claim_assert($conflict['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_CONFLICT, 'another asset must receive an explicit conflict');

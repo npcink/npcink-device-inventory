@@ -294,7 +294,7 @@ $legacy_identity = $controller->create_identity(
 		)
 	)
 );
-npcink_asset_write_assert(is_wp_error($legacy_identity) && $legacy_identity->get_error_code() === 'invalid_identity', 'manual identity writes must use the current two-type contract');
+npcink_asset_write_assert(is_wp_error($legacy_identity) && $legacy_identity->get_error_code() === 'invalid_identity', 'manual identity writes must use the current v2 contract');
 $obsolete_issue_event = $controller->create_event(
 	new Npcink_Asset_Write_Request(
 		array(

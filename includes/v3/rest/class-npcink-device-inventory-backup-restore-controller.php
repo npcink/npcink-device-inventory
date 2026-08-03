@@ -22,7 +22,7 @@ class Npcink_Device_Inventory_Backup_Restore_Conflict_Exception extends Exceptio
 
 class Npcink_Device_Inventory_Backup_Restore_Controller
 {
-	const IDENTITY_TYPES = array('device_uuid_v1', 'fallback_device_v1');
+	const IDENTITY_TYPES = array('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1');
 	const REMOVED_EVENT_TYPES = array('issue_handled', 'issue_reopened', 'identity_reconciled');
 
 	private $exporter;

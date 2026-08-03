@@ -7,7 +7,7 @@ This folder contains lightweight regression checks that can run without a full W
 - `asset-write-fixtures.php`: atomic batch asset updates, validation, audit, and rollback fixtures.
 - `device-upload-boundary-fixtures.php`: observation payload size/shape and signed upload rate-limit fixtures.
 - `schema-migration-fixtures.php`: ordered, resumable schema revision selection fixtures.
-- `identity-contract-fixtures.php`: current PHP/Rust `device_uuid_v1` and `fallback_device_v1` contract fixtures.
+- `identity-contract-fixtures.php`: PHP/Rust hardware identity v2 golden vectors, exclusions, and v1 transition lookup fixtures.
 - `identity-claim-fixtures.php`: atomic identity claim, idempotency, conflict, and failure fixtures.
 - `observation-ingest-fixtures.php`: transaction rollback, concurrent identity ownership, and audit failure fixtures.
 - `fixtures/device-observation-demo.json`: synthetic, sanitized hardware observation sample for documentation and parser experiments.

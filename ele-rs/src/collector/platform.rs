@@ -21,6 +21,18 @@ fn enrich_impl(root: &mut Map<String, Value>) {
     ) {
         root.insert("baseboard".to_string(), normalize_windows_baseboard(&value));
     }
+    if let Some(value) = powershell_json("Get-CimInstance Win32_Processor | Select-Object Name,Manufacturer,ProcessorId,UniqueId,SerialNumber,SocketDesignation,NumberOfCores,NumberOfLogicalProcessors") {
+        root.insert(
+            "processorIdentity".to_string(),
+            normalize_windows_processor_identity(&value),
+        );
+    }
+    if let Some(value) = powershell_json("Get-NetAdapter -Name '*' -Physical -IncludeHidden -ErrorAction SilentlyContinue | Where-Object { $_.Virtual -ne $true } | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual") {
+        root.insert(
+            "networkHardware".to_string(),
+            normalize_windows_network_hardware(&value),
+        );
+    }
     if let Some(value) = powershell_json("Get-CimInstance Win32_SystemEnclosure | Select-Object Manufacturer,SerialNumber,ChassisTypes") {
         root.insert("chassis".to_string(), value);
     }
@@ -46,6 +58,8 @@ fn enrich_impl(root: &mut Map<String, Value>) {
     insert_empty_if_missing(root, "baseboard");
     insert_empty_if_missing(root, "chassis");
     insert_empty_if_missing(root, "graphics");
+    insert_array_if_missing(root, "processorIdentity");
+    insert_array_if_missing(root, "networkHardware");
 }
 
 #[cfg(target_os = "macos")]
@@ -61,6 +75,8 @@ fn enrich_impl(root: &mut Map<String, Value>) {
     insert_empty_if_missing(root, "baseboard");
     insert_empty_if_missing(root, "chassis");
     insert_empty_if_missing(root, "graphics");
+    insert_array_if_missing(root, "processorIdentity");
+    insert_array_if_missing(root, "networkHardware");
 }
 
 #[cfg(target_os = "macos")]
@@ -170,6 +186,8 @@ fn enrich_impl(root: &mut Map<String, Value>) {
     insert_empty_if_missing(root, "baseboard");
     insert_empty_if_missing(root, "chassis");
     insert_empty_if_missing(root, "graphics");
+    insert_array_if_missing(root, "processorIdentity");
+    insert_array_if_missing(root, "networkHardware");
 }
 
 #[cfg(target_os = "windows")]
@@ -229,6 +247,51 @@ fn normalize_windows_baseboard(value: &Value) -> Value {
         "version": value_text(value, "Version"),
         "serial": value_text(value, "SerialNumber"),
     })
+}
+
+#[cfg(target_os = "windows")]
+fn normalize_windows_processor_identity(value: &Value) -> Value {
+    Value::Array(
+        value_items(value)
+            .into_iter()
+            .map(|item| {
+                json!({
+                    "name": value_text(item, "Name"),
+                    "manufacturer": value_text(item, "Manufacturer"),
+                    "processorId": value_text(item, "ProcessorId"),
+                    "uniqueId": value_text(item, "UniqueId"),
+                    "serialNumber": value_text(item, "SerialNumber"),
+                    "socketDesignation": value_text(item, "SocketDesignation"),
+                    "numberOfCores": value_u64_at(item, "NumberOfCores"),
+                    "numberOfLogicalProcessors": value_u64_at(item, "NumberOfLogicalProcessors"),
+                })
+            })
+            .collect(),
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn normalize_windows_network_hardware(value: &Value) -> Value {
+    Value::Array(
+        value_items(value)
+            .into_iter()
+            .map(|item| {
+                json!({
+                    "name": value_text(item, "Name"),
+                    "interfaceDescription": value_text(item, "InterfaceDescription"),
+                    "interfaceIndex": value_u64_at(item, "InterfaceIndex"),
+                    "interfaceGuid": value_text(item, "InterfaceGuid"),
+                    "pnpDeviceId": value_text(item, "PnPDeviceID"),
+                    "macAddress": value_text(item, "MacAddress"),
+                    "permanentAddress": value_text(item, "PermanentAddress"),
+                    "status": value_text(item, "Status"),
+                    "connectorPresent": item.get("ConnectorPresent").and_then(Value::as_bool),
+                    "hardwareInterface": item.get("HardwareInterface").and_then(Value::as_bool),
+                    "virtual": item.get("Virtual").and_then(Value::as_bool),
+                })
+            })
+            .collect(),
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -419,6 +482,12 @@ fn configure_command_window(_command: &mut Command) {}
 fn insert_empty_if_missing(root: &mut Map<String, Value>, key: &str) {
     if !root.contains_key(key) {
         root.insert(key.to_string(), json!({}));
+    }
+}
+
+fn insert_array_if_missing(root: &mut Map<String, Value>, key: &str) {
+    if !root.contains_key(key) {
+        root.insert(key.to_string(), Value::Array(Vec::new()));
     }
 }
 

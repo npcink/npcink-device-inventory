@@ -137,7 +137,7 @@ class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_In
 		}
 
 		$identities_deleted = $wpdb->query(
-			"DELETE FROM $identities WHERE identity_type NOT IN ('device_uuid_v1', 'fallback_device_v1')"
+			"DELETE FROM $identities WHERE identity_type NOT IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1')"
 		);
 		if ($identities_deleted === false) {
 			return false;

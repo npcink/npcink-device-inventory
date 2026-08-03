@@ -97,9 +97,9 @@ fn parse_submit_response(status: reqwest::StatusCode, text: String) -> Result<Va
 }
 
 fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
-    crate::collector::device_uuid_v1(data)
-		.or_else(|| crate::collector::fallback_device_v1(data))
-		.context("missing device identity; check motherboard facts, serial number, and physical MAC data")?;
+    crate::collector::hardware_identity_v2(data).context(
+        "missing device identity; check system UUID, motherboard serial, or permanent PCI MAC data",
+    )?;
     let collector = object_at(data, "/collector");
     let collected_at = string_at(data, "/collector/collected_at");
     let system = value_at(data, "/system");
@@ -110,7 +110,7 @@ fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
 
     Ok(json!({
         "_npcink_device": {
-            "schema_version": 4,
+            "schema_version": 5,
             "collector": {
                 "name": collector_string(&collector, "name", env!("CARGO_PKG_NAME")),
                 "version": collector_string(&collector, "version", env!("CARGO_PKG_VERSION")),
@@ -138,6 +138,7 @@ fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
             "hardware": {
                 "hardwareUuid": string_at(data, "/uuid/hardware"),
                 "cpu": value_at(data, "/cpu"),
+                "processors": value_at(data, "/processorIdentity"),
                 "memory": {
                     "system": value_at(data, "/mem"),
                     "modules": value_at(data, "/memLayout"),
@@ -146,6 +147,7 @@ fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
                 "network": {
                     "primary": primary_network,
                     "interfaces": networks,
+                    "identityInterfaces": value_at(data, "/networkHardware"),
                 },
                 "graphics": value_at(data, "/graphics"),
                 "baseboard": baseboard,
@@ -154,7 +156,7 @@ fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
             },
         },
         "raw": {
-            "source": "npcink-device-agent-v4",
+            "source": "npcink-device-agent-v5",
             "static_data": data,
             "filesystems": value_at(data, "/fsSize"),
             "platform": value_at(data, "/platformData"),
@@ -405,20 +407,22 @@ mod tests {
             "collector": {"name": "agent", "version": "1.0", "runtime": "rust", "collected_at": "2026-06-24T08:00:00Z"},
             "uuid": {"hardware": "HW-1", "macs": ["aa:bb:cc:dd:ee:ff"]},
             "system": {"manufacturer": "Npcink", "model": "Test", "uuid": "HW-1", "serial": "SER-1"},
-            "baseboard": {"serial": "BOARD-1"},
+            "baseboard": {"manufacturer": "Npcink", "product": "Board", "serial": "BOARD-1"},
             "bios": {"serial": "BIOS-1"},
             "os": {"platform": "macos", "distro": "macOS", "release": "15"},
             "cpu": {"brand": "CPU"},
+            "processorIdentity": [{"name": "CPU", "processorId": "SHARED-FAMILY-ID"}],
             "mem": {"total": 8},
             "diskLayout": [{"size": 10}],
             "net": [{"default": true, "mac": "aa:bb:cc:dd:ee:ff", "ip4": "192.168.1.2"}],
+            "networkHardware": [{"pnpDeviceId": "PCI\\VEN_1234", "permanentAddress": "AABBCCDDEEFF", "virtual": false}],
             "graphics": {"controllers": [{"vendor": "GPU", "model": "Model"}]}
         });
 
         let observation = build_observation_v3("Alice", &data).unwrap();
         assert_eq!(
             observation.pointer("/_npcink_device/schema_version"),
-            Some(&json!(4))
+            Some(&json!(5))
         );
         assert!(observation.pointer("/asset/identity").is_none());
         assert_eq!(
@@ -436,6 +440,10 @@ mod tests {
         assert_eq!(
             observation.pointer("/asset/hardware/system/serial"),
             Some(&json!("SER-1"))
+        );
+        assert_eq!(
+            observation.pointer("/asset/hardware/network/identityInterfaces/0/permanentAddress"),
+            Some(&json!("AABBCCDDEEFF"))
         );
     }
 }

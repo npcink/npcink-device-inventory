@@ -7,7 +7,7 @@ if (!defined('ABSPATH')) {
 class Npcink_Device_Inventory_Assets_Controller
 {
 	const ASSET_TYPES = array('computer', 'custom');
-	const IDENTITY_TYPES = array('device_uuid_v1', 'fallback_device_v1');
+	const IDENTITY_TYPES = array('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2');
 	const ASSET_STATUSES = array('active', 'inactive', 'maintenance', 'retired', 'deleted');
 	const MAX_BATCH_SIZE = 100;
 

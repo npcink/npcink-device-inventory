@@ -681,6 +681,133 @@ pub fn device_uuid_v1(data: &Value) -> Option<String> {
     Some(format!("device-v1-{}", &full[..29]))
 }
 
+/// Server-compatible hardware identity v2 candidates, ordered from strongest
+/// to weakest. CPU identifiers are intentionally excluded: the real-device
+/// pilot showed identical model machines returning the same ProcessorId.
+pub fn hardware_identities_v2(data: &Value) -> Vec<(&'static str, String)> {
+    let mut identities = Vec::new();
+    let system_uuid = data
+        .pointer("/uuid/hardware")
+        .and_then(Value::as_str)
+        .and_then(normalize_identity_value)
+        .or_else(|| {
+            data.pointer("/system/uuid")
+                .and_then(Value::as_str)
+                .and_then(normalize_identity_value)
+        });
+    if let Some(system_uuid) = system_uuid {
+        identities.push((
+            "system_uuid_v2",
+            identity_digest("system-v2", &format!("system_uuid={system_uuid}")),
+        ));
+    }
+
+    let manufacturer = data
+        .pointer("/baseboard/manufacturer")
+        .and_then(Value::as_str)
+        .and_then(normalize_identity_value);
+    let model = data
+        .pointer("/baseboard/product")
+        .and_then(Value::as_str)
+        .or_else(|| data.pointer("/baseboard/model").and_then(Value::as_str))
+        .and_then(normalize_identity_value);
+    let serial = data
+        .pointer("/baseboard/serial")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            data.pointer("/baseboard/serialNumber")
+                .and_then(Value::as_str)
+        })
+        .and_then(normalize_identity_value);
+    if let (Some(manufacturer), Some(model), Some(serial)) =
+        (manufacturer.as_ref(), model.as_ref(), serial)
+    {
+        identities.push((
+            "baseboard_serial_v2",
+            identity_digest(
+                "board-v2",
+                &format!(
+                    "baseboard_manufacturer={manufacturer}|baseboard_model={model}|baseboard_serial={serial}"
+                ),
+            ),
+        ));
+    }
+
+    if let (Some(manufacturer), Some(model)) = (manufacturer, model) {
+        if let Some(cpu_model) = processor_model(data) {
+            let mut macs = data
+                .pointer("/networkHardware")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|item| {
+                    item.get("pnpDeviceId")
+                        .and_then(Value::as_str)
+                        .map(|value| value.trim().to_ascii_uppercase().starts_with("PCI\\"))
+                        .unwrap_or(false)
+                        && !item
+                            .get("virtual")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false)
+                })
+                .filter_map(|item| {
+                    item.get("permanentAddress")
+                        .and_then(Value::as_str)
+                        .and_then(normalize_identity_mac)
+                })
+                .collect::<Vec<_>>();
+            macs.sort();
+            macs.dedup();
+            for mac in macs.into_iter().take(8) {
+                identities.push((
+                    "pci_permanent_mac_v2",
+                    identity_digest(
+                        "pci-v2",
+                        &format!(
+                            "pci_permanent_mac={mac}|baseboard_manufacturer={manufacturer}|baseboard_model={model}|cpu_model={cpu_model}"
+                        ),
+                    ),
+                ));
+            }
+        }
+    }
+
+    identities
+}
+
+pub fn hardware_identity_v2(data: &Value) -> Option<(&'static str, String)> {
+    hardware_identities_v2(data).into_iter().next()
+}
+
+fn identity_digest(prefix: &str, source: &str) -> String {
+    let digest = Sha256::digest(source.as_bytes());
+    let full = format!("{:x}", digest);
+    format!("{prefix}-{}", &full[..29])
+}
+
+fn processor_model(data: &Value) -> Option<String> {
+    let mut models = data
+        .pointer("/processorIdentity")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("name").and_then(Value::as_str))
+        .filter_map(normalize_identity_value)
+        .collect::<Vec<_>>();
+    if models.is_empty() {
+        if let Some(model) = data
+            .pointer("/cpu/brand")
+            .and_then(Value::as_str)
+            .and_then(normalize_identity_value)
+        {
+            models.push(model);
+        }
+    }
+    models.sort();
+    models.dedup();
+    (!models.is_empty()).then(|| models.join("+"))
+}
+
 fn normalize_identity_value(value: &str) -> Option<String> {
     let value = value
         .split_whitespace()
@@ -734,15 +861,26 @@ fn normalize_identity_value(value: &str) -> Option<String> {
 }
 
 fn normalize_identity_mac(value: &str) -> Option<String> {
-    let value = value.trim().to_lowercase().replace('-', ":");
-    let valid = value.split(':').count() == 6
-        && value.split(':').all(|part| {
-            part.len() == 2 && part.chars().all(|character| character.is_ascii_hexdigit())
-        });
-    if !valid || value == "00:00:00:00:00:00" || value == "ff:ff:ff:ff:ff:ff" {
+    let compact = value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|character| character.is_ascii_hexdigit())
+        .collect::<String>();
+    if compact.len() != 12
+        || compact.chars().all(|character| character == '0')
+        || compact.chars().all(|character| character == 'f')
+    {
         return None;
     }
-    Some(value)
+    Some(
+        compact
+            .as_bytes()
+            .chunks(2)
+            .map(|chunk| std::str::from_utf8(chunk).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(":"),
+    )
 }
 
 fn collect_os() -> Value {
@@ -980,7 +1118,7 @@ fn is_virtual_iface(iface: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{device_uuid_v1, fallback_device_v1};
+    use super::{device_uuid_v1, fallback_device_v1, hardware_identities_v2, hardware_identity_v2};
     use serde_json::{json, Value};
 
     #[test]
@@ -1064,5 +1202,92 @@ mod tests {
                 "fallback identity accepted invalid value: {invalid_value}"
             );
         }
+    }
+
+    #[test]
+    fn hardware_v2_keeps_independent_strong_signals_and_ignores_replaceable_parts() {
+        let first = json!({
+            "uuid": {"hardware": "4C4C4544-0059-4710-8030-C8C04F354633"},
+            "baseboard": {"manufacturer": "Dell Inc.", "product": "0MJF5P", "serial": "BOARD-103"},
+            "processorIdentity": [{"name": "Intel Core i3", "processorId": "SHARED-ID"}],
+            "networkHardware": [{"pnpDeviceId": "PCI\\VEN_10EC", "permanentAddress": "B07B25217BA0", "virtual": false}],
+            "diskLayout": [{"serialNum": "DISK-ONE"}],
+        });
+        let mut replaced_parts = first.clone();
+        replaced_parts["diskLayout"] = json!([{"serialNum": "DISK-TWO"}]);
+        replaced_parts["memLayout"] = json!([{"serialNum": "RAM-TWO"}]);
+        replaced_parts["graphics"] = json!({"controllers": [{"model": "GPU-TWO"}]});
+
+        let identities = hardware_identities_v2(&first);
+        assert_eq!(identities.len(), 3);
+        assert_eq!(identities[0].0, "system_uuid_v2");
+        assert_eq!(identities[0].1, "system-v2-4635fbe8792530e34dc720faffa63");
+        assert_eq!(identities[1].0, "baseboard_serial_v2");
+        assert_eq!(identities[2].0, "pci_permanent_mac_v2");
+        assert_eq!(identities, hardware_identities_v2(&replaced_parts));
+    }
+
+    #[test]
+    fn hardware_v2_uses_permanent_pci_mac_but_never_usb_or_current_mac() {
+        let fallback = json!({
+            "uuid": {"hardware": "03000200-0400-0500-0006-000700080009"},
+            "baseboard": {"manufacturer": "KOLOE", "product": "H610M4-PLUS", "serial": "Default string"},
+            "processorIdentity": [{"name": "12th Gen Intel Core i5", "processorId": "SHARED-ID"}],
+            "networkHardware": [{"pnpDeviceId": "PCI\\VEN_10EC", "permanentAddress": "00E01E84A499", "macAddress": "00-E0-1E-84-A4-98", "virtual": false}],
+        });
+        assert_eq!(
+            hardware_identity_v2(&fallback).map(|identity| identity.0),
+            Some("pci_permanent_mac_v2")
+        );
+
+        let mut usb = fallback.clone();
+        usb["networkHardware"][0]["pnpDeviceId"] = json!("USB\\VID_1234");
+        assert_eq!(hardware_identity_v2(&usb), None);
+
+        let mut current_only = fallback;
+        current_only["networkHardware"][0]["permanentAddress"] = Value::Null;
+        assert_eq!(hardware_identity_v2(&current_only), None);
+    }
+
+    #[test]
+    fn processor_id_does_not_merge_identical_model_computers() {
+        let first = json!({
+            "uuid": {"hardware": "SYSTEM-103"},
+            "baseboard": {"manufacturer": "Dell", "product": "Vostro 3690", "serial": "BOARD-103"},
+            "processorIdentity": [{"name": "Intel Core i3-10105", "processorId": "BFEBFBFF000A0653"}],
+        });
+        let second = json!({
+            "uuid": {"hardware": "SYSTEM-174"},
+            "baseboard": {"manufacturer": "Dell", "product": "Vostro 3690", "serial": "BOARD-174"},
+            "processorIdentity": [{"name": "Intel Core i3-10105", "processorId": "BFEBFBFF000A0653"}],
+        });
+        assert_ne!(hardware_identity_v2(&first), hardware_identity_v2(&second));
+    }
+
+    #[test]
+    fn hardware_v2_matches_the_php_golden_vectors() {
+        let data = json!({
+            "uuid": {"hardware": " BOARD-UUID "},
+            "baseboard": {"manufacturer": " Example  Inc ", "product": "Board Pro", "serial": "BOARD-001"},
+            "processorIdentity": [{"name": " Example CPU ", "processorId": "SHARED-CPU-ID"}],
+            "networkHardware": [{"pnpDeviceId": "PCI\\VEN_1234", "permanentAddress": "AA-BB-CC-DD-EE-01", "virtual": false}],
+        });
+        assert_eq!(
+            hardware_identities_v2(&data),
+            vec![
+                (
+                    "system_uuid_v2",
+                    "system-v2-fafa4bc231d7a48614a0bfd9e0ac3".to_string()
+                ),
+                (
+                    "baseboard_serial_v2",
+                    "board-v2-13d1184332c87ed6ea9c461d7c270".to_string()
+                ),
+                (
+                    "pci_permanent_mac_v2",
+                    "pci-v2-9cd7c81afd4a5c0f01e33532ec11a".to_string()
+                ),
+            ]
+        );
     }
 }

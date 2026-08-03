@@ -4,7 +4,7 @@ Tags: inventory, assets, device management, rest api, admin
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 3.0.1
+Stable tag: 3.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -70,6 +70,12 @@ Npcink Device Inventory stores device asset data in the local WordPress database
 The plugin does not transmit this data to Npcink or any third-party server during normal plugin operation. Site administrators are responsible for informing users and employees about their own device inventory policies.
 
 == Changelog ==
+
+= 3.1.0 =
+* Add server-recomputed hardware identity v2 using independent system UUID, guarded motherboard serial, and permanent PCI MAC signals.
+* Exclude CPU ProcessorId, USB adapters, current-only MAC addresses, disks, memory, and graphics from automatic identity matching.
+* Attach v2 identities to matching v1 assets on their first upgraded upload to avoid duplicate inventory records.
+* Add read-only Windows processor and physical network identity collection plus real-device pilot regression coverage.
 
 = 3.0.1 =
 * Rebuild each asset's latest observation pointer after JSON restore, including repeat imports that repair a prior incomplete pointer.
@@ -143,6 +149,9 @@ The plugin does not transmit this data to Npcink or any third-party server durin
 * Moved desktop uploads to signed v3 device observations.
 
 == Upgrade Notice ==
+
+= 3.1.0 =
+Upgrade the WordPress plugin before deploying Device Agent 0.3.0. Existing v1 assets are matched once and gain v2 identities on their next upload.
 
 = 3.0.1 =
 Use this release for JSON restores. Re-importing a backup safely repairs missing latest-observation pointers left by 3.0.0 without duplicating observations.

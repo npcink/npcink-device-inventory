@@ -13,7 +13,7 @@ class Npcink_Device_Inventory_Identity_Repository
 	const CLAIM_CONFLICT = 'conflict';
 	const CLAIM_INVALID = 'invalid';
 	const CLAIM_ERROR = 'error';
-	const ALLOWED_TYPES = array('device_uuid_v1', 'fallback_device_v1');
+	const ALLOWED_TYPES = array('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1');
 
 	public function find_asset_id_by_identities($identities)
 	{
@@ -193,18 +193,18 @@ class Npcink_Device_Inventory_Identity_Repository
 	private function mark_primary($asset_id, $type, $value)
 	{
 		global $wpdb;
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- This only promotes an identity already owned by the requested asset.
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- This atomically selects one identity already owned by the requested asset as primary.
 		$result = $wpdb->query(
 			$wpdb->prepare(
-				'UPDATE %i SET is_primary = 1 WHERE asset_id = %d AND identity_type = %s AND identity_value = %s AND is_primary = 0',
+				'UPDATE %i SET is_primary = CASE WHEN identity_type = %s AND identity_value = %s THEN 1 ELSE 0 END WHERE asset_id = %d',
 				Npcink_Device_Inventory_V3_Tables::identities(),
-				$asset_id,
 				$type,
-				$value
+				$value,
+				$asset_id
 			)
 		);
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-		if ($result === 1) {
+		if ($result > 0) {
 			$this->bump_list_cache_version();
 		}
 	}

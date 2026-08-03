@@ -83,7 +83,8 @@ npcink_schema_assert($migration->invoke(null, Npcink_Device_Inventory_Activator:
 npcink_schema_assert(count($wpdb->queries) === 3, 'scope reset must normalize assets and clean identities and obsolete events');
 npcink_schema_assert(strpos($wpdb->queries[0], "asset_type IN ('pc', 'computer')") !== false, 'pc and computer values must normalize to computer');
 npcink_schema_assert(strpos($wpdb->queries[0], "ELSE 'custom'") !== false, 'other asset types must normalize to custom');
-npcink_schema_assert(strpos($wpdb->queries[1], "'device_uuid_v1', 'fallback_device_v1'") !== false, 'only current identities may remain');
+npcink_schema_assert(strpos($wpdb->queries[1], "'system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2'") !== false, 'hardware identity v2 types must survive the scope reset');
+npcink_schema_assert(strpos($wpdb->queries[1], "'device_uuid_v1', 'fallback_device_v1'") !== false, 'v1 identities must remain available for the one-time upgrade lookup');
 npcink_schema_assert(!isset($npcink_schema_options['public_query_enabled']), 'scope reset must remove obsolete public-query options');
 
 echo "Schema migration fixture checks passed.\n";

@@ -14,7 +14,7 @@ POST /wp-json/npcink-device-inventory/v1/device-observations
 {
   "observation": {
     "_npcink_device": {
-      "schema_version": 4,
+      "schema_version": 5,
       "collector": {}
     },
     "asset": {
@@ -28,7 +28,7 @@ POST /wp-json/npcink-device-inventory/v1/device-observations
 }
 ```
 
-客户端只上传硬件事实。服务端从快照重新计算 `device_uuid_v1`，无法生成时再计算 `fallback_device_v1`；不会信任客户端声明的身份哈希。
+客户端只上传硬件事实。服务端从快照重新计算 `system_uuid_v2`、`baseboard_serial_v2` 和符合条件的 `pci_permanent_mac_v2`；不会信任客户端声明的身份哈希。CPU `ProcessorId`、USB/当前 MAC、硬盘、内存和显卡不参与自动匹配。
 
 请求必须携带后台生成的完整授权码对应的 HMAC 头。完整授权码形如：
 
