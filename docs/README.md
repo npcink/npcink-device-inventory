@@ -9,6 +9,8 @@ This folder keeps the current product contracts, development guardrails, release
 - `identity-contract.md`: current hardware identity v2 upload contract.
 - `decisions/ADR-003-pre-ga-scope-reset.md`: current product-scope and data-boundary decision.
 - `decisions/ADR-004-hardware-identity-v2.md`: current hardware identity design and v1 transition rule.
+- `decisions/ADR-005-observation-troubleshooting-boundary.md`: raw observation retention, online troubleshooting, and desktop snapshot boundary.
+- `observation-troubleshooting-development-summary-2026-08-04.md`: implementation history, lessons learned, and reusable rules for observation troubleshooting.
 - `release-readiness-checklist.md`: release gate and manual smoke-test checklist.
 - `github-release.md`: GitHub release workflow notes.
 

@@ -128,6 +128,39 @@ class Npcink_Device_Inventory_Observation_Repository
 		return $row;
 	}
 
+	public function find_previous_for_asset($asset_id, $observed_at, $id)
+	{
+		global $wpdb;
+		$asset_id = intval($asset_id);
+		$id = intval($id);
+		$observed_at = sanitize_text_field((string) $observed_at);
+		$cache_key = $this->build_cache_key(
+			'previous',
+			array('asset_id' => $asset_id, 'observed_at' => $observed_at, 'id' => $id)
+		);
+		$cached = wp_cache_get($cache_key, self::CACHE_GROUP);
+		if ($cached !== false) {
+			return $cached;
+		}
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned observation lookup is wrapped in the object cache.
+		$row = $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT * FROM %i WHERE asset_id = %d AND (observed_at < %s OR (observed_at = %s AND id < %d)) ORDER BY observed_at DESC, id DESC LIMIT 1',
+				Npcink_Device_Inventory_V3_Tables::observations(),
+				$asset_id,
+				$observed_at,
+				$observed_at,
+				$id
+			),
+			ARRAY_A
+		);
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery
+
+		wp_cache_set($cache_key, $row, self::CACHE_GROUP, self::CACHE_TTL);
+		return $row;
+	}
+
 	public function list_for_asset($asset_id, $page, $page_size)
 	{
 		global $wpdb;

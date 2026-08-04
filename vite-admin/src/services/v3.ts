@@ -107,6 +107,14 @@ export const getAssetObservations = async (
   return response.data;
 };
 
+export const getObservation = async (id: number): Promise<AssetObservation> => {
+  const response = await restInstance.get<DataEnvelope<AssetObservation>>(
+    `/observations/${id}`,
+    { showSuccessMessage: false } as RequestConfig
+  );
+  return unwrapData(response.data);
+};
+
 export const getAssetEvents = async (
   uuid: string,
   page = 1,

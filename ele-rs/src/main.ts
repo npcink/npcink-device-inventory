@@ -320,6 +320,7 @@ app.innerHTML = `
             <div class="diagnostics-actions">
               <button class="button primary diagnostics-button" id="exportHardwareButton" type="button">导出硬件信息</button>
               <button class="button secondary diagnostics-button" id="generateDiagnosticsButton" type="button">生成深度排障包</button>
+              <button class="button secondary diagnostics-button" id="openObservationHistoryButton" type="button">打开采集历史</button>
               <button class="button secondary diagnostics-button" id="openDiagnosticsFolderButton" type="button" hidden>打开文件夹</button>
               <button class="button secondary diagnostics-button" id="copyDiagnosticsPathButton" type="button" hidden>复制文件位置</button>
             </div>
@@ -436,6 +437,7 @@ const generateDiagnosticsButton = document.querySelector<HTMLButtonElement>("#ge
 const openDiagnosticsFolderButton = document.querySelector<HTMLButtonElement>("#openDiagnosticsFolderButton")!;
 const copyDiagnosticsPathButton = document.querySelector<HTMLButtonElement>("#copyDiagnosticsPathButton")!;
 const diagnosticsResult = document.querySelector<HTMLElement>("#diagnosticsResult")!;
+const openObservationHistoryButton = document.querySelector<HTMLButtonElement>("#openObservationHistoryButton")!;
 const detailMenu = document.querySelector<HTMLElement>("#detailMenu")!;
 const detailContent = document.querySelector<HTMLElement>("#detailContent")!;
 const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab"));
@@ -2225,6 +2227,15 @@ openDiagnosticsFolderButton.addEventListener("click", () => {
   if (diagnosticsDirectoryPath) {
     logAppEvent("info", "ui.open_diagnostics_folder", diagnosticsDirectoryPath);
     void invoke("open_path", { path: diagnosticsDirectoryPath });
+  }
+});
+
+openObservationHistoryButton.addEventListener("click", async () => {
+  try {
+    await invoke("open_observation_history");
+    setToast("已打开本地采集历史目录。", "ok");
+  } catch (error) {
+    setToast(`打开采集历史失败：${errorMessage(error)}`, "error");
   }
 });
 

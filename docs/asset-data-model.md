@@ -72,6 +72,13 @@ structured hardware detail, and `raw_json` preserves source payloads for
 debugging. These JSON-encoded fields are stored as `LONGTEXT` for broad
 MySQL/MariaDB compatibility.
 
+Observation list endpoints return summary and structured hardware data but do
+not return the complete `raw_json`. Administrators load one observation detail
+on demand to access raw data, its stored-content SHA-256, identity evidence,
+and the bounded comparison with the previous observation. Raw payloads remain
+immutable evidence; derived comparisons and explanations are not written back
+into the observation row.
+
 ### `npcink_asset_events`
 
 Unified timeline and audit log.

@@ -145,6 +145,23 @@ class Npcink_Device_Inventory_Assets_Controller
 				'permission_callback' => array($this, 'admin_permissions_check'),
 			)
 		);
+
+		register_rest_route(
+			'npcink-device-inventory/v1',
+			'/observations/(?P<id>\d+)',
+			array(
+				'methods' => WP_REST_Server::READABLE,
+				'callback' => array($this, 'get_observation'),
+				'permission_callback' => array($this, 'admin_permissions_check'),
+				'args' => array(
+					'id' => array(
+						'type' => 'integer',
+						'minimum' => 1,
+						'required' => true,
+					),
+				),
+			)
+		);
 	}
 
 	public function admin_permissions_check()
@@ -421,7 +438,7 @@ class Npcink_Device_Inventory_Assets_Controller
 			return $asset;
 		}
 		$result = $this->observations->list_for_asset(intval($asset['id']), $request->get_param('page') ?: 1, $request->get_param('pageSize') ?: 20);
-		$items = array_map(array($this, 'format_observation'), $result['items']);
+		$items = array_map(array($this, 'format_observation_summary'), $result['items']);
 		return rest_ensure_response(
 			Npcink_Device_Inventory_V3_Response::paginated($items, $result['page'], $result['pageSize'], $result['total'])
 		);
@@ -468,10 +485,35 @@ class Npcink_Device_Inventory_Assets_Controller
 				'search' => $request->get_param('search'),
 			)
 		);
-		$items = array_map(array($this, 'format_observation'), $result['items']);
+		$items = array_map(array($this, 'format_observation_summary'), $result['items']);
 		return rest_ensure_response(
 			Npcink_Device_Inventory_V3_Response::paginated($items, $result['page'], $result['pageSize'], $result['total'])
 		);
+	}
+
+	public function get_observation($request)
+	{
+		$row = $this->observations->find_by_id(intval($request['id']));
+		if (!$row) {
+			return Npcink_Device_Inventory_V3_Response::error('observation_not_found', 'Observation not found.', 404);
+		}
+		$previous = $this->observations->find_previous_for_asset(
+			intval($row['asset_id']),
+			(string) $row['observed_at'],
+			intval($row['id'])
+		);
+		$item = $this->format_observation($row);
+		$item['contentHash'] = hash('sha256', (string) $row['raw_json']);
+		$item['rawBytes'] = strlen((string) $row['raw_json']);
+		$item['identityDecision'] = $this->identity_decision($item['raw']);
+		$item['previousObservationId'] = $previous ? intval($previous['id']) : null;
+		$item['changesFromPrevious'] = $previous
+			? $this->observation_changes(
+				$this->decode_json(isset($previous['raw_json']) ? $previous['raw_json'] : '', array()),
+				$item['raw']
+			)
+			: array();
+		return rest_ensure_response(array('data' => $item));
 	}
 
 	public function create_event($request)
@@ -758,6 +800,106 @@ class Npcink_Device_Inventory_Assets_Controller
 			$item['asset'] = $this->format_asset_reference($row);
 		}
 		return $item;
+	}
+
+	private function format_observation_summary($row)
+	{
+		$item = $this->format_observation($row);
+		unset($item['raw']);
+		$item['rawBytes'] = strlen(isset($row['raw_json']) ? (string) $row['raw_json'] : '');
+		return $item;
+	}
+
+	private function identity_decision($payload)
+	{
+		$identity_service = new Npcink_Device_Inventory_Device_Identity_Service();
+		$accepted_identities = $identity_service->identities($payload);
+		$accepted_types = array();
+		foreach ($accepted_identities as $identity) {
+			if (isset($identity['type'])) {
+				$accepted_types[(string) $identity['type']] = true;
+			}
+		}
+		$hardware = isset($payload['asset']['hardware']) && is_array($payload['asset']['hardware']) ? $payload['asset']['hardware'] : array();
+		$system = isset($hardware['system']) && is_array($hardware['system']) ? $hardware['system'] : array();
+		$board = isset($hardware['baseboard']) && is_array($hardware['baseboard']) ? $hardware['baseboard'] : array();
+		$network = isset($hardware['network']) && is_array($hardware['network']) ? $hardware['network'] : array();
+		$interfaces = isset($network['identityInterfaces']) && is_array($network['identityInterfaces']) ? $network['identityInterfaces'] : array();
+		$system_uuid = $this->identity_value(isset($hardware['hardwareUuid']) ? $hardware['hardwareUuid'] : '');
+		if ($system_uuid === '') {
+			$system_uuid = $this->identity_value(isset($system['uuid']) ? $system['uuid'] : '');
+		}
+		$board_manufacturer = $this->identity_value(isset($board['manufacturer']) ? $board['manufacturer'] : '');
+		$board_model = $this->identity_value(isset($board['product']) ? $board['product'] : (isset($board['model']) ? $board['model'] : ''));
+		$board_serial = $this->identity_value(isset($board['serial']) ? $board['serial'] : (isset($board['serialNumber']) ? $board['serialNumber'] : ''));
+		$pci_macs = array();
+		foreach ($interfaces as $interface) {
+			if (!is_array($interface) || !empty($interface['virtual'])) {
+				continue;
+			}
+			$pnp = isset($interface['pnpDeviceId']) && is_scalar($interface['pnpDeviceId']) ? strtoupper(trim((string) $interface['pnpDeviceId'])) : '';
+			$mac = isset($interface['permanentAddress']) && is_scalar($interface['permanentAddress']) ? strtolower(trim((string) $interface['permanentAddress'])) : '';
+			if (strpos($pnp, 'PCI\\') === 0 && preg_match('/^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i', $mac)) {
+				$pci_macs[] = str_replace('-', ':', $mac);
+			}
+		}
+		$evidence = array(
+			array('type' => 'system_uuid_v2', 'label' => '系统 UUID', 'accepted' => isset($accepted_types['system_uuid_v2']), 'value' => $system_uuid, 'reason' => isset($accepted_types['system_uuid_v2']) ? '有效，优先级最高' : '缺失或为已知占位值'),
+			array('type' => 'baseboard_serial_v2', 'label' => '主板序列号', 'accepted' => isset($accepted_types['baseboard_serial_v2']), 'value' => $board_serial, 'reason' => isset($accepted_types['baseboard_serial_v2']) ? '厂商、型号和序列号完整' : '主板厂商、型号或序列号不完整'),
+			array('type' => 'pci_permanent_mac_v2', 'label' => 'PCI 永久 MAC', 'accepted' => isset($accepted_types['pci_permanent_mac_v2']), 'value' => implode(', ', array_values(array_unique($pci_macs))), 'reason' => isset($accepted_types['pci_permanent_mac_v2']) ? '永久地址、主板信息和 CPU 型号完整' : '永久地址、主板信息或 CPU 型号不完整'),
+		);
+		$selected = '';
+		foreach ($evidence as $item) {
+			if ($item['accepted']) {
+				$selected = $item['type'];
+				break;
+			}
+		}
+		return array('selectedType' => $selected, 'evidence' => $evidence);
+	}
+
+	private function identity_value($value)
+	{
+		if (!is_scalar($value)) {
+			return '';
+		}
+		$value = strtolower(trim((string) $value));
+		$invalid = array('', '0', '00000000', '00000000-0000-0000-0000-000000000000', 'ffffffff-ffff-ffff-ffff-ffffffffffff', 'default string', 'unknown', 'n/a', 'none', 'null', 'to be filled by o.e.m.', 'system serial number', '-');
+		return in_array($value, $invalid, true) ? '' : $value;
+	}
+
+	private function observation_changes($before, $after)
+	{
+		$changes = array();
+		$this->collect_observation_changes($before, $after, '', $changes);
+		return array_slice($changes, 0, 200);
+	}
+
+	private function collect_observation_changes($before, $after, $path, &$changes)
+	{
+		if (count($changes) >= 200) {
+			return;
+		}
+		if (is_array($before) && is_array($after)) {
+			$keys = array_values(array_unique(array_merge(array_keys($before), array_keys($after))));
+			sort($keys);
+			foreach ($keys as $key) {
+				$next_path = $path . '/' . str_replace(array('~', '/'), array('~0', '~1'), (string) $key);
+				$this->collect_observation_changes(
+					array_key_exists($key, $before) ? $before[$key] : null,
+					array_key_exists($key, $after) ? $after[$key] : null,
+					$next_path,
+					$changes
+				);
+				if (count($changes) >= 200) {
+					break;
+				}
+			}
+			return;
+		}
+		if ($before !== $after) {
+			$changes[] = array('path' => $path === '' ? '/' : $path, 'before' => $before, 'after' => $after);
+		}
 	}
 
 	private function format_event($row)

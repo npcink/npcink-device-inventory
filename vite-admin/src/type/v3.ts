@@ -86,7 +86,25 @@ export interface AssetObservation {
   receivedAt: string;
   summary: JsonRecord;
   hardware: JsonRecord;
-  raw: JsonRecord;
+  raw?: JsonRecord;
+  rawBytes?: number;
+  contentHash?: string;
+  previousObservationId?: number | null;
+  identityDecision?: {
+    selectedType: string;
+    evidence: Array<{
+      type: string;
+      label: string;
+      accepted: boolean;
+      value: string;
+      reason: string;
+    }>;
+  };
+  changesFromPrevious?: Array<{
+    path: string;
+    before: unknown;
+    after: unknown;
+  }>;
   asset?: AssetReference;
 }
 

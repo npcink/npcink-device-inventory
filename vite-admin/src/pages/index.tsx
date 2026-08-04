@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AppleFilled, DesktopOutlined, PlusOutlined, SearchOutlined, WindowsFilled } from "@ant-design/icons";
+import { AppleFilled, DesktopOutlined, DownloadOutlined, EyeOutlined, PlusOutlined, SearchOutlined, WindowsFilled } from "@ant-design/icons";
 import {
   Alert,
   Button,
@@ -37,6 +37,7 @@ import {
   getAssetEvents,
   getAssetIdentities,
   getAssetObservations,
+  getObservation,
   getAssets,
   getEvents,
   getSettings,
@@ -2900,6 +2901,7 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
   const [manualRecordSearch, setManualRecordSearch] = useState("");
   const [activeDetailKey, setActiveDetailKey] = useState("processor");
   const [autoRecordSearch, setAutoRecordSearch] = useState("");
+  const [selectedObservationId, setSelectedObservationId] = useState<number | null>(null);
   const enabled = Boolean(uuid && open);
   const assetQuery = useQuery(["v3-asset", uuid], () => getAsset(uuid || ""), {
     enabled,
@@ -2919,6 +2921,11 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
     ["v3-asset-events", uuid],
     () => getAssetEvents(uuid || "", 1, 30),
     { enabled }
+  );
+  const observationDetailQuery = useQuery(
+    ["v3-observation", selectedObservationId],
+    () => getObservation(selectedObservationId || 0),
+    { enabled: selectedObservationId !== null }
   );
 
   const asset = assetQuery.data || null;
@@ -3017,7 +3024,36 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
         </Space>
       ),
     },
+    {
+      title: "原始数据",
+      width: 110,
+      render: (_, observation) => observation.rawBytes ? `${Math.ceil(observation.rawBytes / 1024)} KB` : "-",
+    },
+    {
+      title: "操作",
+      width: 92,
+      render: (_, observation) => (
+        <Button size="small" icon={<EyeOutlined />} onClick={() => setSelectedObservationId(observation.id)}>
+          查看
+        </Button>
+      ),
+    },
   ];
+
+  const downloadObservation = (observation: AssetObservation) => {
+    if (!observation.raw) {
+      return;
+    }
+    const blob = new Blob([JSON.stringify(observation.raw, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `npcink-observation-${observation.id}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   const eventColumns: ColumnsType<AssetEvent> = [
     {
@@ -3353,25 +3389,6 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
                           dataSource={observations}
                           loading={observationsQuery.isLoading}
                           pagination={false}
-                          expandable={{
-                            expandedRowRender: (observation) => (
-                              <Collapse
-                                size="small"
-                                items={[
-                                  {
-                                    key: "hardware",
-                                    label: "硬件明细",
-                                    children: renderJsonBlock(observation.hardware),
-                                  },
-                                  {
-                                    key: "raw",
-                                    label: "原始数据",
-                                    children: renderJsonBlock(observation.raw),
-                                  },
-                                ]}
-                              />
-                            ),
-                          }}
                         />
                       ),
                     },
@@ -3400,6 +3417,77 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
             onClose={() => setManualRecordOpen(false)}
             onSubmit={(values) => createEventMutation.mutateAsync(values)}
           />
+          <Modal
+            title={selectedObservationId ? `采集记录 #${selectedObservationId}` : "采集记录"}
+            open={selectedObservationId !== null}
+            onCancel={() => setSelectedObservationId(null)}
+            footer={null}
+            width="min(920px, calc(100vw - 40px))"
+            destroyOnClose
+          >
+            {observationDetailQuery.isLoading ? (
+              <Table loading pagination={false} showHeader={false} />
+            ) : observationDetailQuery.data ? (
+              <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                <Space wrap>
+                  <Tag>采集：{formatDate(observationDetailQuery.data.observedAt)}</Tag>
+                  <Tag>接收：{formatDate(observationDetailQuery.data.receivedAt)}</Tag>
+                  <Tag>版本：v{observationDetailQuery.data.schemaVersion}</Tag>
+                  <Tag>{observationDetailQuery.data.rawBytes || 0} bytes</Tag>
+                  <Button icon={<DownloadOutlined />} onClick={() => downloadObservation(observationDetailQuery.data!)}>
+                    下载原始 JSON
+                  </Button>
+                </Space>
+                <Text copyable={{ text: observationDetailQuery.data.contentHash || "" }}>
+                  SHA-256：{observationDetailQuery.data.contentHash || "-"}
+                </Text>
+                <Collapse
+                  defaultActiveKey={["identity", "changes"]}
+                  items={[
+                    {
+                      key: "identity",
+                      label: `身份判定：${observationDetailQuery.data.identityDecision?.selectedType || "没有可用依据"}`,
+                      children: (
+                        <Table
+                          rowKey="type"
+                          size="small"
+                          pagination={false}
+                          dataSource={observationDetailQuery.data.identityDecision?.evidence || []}
+                          columns={[
+                            { title: "依据", dataIndex: "label", width: 150 },
+                            { title: "结果", dataIndex: "accepted", width: 90, render: (accepted: boolean) => accepted ? <Tag color="green">有效</Tag> : <Tag>未采用</Tag> },
+                            { title: "采集值", dataIndex: "value", render: fieldText },
+                            { title: "说明", dataIndex: "reason", width: 220 },
+                          ]}
+                        />
+                      ),
+                    },
+                    {
+                      key: "changes",
+                      label: `与上次采集差异 ${observationDetailQuery.data.changesFromPrevious?.length || 0}`,
+                      children: observationDetailQuery.data.previousObservationId ? (
+                        <Table
+                          rowKey={(row) => row.path}
+                          size="small"
+                          pagination={{ pageSize: 20, hideOnSinglePage: true }}
+                          dataSource={observationDetailQuery.data.changesFromPrevious || []}
+                          columns={[
+                            { title: "字段路径", dataIndex: "path", width: 280 },
+                            { title: "上次", dataIndex: "before", render: compactJson },
+                            { title: "本次", dataIndex: "after", render: compactJson },
+                          ]}
+                        />
+                      ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="这是第一份采集记录" />,
+                    },
+                    { key: "hardware", label: "标准化硬件信息", children: renderJsonBlock(observationDetailQuery.data.hardware) },
+                    { key: "raw", label: "原始采集数据", children: renderJsonBlock(observationDetailQuery.data.raw || {}) },
+                  ]}
+                />
+              </Space>
+            ) : (
+              <Empty description="采集记录读取失败" />
+            )}
+          </Modal>
         </Space>
       ) : (
         <Empty description="未找到资产" />

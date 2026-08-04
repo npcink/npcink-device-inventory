@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -30,6 +30,9 @@ const PROJECT_URL: &str = "https://github.com/muze-page/npcink-device-inventory"
 const MENU_CHECK_UPDATE: &str = "check_for_updates";
 const MENU_CHECK_UPDATE_EVENT: &str = "desktop-check-update";
 const MENU_OPEN_PROJECT: &str = "open_project_url";
+const OBSERVATION_HISTORY_DIR: &str = "observations";
+const OBSERVATION_HISTORY_MAX_FILES: usize = 10;
+const OBSERVATION_HISTORY_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
 #[derive(Debug, Serialize)]
 struct DeviceSnapshot {
@@ -197,8 +200,17 @@ fn submit_device_data_inner(config: AgentConfig) -> Result<Value, String> {
         }
     };
 
+    let snapshot_path = match save_observation_snapshot(&data) {
+        Ok(path) => path,
+        Err(error) => {
+            let message = format!("保存本地原始采集记录失败：{error}");
+            write_app_log("error", "upload.snapshot_failed", &message);
+            return Err(message);
+        }
+    };
+
     match upload::submit_v3(&config.site, &config.name, &config.token, &data) {
-        Ok(response) => {
+        Ok(mut response) => {
             write_app_log(
                 "info",
                 "upload.succeeded",
@@ -208,6 +220,12 @@ fn submit_device_data_inner(config: AgentConfig) -> Result<Value, String> {
                     redact_url_for_log(&config.site),
                 ),
             );
+            if let Some(object) = response.as_object_mut() {
+                object.insert(
+                    "localSnapshotPath".to_string(),
+                    Value::String(snapshot_path.to_string_lossy().to_string()),
+                );
+            }
             Ok(response)
         }
         Err(error) => {
@@ -220,6 +238,15 @@ fn submit_device_data_inner(config: AgentConfig) -> Result<Value, String> {
             Err(message)
         }
     }
+}
+
+#[tauri::command]
+fn open_observation_history(app: tauri::AppHandle) -> Result<(), String> {
+    let path = observation_history_dir().map_err(|error| error.to_string())?;
+    fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -310,6 +337,7 @@ pub fn run() {
             collect_runtime_status,
             get_runtime_history,
             submit_device_data,
+            open_observation_history,
             export_hardware_feedback,
             generate_diagnostics_package,
             open_path,
@@ -464,6 +492,101 @@ fn app_data_dir() -> Result<PathBuf> {
 
 fn app_log_path() -> Result<PathBuf> {
     Ok(app_data_dir()?.join(APP_LOG_FILE))
+}
+
+fn observation_history_dir() -> Result<PathBuf> {
+    Ok(app_data_dir()?.join(OBSERVATION_HISTORY_DIR))
+}
+
+fn save_observation_snapshot(data: &Value) -> Result<PathBuf> {
+    let directory = observation_history_dir()?;
+    fs::create_dir_all(&directory).with_context(|| {
+        format!(
+            "failed to create observation history dir {}",
+            directory.display()
+        )
+    })?;
+    #[cfg(unix)]
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).with_context(|| {
+        format!(
+            "failed to restrict observation history dir {}",
+            directory.display()
+        )
+    })?;
+
+    prune_observation_history(&directory)?;
+    let now = Local::now();
+    let path = directory.join(format!(
+        "observation-{}.json",
+        now.format("%Y%m%d-%H%M%S-%3f")
+    ));
+    let payload = json!({
+        "schema": "npcink-device-local-observation-v1",
+        "savedAt": now.to_rfc3339(),
+        "collector": {
+            "name": APP_NAME,
+            "version": env!("CARGO_PKG_VERSION"),
+            "platform": std::env::consts::OS,
+            "architecture": std::env::consts::ARCH,
+        },
+        "privacy": {
+            "containsUploadConfiguration": false,
+            "containsUploadToken": false,
+            "containsDeviceIdentifiers": true,
+        },
+        "raw": data,
+    });
+    write_private_json(&path, &payload)?;
+    prune_observation_history(&directory)?;
+    write_app_log(
+        "info",
+        "upload.snapshot_saved",
+        &format!(
+            "file={}",
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("observation.json")
+        ),
+    );
+    Ok(path)
+}
+
+fn prune_observation_history(directory: &Path) -> Result<()> {
+    let now = std::time::SystemTime::now();
+    let mut files = fs::read_dir(directory)
+        .with_context(|| {
+            format!(
+                "failed to read observation history dir {}",
+                directory.display()
+            )
+        })?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let path = entry.path();
+            let is_snapshot = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(|value| value.starts_with("observation-") && value.ends_with(".json"))
+                .unwrap_or(false);
+            if !is_snapshot {
+                return None;
+            }
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((path, modified))
+        })
+        .collect::<Vec<_>>();
+
+    for (path, modified) in &files {
+        if now.duration_since(*modified).unwrap_or_default() > OBSERVATION_HISTORY_MAX_AGE {
+            let _ = fs::remove_file(path);
+        }
+    }
+    files.retain(|(path, _)| path.exists());
+    files.sort_by_key(|entry| std::cmp::Reverse(entry.1));
+    for (path, _) in files.into_iter().skip(OBSERVATION_HISTORY_MAX_FILES) {
+        let _ = fs::remove_file(path);
+    }
+    Ok(())
 }
 
 fn diagnostics_base_dir() -> Result<PathBuf> {
@@ -2038,6 +2161,41 @@ mod tests {
         }
 
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn observation_history_keeps_only_ten_snapshot_files() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "npcink-observation-history-test-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        for index in 0..12 {
+            fs::write(directory.join(format!("observation-{index:02}.json")), "{}").unwrap();
+        }
+        fs::write(directory.join("README.txt"), "keep").unwrap();
+
+        prune_observation_history(&directory).unwrap();
+
+        let snapshot_count = fs::read_dir(&directory)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .map(|name| name.starts_with("observation-") && name.ends_with(".json"))
+                    .unwrap_or(false)
+            })
+            .count();
+        assert_eq!(snapshot_count, OBSERVATION_HISTORY_MAX_FILES);
+        assert!(directory.join("README.txt").exists());
+
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

@@ -14,8 +14,9 @@
 - 分析中心只展示从当前事实派生的只读结果；不新增“已处理”、工单、趋势或批量处置状态。
 - 服务端根据上传事实计算身份，不信任客户端传入的身份哈希；身份冲突必须失败关闭，绝不自动合并资产。
 - 磁盘、内存、显卡、USB 网卡、当前 MAC 和 CPU `ProcessorId` 是快照或辅助核对信息，不进入自动身份摘要。
+- observation 原始数据只在管理员单条详情中按需读取；列表不得携带完整 raw。桌面端普通上传先写本地私有快照，再发起网络请求；深度排障包继续人工发送。
 
-边界来源见 [`ADR-003`](decisions/ADR-003-pre-ga-scope-reset.md) 和 [`ADR-004`](decisions/ADR-004-hardware-identity-v2.md)。新需求若要改变其中任一条，应先补 ADR，说明真实使用场景、权限边界、失败行为、迁移方式和验收指标。
+边界来源见 [`ADR-003`](decisions/ADR-003-pre-ga-scope-reset.md)、[`ADR-004`](decisions/ADR-004-hardware-identity-v2.md) 和 [`ADR-005`](decisions/ADR-005-observation-troubleshooting-boundary.md)。新需求若要改变其中任一条，应先补 ADR，说明真实使用场景、权限边界、失败行为、迁移方式和验收指标。
 
 ## 从历史中得到的开发方法
 
@@ -36,6 +37,12 @@
 复杂度不只来自代码行数，也来自可见功能、API、状态、迁移和测试组合。此前已经删除或收缩了公开查询、多代长期兼容、可写分析流程和多种顶层资产类型；不要仅因“以后可能需要”恢复它们。已有可靠边界（四表模型、事务化上传、HMAC、备份恢复、发布门禁）也不要为追求“更整洁”而整体重写。
 
 对大组件的拆分以清楚的工作区边界和可独立验证为前提，不以文件行数作为唯一理由。
+
+### 排查能力从证据链开始，不从日志堆积开始
+
+先确认系统是否已经保存原始事实，再判断需要补存储、接口还是解释能力。原始事实、标准化结果和按需派生的身份解释/差异必须分层。列表只返回轻量摘要，完整 raw 由管理员按需读取；展示“为什么匹配”时复用真实身份服务，不复制近似规则。
+
+客户端采集上传遵循“采集 → 私有落盘 → 上传”。常规 observation 与深度排障信息保持不同隐私边界，不能因为方便排查就自动上传事件日志、进程或 dump。详细经验见 [`observation-troubleshooting-development-summary-2026-08-04.md`](observation-troubleshooting-development-summary-2026-08-04.md)。
 
 ## 变更工作流
 
@@ -72,5 +79,7 @@
 - [`identity-contract.md`](identity-contract.md)：身份算法、请求 schema 与错误语义。
 - [`decisions/ADR-003-pre-ga-scope-reset.md`](decisions/ADR-003-pre-ga-scope-reset.md)：产品范围。
 - [`decisions/ADR-004-hardware-identity-v2.md`](decisions/ADR-004-hardware-identity-v2.md)：v2 身份选择与迁移理由。
+- [`decisions/ADR-005-observation-troubleshooting-boundary.md`](decisions/ADR-005-observation-troubleshooting-boundary.md)：原始采集留档与在线排查边界。
+- [`observation-troubleshooting-development-summary-2026-08-04.md`](observation-troubleshooting-development-summary-2026-08-04.md)：本轮实现过程、经验和后续规范。
 - [`release-readiness-checklist.md`](release-readiness-checklist.md)：发布门禁。
 - [`windows-hardware-identity-pilot.md`](windows-hardware-identity-pilot.md)：实机试点方法与原始结论。
