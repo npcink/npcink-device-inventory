@@ -1,17 +1,20 @@
 # Documentation Map
 
-This folder keeps product contracts, release procedures, verification records, and historical notes for Npcink Device Inventory.
+This folder keeps the current product contracts, development guardrails, release procedures, verification records, and historical notes for Npcink Device Inventory.
 
 ## Start Here
 
+- `development-playbook.md`: the working agreement for new changes: scope, evidence, contracts, testing, and release gates.
 - `asset-data-model.md`: v3 asset, identity, observation, and event model contract.
-- `identity-contract.md`: current `device_uuid_v1` / `fallback_device_v1` upload identity contract.
-- `decisions/ADR-003-pre-ga-scope-reset.md`: current pre-GA product scope and compatibility decision.
+- `identity-contract.md`: current hardware identity v2 upload contract.
+- `decisions/ADR-003-pre-ga-scope-reset.md`: current product-scope and data-boundary decision.
+- `decisions/ADR-004-hardware-identity-v2.md`: current hardware identity design and v1 transition rule.
 - `release-readiness-checklist.md`: release gate and manual smoke-test checklist.
 - `github-release.md`: GitHub release workflow notes.
 
-## Current Release Records
+## Release Records
 
+- `release-verification-2026-08-03-v3.1.0.md`: current release verification record for plugin 3.1.0 and Device Agent 0.3.0.
 - `release-verification-2026-07-10-v2.8.0.md`: v2.8.0 release verification record.
 - `release-verification-2026-07-09-v2.7.9.md`: v2.7.9 release verification record.
 - `release-verification-2026-07-07-v2.7.8.md`: v2.7.8 release verification record.
@@ -30,7 +33,12 @@ This folder keeps product contracts, release procedures, verification records, a
 - `admin-latest-and-macos-uploader-history-2026-07-06.md`: admin latest-state and macOS uploader notes.
 - `github-transition-summary.md`: transition notes for GitHub-based distribution.
 
-## Product And Implementation History
+## Historical Context
+
+The files in this section preserve the reasoning behind earlier decisions; they
+do not override the current contracts above. In particular, records that refer
+to v1-only identity, public queries, or writable analysis workflows are
+historical unless a newer ADR explicitly restores them.
 
 - `simple-device-management-analysis-boundary-2026-07-10.md`: superseded product-boundary history from before ADR-003.
 - `analysis-remediation-development-notes-2026-07-10.md`: superseded writable-analysis history from before ADR-003.

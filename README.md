@@ -2,6 +2,11 @@
 
 Npcink Device Inventory 是一个 WordPress 设备资产管理插件，用于小型团队维护设备资产、采集快照、身份匹配和事件时间线。
 
+当前产品范围、开发约束和发布入口见
+[`docs/development-playbook.md`](docs/development-playbook.md)。硬件身份以
+[`docs/identity-contract.md`](docs/identity-contract.md) 为准；历史 v1 身份
+文档不代表当前上传行为。
+
 ## 组成
 
 - `npcink-device-inventory.php`：WordPress 插件入口。
@@ -24,6 +29,8 @@ v3 使用统一资产模型，详细契约见 `docs/asset-data-model.md`。插�
 - `npcink_asset_identities`：资产身份与匹配信号。
 - `npcink_asset_observations`：客户端采集、导入或人工录入的资产快照。
 - `npcink_asset_events`：统一事件和审计时间线。
+
+设备上传使用 schema 5 硬件事实。服务端会独立计算系统 UUID、主板序列号和永久 PCI MAC 三类 v2 身份；多条证据互相指向不同资产时返回 409，不自动合并。v1 身份只用于升级时定位已有资产，详见 [`docs/identity-contract.md`](docs/identity-contract.md)。
 
 主要 REST 入口：
 

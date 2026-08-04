@@ -38,14 +38,20 @@ Important fields:
 
 Identity claims for matching uploads and imports to assets.
 
-Allowed automatic identity types:
+Current automatic identity types are defined in
+[`identity-contract.md`](identity-contract.md):
 
-- `device_uuid_v1` (canonical motherboard-backed computer identity)
-- `fallback_device_v1` (one hardware/serial fact plus one physical MAC)
+- `system_uuid_v2` (valid SMBIOS/system UUID)
+- `baseboard_serial_v2` (manufacturer, model, and valid baseboard serial)
+- `pci_permanent_mac_v2` (permanent address of a physical, non-virtual PCI
+  adapter, guarded by baseboard and CPU model facts)
 
-An upload claims only the one identity selected by the server. Hardware UUIDs,
-serial numbers, and MAC addresses are observation facts, not global identity
-claims.
+One upload may claim multiple v2 signals. The server recomputes every claim
+from the observation facts; client-provided hashes have no authority. If the
+signals resolve to different assets, ingestion fails with 409 instead of
+guessing or merging. `device_uuid_v1` and `fallback_device_v1` remain stored
+only for the one-time upgrade lookup described by the identity contract; new
+assets never receive them.
 
 `identity_type + identity_value` is globally unique so one physical identity
 cannot silently point to two different assets.
