@@ -10,6 +10,9 @@ const WINDOWS_NETWORK_HARDWARE_COMMANDS: [&str; 2] = [
     "Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Virtual -ne $true } | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual",
 ];
 
+#[cfg(any(target_os = "windows", test))]
+const WINDOWS_POWERSHELL_UTF8_PREAMBLE: &str = "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; ";
+
 pub(crate) fn enrich(root: &mut Map<String, Value>) {
     enrich_impl(root);
 }
@@ -243,13 +246,19 @@ fn hardware_uuid_impl() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn powershell_json(command: &str) -> Option<Value> {
-    let wrapped = format!("{command} | ConvertTo-Json -Compress");
+    let wrapped = powershell_utf8_command(&format!("{command} | ConvertTo-Json -Compress"));
     command_json("powershell", &["-NoProfile", "-Command", &wrapped])
 }
 
 #[cfg(target_os = "windows")]
 fn powershell_scalar(command: &str) -> Option<String> {
-    command_text("powershell", &["-NoProfile", "-Command", command])
+    let wrapped = powershell_utf8_command(command);
+    command_text("powershell", &["-NoProfile", "-Command", &wrapped])
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn powershell_utf8_command(command: &str) -> String {
+    format!("{WINDOWS_POWERSHELL_UTF8_PREAMBLE}{command}")
 }
 
 #[cfg(target_os = "windows")]
@@ -576,5 +585,13 @@ mod tests {
         assert!(WINDOWS_NETWORK_HARDWARE_COMMANDS[0].contains("-ErrorAction Stop"));
         assert!(!WINDOWS_NETWORK_HARDWARE_COMMANDS[1].contains("-IncludeHidden"));
         assert!(WINDOWS_NETWORK_HARDWARE_COMMANDS[1].contains("-ErrorAction Stop"));
+    }
+
+    #[test]
+    fn forces_utf8_for_windows_powershell_output() {
+        let command = powershell_utf8_command("Write-Output '{\"Name\":\"以太网\"}'");
+        assert!(command.starts_with(WINDOWS_POWERSHELL_UTF8_PREAMBLE));
+        assert!(command.contains("$OutputEncoding = [Console]::OutputEncoding"));
+        assert!(command.ends_with("Write-Output '{\"Name\":\"以太网\"}'"));
     }
 }
