@@ -37,7 +37,10 @@ fn enrich_impl(root: &mut Map<String, Value>) {
         );
     }
     let network_hardware = collect_windows_network_hardware();
-    if !network_hardware.is_empty() {
+    if network_hardware
+        .as_array()
+        .is_some_and(|interfaces| !interfaces.is_empty())
+    {
         root.insert("networkHardware".to_string(), network_hardware);
     }
     if let Some(value) = powershell_json("Get-CimInstance Win32_SystemEnclosure | Select-Object Manufacturer,SerialNumber,ChassisTypes") {
@@ -74,7 +77,10 @@ fn collect_windows_network_hardware() -> Value {
     for command in WINDOWS_NETWORK_HARDWARE_COMMANDS {
         if let Some(value) = powershell_json(command) {
             let interfaces = normalize_windows_network_hardware(&value);
-            if !interfaces.is_empty() {
+            if interfaces
+                .as_array()
+                .is_some_and(|interfaces| !interfaces.is_empty())
+            {
                 return interfaces;
             }
         }
