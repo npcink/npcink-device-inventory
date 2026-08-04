@@ -1,6 +1,15 @@
 use serde_json::{json, Map, Value};
 use std::process::Command;
 
+// Some Windows NIC drivers fail when hidden adapters are enumerated. Retry
+// without hidden adapters so a usable physical PCI NIC is not lost merely
+// because an unrelated virtual adapter reports an error.
+#[cfg(any(target_os = "windows", test))]
+const WINDOWS_NETWORK_HARDWARE_COMMANDS: [&str; 2] = [
+    "Get-NetAdapter -Physical -IncludeHidden -ErrorAction Stop | Where-Object { $_.Virtual -ne $true } | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual",
+    "Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Virtual -ne $true } | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual",
+];
+
 pub(crate) fn enrich(root: &mut Map<String, Value>) {
     enrich_impl(root);
 }
@@ -27,11 +36,9 @@ fn enrich_impl(root: &mut Map<String, Value>) {
             normalize_windows_processor_identity(&value),
         );
     }
-    if let Some(value) = powershell_json("Get-NetAdapter -Name '*' -Physical -IncludeHidden -ErrorAction SilentlyContinue | Where-Object { $_.Virtual -ne $true } | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual") {
-        root.insert(
-            "networkHardware".to_string(),
-            normalize_windows_network_hardware(&value),
-        );
+    let network_hardware = collect_windows_network_hardware();
+    if !network_hardware.is_empty() {
+        root.insert("networkHardware".to_string(), network_hardware);
     }
     if let Some(value) = powershell_json("Get-CimInstance Win32_SystemEnclosure | Select-Object Manufacturer,SerialNumber,ChassisTypes") {
         root.insert("chassis".to_string(), value);
@@ -60,6 +67,20 @@ fn enrich_impl(root: &mut Map<String, Value>) {
     insert_empty_if_missing(root, "graphics");
     insert_array_if_missing(root, "processorIdentity");
     insert_array_if_missing(root, "networkHardware");
+}
+
+#[cfg(target_os = "windows")]
+fn collect_windows_network_hardware() -> Value {
+    for command in WINDOWS_NETWORK_HARDWARE_COMMANDS {
+        if let Some(value) = powershell_json(command) {
+            let interfaces = normalize_windows_network_hardware(&value);
+            if !interfaces.is_empty() {
+                return interfaces;
+            }
+        }
+    }
+
+    Value::Array(Vec::new())
 }
 
 #[cfg(target_os = "macos")]
@@ -270,7 +291,7 @@ fn normalize_windows_processor_identity(value: &Value) -> Value {
     )
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn normalize_windows_network_hardware(value: &Value) -> Value {
     Value::Array(
         value_items(value)
@@ -418,7 +439,7 @@ fn graphics_vendor(value: &Value) -> String {
         .to_string()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn value_items(value: &Value) -> Vec<&Value> {
     value
         .as_array()
@@ -426,7 +447,7 @@ fn value_items(value: &Value) -> Vec<&Value> {
         .unwrap_or_else(|| vec![value])
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn value_text(value: &Value, key: &str) -> String {
     value
         .get(key)
@@ -437,7 +458,7 @@ fn value_text(value: &Value, key: &str) -> String {
         .to_string()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn value_u64_at(value: &Value, key: &str) -> Option<u64> {
     let value = value.get(key)?;
     if let Some(number) = value.as_u64() {
@@ -514,4 +535,40 @@ fn first_non_empty(values: &[String]) -> String {
         .find(|value| !value.trim().is_empty())
         .cloned()
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_permanent_pci_mac_for_133_style_adapter() {
+        let source = json!({
+            "Name": "以太网",
+            "InterfaceDescription": "Realtek PCIe GbE Family Controller",
+            "InterfaceIndex": 2,
+            "PnPDeviceID": "PCI\\VEN_10EC&DEV_8168",
+            "MacAddress": "00-E0-1E-84-A4-99",
+            "PermanentAddress": "00E01E84A499",
+            "Virtual": false
+        });
+
+        let interfaces = normalize_windows_network_hardware(&source);
+        assert_eq!(
+            interfaces.pointer("/0/pnpDeviceId"),
+            Some(&json!("PCI\\VEN_10EC&DEV_8168"))
+        );
+        assert_eq!(
+            interfaces.pointer("/0/permanentAddress"),
+            Some(&json!("00E01E84A499"))
+        );
+    }
+
+    #[test]
+    fn retries_visible_adapters_after_hidden_adapter_query() {
+        assert!(WINDOWS_NETWORK_HARDWARE_COMMANDS[0].contains("-IncludeHidden"));
+        assert!(WINDOWS_NETWORK_HARDWARE_COMMANDS[0].contains("-ErrorAction Stop"));
+        assert!(!WINDOWS_NETWORK_HARDWARE_COMMANDS[1].contains("-IncludeHidden"));
+        assert!(WINDOWS_NETWORK_HARDWARE_COMMANDS[1].contains("-ErrorAction Stop"));
+    }
 }
