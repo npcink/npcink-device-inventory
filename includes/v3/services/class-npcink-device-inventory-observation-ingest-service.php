@@ -50,14 +50,23 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			return Npcink_Device_Inventory_V3_Response::error('identity_evidence_conflict', 'Hardware identity signals belong to different assets.', 409);
 		}
 		$asset_id = !empty($owner_ids) ? $owner_ids[0] : null;
+		$matched_by_legacy_identity = false;
 		if (!$asset_id) {
 			$legacy_identity = $this->device_identity->legacy_primary_identity($observation_payload);
 			if (!empty($legacy_identity['type']) && !empty($legacy_identity['value'])) {
 				$asset_id = $this->identities->find_asset_id_by_identity($legacy_identity['type'], $legacy_identity['value']);
+				$matched_by_legacy_identity = !empty($asset_id);
 			}
 		}
 		$mode = 'matched';
 		$asset = $asset_id ? $this->assets->find_by_id($asset_id) : null;
+		if ($matched_by_legacy_identity && $asset && $this->legacy_migration_conflicts($asset, $identities)) {
+			return Npcink_Device_Inventory_V3_Response::error(
+				'legacy_identity_migration_conflict',
+				'Legacy identity matched an asset whose latest hardware evidence conflicts with this upload.',
+				409
+			);
+		}
 
 		if (!$this->begin_transaction()) {
 			return Npcink_Device_Inventory_V3_Response::error('transaction_start_failed', 'Failed to start observation transaction.', 500);
@@ -206,6 +215,42 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			}
 		}
 		return array_values(array_unique($owner_ids));
+	}
+
+	private function legacy_migration_conflicts($asset, $incoming_identities)
+	{
+		$latest_observation_id = isset($asset['latest_observation_id']) ? intval($asset['latest_observation_id']) : 0;
+		if ($latest_observation_id <= 0) {
+			return false;
+		}
+
+		$observation = $this->observations->find_by_id($latest_observation_id);
+		if (!$observation || empty($observation['hardware_json'])) {
+			return false;
+		}
+		$hardware = json_decode((string) $observation['hardware_json'], true);
+		if (!is_array($hardware) || empty($hardware)) {
+			return false;
+		}
+
+		$existing_identities = $this->device_identity->identities(array('asset' => array('hardware' => $hardware)));
+		if (empty($existing_identities)) {
+			return false;
+		}
+
+		$existing_keys = array();
+		foreach ($existing_identities as $identity) {
+			if (!empty($identity['type']) && !empty($identity['value'])) {
+				$existing_keys[$identity['type'] . "\0" . $identity['value']] = true;
+			}
+		}
+		foreach ($incoming_identities as $identity) {
+			$key = isset($identity['type'], $identity['value']) ? $identity['type'] . "\0" . $identity['value'] : '';
+			if ($key !== '' && isset($existing_keys[$key])) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private function claim_conflict_owner_ids($claim_results)
