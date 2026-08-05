@@ -13,6 +13,7 @@
 - 所有资产查询和管理操作留在已授权的 WordPress 管理端；不恢复匿名查询或访问码。
 - 分析中心只展示从当前事实派生的只读结果；不新增“已处理”、工单、趋势或批量处置状态。
 - 服务端根据上传事实计算身份，不信任客户端传入的身份哈希；身份冲突必须失败关闭，绝不自动合并资产。
+- 资产编号是可变管理字段，不是硬件身份；编号复用前必须先处理旧资产并核对身份、观测和 latest 指针。
 - 磁盘、内存、显卡、USB 网卡、当前 MAC 和 CPU `ProcessorId` 是快照或辅助核对信息，不进入自动身份摘要。
 
 边界来源见 [`ADR-003`](decisions/ADR-003-pre-ga-scope-reset.md) 和 [`ADR-004`](decisions/ADR-004-hardware-identity-v2.md)。新需求若要改变其中任一条，应先补 ADR，说明真实使用场景、权限边界、失败行为、迁移方式和验收指标。
@@ -31,6 +32,8 @@
 
 兼容代码必须有退出条件。v1 仅在 v2 首次上传找不到拥有者时用于查找旧资产，并在同一事务中补写 v2；新资产不再写 v1。观察完已有资产升级后，应单独决定删除这条过渡查询的版本和条件。
 
+旧身份迁移不能只验证“旧哈希命中”。目标资产最近观测和本次上传都能计算出 v2 身份时，至少要共享一个证据；完全不相交必须在事务前返回 409。32/35 串号事件证明，迁移兼容层比新算法本身更容易固化历史错误。
+
 ### 控制复杂度：删除未证实的承诺
 
 复杂度不只来自代码行数，也来自可见功能、API、状态、迁移和测试组合。此前已经删除或收缩了公开查询、多代长期兼容、可写分析流程和多种顶层资产类型；不要仅因“以后可能需要”恢复它们。已有可靠边界（四表模型、事务化上传、HMAC、备份恢复、发布门禁）也不要为追求“更整洁”而整体重写。
@@ -45,6 +48,8 @@
 4. **保持失败安全**：身份冲突、无有效身份、权限不足、签名无效和备份冲突都应拒绝写入，并返回可行动的错误。
 5. **分层验收**：先跑受影响的 fixture/单测，再跑静态检查与构建；发布候选还要验证最终 ZIP、Docker WordPress 和真实桌面升级路径。
 6. **收尾**：更新当前文档入口、ADR 或发布记录；把一次性探针、试验或兼容层写明用途和删除条件，不把临时产物提交到仓库。
+
+生产数据修复必须使用“完整备份 → 固定目标预检 → 单事务执行 → 审计记录 → 修复后完整备份 → 删除一次性工具”的闭环。禁止凭显示编号或数组下标直接改库；必须同时核对资产 UUID、身份值、观测硬件事实和预期数量。
 
 ## 最小验证矩阵
 
@@ -72,5 +77,7 @@
 - [`identity-contract.md`](identity-contract.md)：身份算法、请求 schema 与错误语义。
 - [`decisions/ADR-003-pre-ga-scope-reset.md`](decisions/ADR-003-pre-ga-scope-reset.md)：产品范围。
 - [`decisions/ADR-004-hardware-identity-v2.md`](decisions/ADR-004-hardware-identity-v2.md)：v2 身份选择与迁移理由。
+- [`decisions/ADR-006-guard-legacy-identity-migration.md`](decisions/ADR-006-guard-legacy-identity-migration.md)：旧 v1 → v2 迁移的证据连续性保护。
+- [`windows-identity-and-asset-reconciliation-incident-2026-08-05.md`](windows-identity-and-asset-reconciliation-incident-2026-08-05.md)：133 采集故障与 32/35 串号的完整复盘和修复规范。
 - [`release-readiness-checklist.md`](release-readiness-checklist.md)：发布门禁。
 - [`windows-hardware-identity-pilot.md`](windows-hardware-identity-pilot.md)：实机试点方法与原始结论。

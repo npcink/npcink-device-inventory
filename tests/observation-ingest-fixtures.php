@@ -136,6 +136,12 @@ class Npcink_Device_Inventory_Observation_Repository
 {
 	public $created_asset_ids = array();
 	public $cache_invalidations = 0;
+	public $rows = array();
+
+	public function __construct($rows = array())
+	{
+		$this->rows = $rows;
+	}
 
 	public function create($asset_id)
 	{
@@ -156,6 +162,11 @@ class Npcink_Device_Inventory_Observation_Repository
 	public function invalidate_cache()
 	{
 		$this->cache_invalidations++;
+	}
+
+	public function find_by_id($id)
+	{
+		return isset($this->rows[$id]) ? $this->rows[$id] : null;
 	}
 }
 
@@ -228,6 +239,25 @@ class Npcink_Legacy_Match_Device_Identity_Service extends Npcink_Device_Inventor
 	}
 }
 
+class Npcink_Conflicting_Legacy_Match_Device_Identity_Service extends Npcink_Legacy_Match_Device_Identity_Service
+{
+	public function identities($payload = array())
+	{
+		$hardware = isset($payload['asset']['hardware']) && is_array($payload['asset']['hardware']) ? $payload['asset']['hardware'] : array();
+		$value = !empty($hardware['identityFixture']) && $hardware['identityFixture'] === 'existing'
+			? 'system-v2-existing'
+			: 'system-v2-fixture';
+		return array(
+			array(
+				'type' => self::TYPE,
+				'value' => $value,
+				'confidence' => 100,
+				'source' => 'server_recomputed',
+			),
+		);
+	}
+}
+
 class Npcink_Ingest_Transaction_Fake_Wpdb
 {
 	public $commands = array();
@@ -254,6 +284,8 @@ function npcink_ingest_asset_row($id, $uuid)
 		'purchase_price' => 0,
 		'residual_value' => 0,
 		'metadata_json' => '{}',
+		'latest_observation_id' => null,
+		'latest_observed_at' => null,
 		'created_at' => '2026-07-15 12:00:00',
 		'updated_at' => '2026-07-15 12:00:00',
 	);
@@ -387,5 +419,58 @@ $service = new Npcink_Device_Inventory_Observation_Ingest_Service(
 $result = $service->ingest(npcink_ingest_payload());
 npcink_ingest_assert(is_array($result) && $result['data']['mode'] === 'matched', 'a v2 upload must attach to an existing v1 asset during the transition');
 npcink_ingest_assert($identities->claimed_asset_ids === array(11), 'the v2 identity must be backfilled onto the legacy asset');
+
+$wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
+$legacy_asset = npcink_ingest_asset_row(11, 'legacy-owner-with-shared-v2');
+$legacy_asset['latest_observation_id'] = 700;
+$assets = new Npcink_Device_Inventory_Asset_Repository(array(11 => $legacy_asset));
+$identities = new Npcink_Device_Inventory_Identity_Repository();
+$identities->matched_asset_ids = array('device_uuid_v1:device-v1-existing' => 11);
+$observations = new Npcink_Device_Inventory_Observation_Repository(
+	array(
+		700 => array(
+			'id' => 700,
+			'asset_id' => 11,
+			'hardware_json' => json_encode(array('identityFixture' => 'incoming')),
+		),
+	)
+);
+$service = new Npcink_Device_Inventory_Observation_Ingest_Service(
+	$assets,
+	$identities,
+	$observations,
+	new Npcink_Device_Inventory_Event_Service(),
+	new Npcink_Conflicting_Legacy_Match_Device_Identity_Service()
+);
+$result = $service->ingest(npcink_ingest_payload());
+npcink_ingest_assert(is_array($result) && $result['data']['mode'] === 'matched', 'legacy migration must continue when the latest observation shares a v2 identity');
+npcink_ingest_assert($identities->claimed_asset_ids === array(11), 'shared v2 evidence must allow the legacy asset to receive the backfill');
+
+$wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
+$legacy_asset = npcink_ingest_asset_row(11, 'legacy-owner-conflict');
+$legacy_asset['latest_observation_id'] = 701;
+$assets = new Npcink_Device_Inventory_Asset_Repository(array(11 => $legacy_asset));
+$identities = new Npcink_Device_Inventory_Identity_Repository();
+$identities->matched_asset_ids = array('device_uuid_v1:device-v1-existing' => 11);
+$observations = new Npcink_Device_Inventory_Observation_Repository(
+	array(
+		701 => array(
+			'id' => 701,
+			'asset_id' => 11,
+			'hardware_json' => json_encode(array('identityFixture' => 'existing')),
+		),
+	)
+);
+$service = new Npcink_Device_Inventory_Observation_Ingest_Service(
+	$assets,
+	$identities,
+	$observations,
+	new Npcink_Device_Inventory_Event_Service(),
+	new Npcink_Conflicting_Legacy_Match_Device_Identity_Service()
+);
+$result = $service->ingest(npcink_ingest_payload());
+npcink_ingest_assert($result instanceof WP_Error && $result->code === 'legacy_identity_migration_conflict', 'legacy migration must fail when the target latest hardware has no shared v2 evidence');
+npcink_ingest_assert($wpdb->commands === array(), 'legacy migration conflicts must fail before starting a transaction');
+npcink_ingest_assert($identities->claimed_asset_ids === array(), 'legacy migration conflicts must not backfill incoming v2 identities');
 
 echo "Observation ingest fixture checks passed.\n";
