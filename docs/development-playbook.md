@@ -2,7 +2,7 @@
 
 ## 目的与适用范围
 
-这份手册把项目截至 2026-08-03 的真实试点、范围收缩和 3.1.0 发布经验整理为后续开发的默认工作方式。它不是另一套功能需求；现行功能契约仍以数据模型、身份契约和 ADR 为准。
+这份手册把项目截至 2026-08-05 的真实试点、范围收缩和 3.1.1 发布经验整理为后续开发的默认工作方式。它不是另一套功能需求；现行功能契约仍以数据模型、身份契约和 ADR 为准。
 
 产品的核心价值很窄且明确：管理员维护资产；Device Agent 上传电脑硬件事实；系统以可解释、可审计的规则匹配资产并保留观测与事件。它不是公开查询门户、ITSM、远程运维、工单或趋势/价值分析平台。
 
@@ -65,10 +65,11 @@
 
 ## 当前运行与后续观察
 
-- 当前正式版本为 WordPress 插件 3.1.0 与 Device Agent 0.3.0，发布记录见 [`release-verification-2026-08-03-v3.1.0.md`](release-verification-2026-08-03-v3.1.0.md)。
-- 部署顺序必须是先升级插件，再部署 Agent 0.3.0；否则 schema 5 的身份事实无法按 v2 契约处理。
+- 当前正式版本为 WordPress 插件 3.1.1 与 Device Agent 0.3.2，发布记录见 [`release-verification-2026-08-05-v3.1.1.md`](release-verification-2026-08-05-v3.1.1.md)。
+- 部署顺序必须是先升级插件，再部署 Agent；否则新 Agent 的身份事实和错误语义可能无法按当前契约处理。
 - 观察已有 v1 资产首次上传是否唯一命中并补写 v2；在实际覆盖完成前，不删除 v1 过渡查询。
 - 对 133 这类只依赖 PCI 永久 MAC 的设备，网卡更换后需要人工确认资产关系，不能自动把新身份并入旧资产。
+- 正式环境采用轻量诊断：Agent 反馈 JSON + 稳定错误码 + WordPress 身份/观测/事件；不常驻完整请求与命令输出面板。
 - 未出现重复、可量化的真实使用需求前，不扩张功能范围；出现后从本手册第一步重新开始。
 
 ## 文档导航
@@ -78,6 +79,8 @@
 - [`decisions/ADR-003-pre-ga-scope-reset.md`](decisions/ADR-003-pre-ga-scope-reset.md)：产品范围。
 - [`decisions/ADR-004-hardware-identity-v2.md`](decisions/ADR-004-hardware-identity-v2.md)：v2 身份选择与迁移理由。
 - [`decisions/ADR-006-guard-legacy-identity-migration.md`](decisions/ADR-006-guard-legacy-identity-migration.md)：旧 v1 → v2 迁移的证据连续性保护。
+- [`decisions/ADR-007-keep-production-diagnostics-lightweight.md`](decisions/ADR-007-keep-production-diagnostics-lightweight.md)：正式环境保持轻量诊断的决定。
+- [`device-upload-troubleshooting-and-operations.md`](device-upload-troubleshooting-and-operations.md)：Agent 与 WordPress 分层排障和生产修复规范。
 - [`windows-identity-and-asset-reconciliation-incident-2026-08-05.md`](windows-identity-and-asset-reconciliation-incident-2026-08-05.md)：133 采集故障与 32/35 串号的完整复盘和修复规范。
 - [`release-readiness-checklist.md`](release-readiness-checklist.md)：发布门禁。
 - [`windows-hardware-identity-pilot.md`](windows-hardware-identity-pilot.md)：实机试点方法与原始结论。

@@ -7,14 +7,18 @@ This folder keeps the current product contracts, development guardrails, release
 - `development-playbook.md`: the working agreement for new changes: scope, evidence, contracts, testing, and release gates.
 - `asset-data-model.md`: v3 asset, identity, observation, and event model contract.
 - `identity-contract.md`: current hardware identity v2 upload contract.
+- `device-upload-troubleshooting-and-operations.md`: production upload troubleshooting, evidence, and recovery runbook.
 - `decisions/ADR-003-pre-ga-scope-reset.md`: current product-scope and data-boundary decision.
 - `decisions/ADR-004-hardware-identity-v2.md`: current hardware identity design and v1 transition rule.
+- `decisions/ADR-006-guard-legacy-identity-migration.md`: evidence-continuity guard for legacy identity migration.
+- `decisions/ADR-007-keep-production-diagnostics-lightweight.md`: decision to keep production diagnostics lightweight.
 - `release-readiness-checklist.md`: release gate and manual smoke-test checklist.
 - `github-release.md`: GitHub release workflow notes.
 
 ## Release Records
 
-- `release-verification-2026-08-03-v3.1.0.md`: current release verification record for plugin 3.1.0 and Device Agent 0.3.0.
+- `release-verification-2026-08-05-v3.1.1.md`: current release verification record for plugin 3.1.1 and Device Agent 0.3.2.
+- `release-verification-2026-08-03-v3.1.0.md`: previous release verification record for plugin 3.1.0 and Device Agent 0.3.0.
 - `release-verification-2026-07-10-v2.8.0.md`: v2.8.0 release verification record.
 - `release-verification-2026-07-09-v2.7.9.md`: v2.7.9 release verification record.
 - `release-verification-2026-07-07-v2.7.8.md`: v2.7.8 release verification record.
@@ -55,6 +59,7 @@ historical unless a newer ADR explicitly restores them.
 
 ## Incidents And Review Follow-Ups
 
+- `windows-identity-and-asset-reconciliation-incident-2026-08-05.md`: Windows collection failure and 32/35 identity reconciliation incident.
 - `asset-list-regexp-incident-2026-07-06.md`: asset list search incident note.
 - `plugin-check-db-cache-escaping-follow-up-2026-07-03.md`: Plugin Check and escaping follow-up.
 - `desktop-uploader-win11-stabilization-summary-2026-07-03.md`: Windows 11 desktop uploader stabilization summary.
