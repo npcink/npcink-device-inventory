@@ -28,11 +28,17 @@ Date: 2026-08-05
 - Isolated Docker verification passed with WordPress 7.0.2, PHP 8.3 and MariaDB 11.
 - Official Plugin Check 2.0.0 completed with no errors.
 - Real JSON backup restore rehearsal passed.
+- GitHub tag workflow completed successfully for plugin, Windows x64 and macOS Apple Silicon artifacts.
+- Published updater manifests declare Agent `0.3.3` for `windows-x86_64` and `darwin-aarch64` with signed updater assets.
+- The production WordPress site was upgraded from plugin 3.1.1 to 3.1.2; the plugin remained active, the device-management page loaded normally, and the browser console had no errors.
 
 ## Artifacts
 
 - `release/npcink-device-inventory.zip`
 - `sj/npcink-device-inventory.zip`
 - Synchronized package SHA-256: `16596a44e32fa5213366e22574deac7a85fc318eee89c8356b87c7fd2d78824e`
+- GitHub Release: <https://github.com/npcink/npcink-device-inventory/releases/tag/v3.1.2>
+- Windows x64: <https://github.com/npcink/npcink-device-inventory/releases/download/v3.1.2/Npcink.Device.Agent_0.3.3_x64-setup.exe>
+- macOS Apple Silicon: <https://github.com/npcink/npcink-device-inventory/releases/download/v3.1.2/Npcink.Device.Agent_0.3.3_aarch64.dmg>
 
-Desktop installers and signed updater manifests are produced by the `v3.1.2` GitHub tag release workflow. Windows collection still requires final smoke validation on representative physical devices after the workflow artifact is installed.
+Desktop installers and signed updater manifests were produced by the `v3.1.2` GitHub tag release workflow. Windows collection still requires final smoke validation on representative physical devices after the workflow artifact is installed.

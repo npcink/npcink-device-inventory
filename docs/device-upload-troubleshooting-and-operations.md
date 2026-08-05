@@ -88,11 +88,11 @@ Agent 不是单纯的文件传输器。它负责操作系统命令、输出编�
 
 截至 2026-08-05：
 
-- WordPress 插件 3.1.1 已部署并通过官方 Plugin Check；
-- Device Agent 0.3.2 已修复 Windows 物理网卡查询重试、JSON 数组处理和 PowerShell UTF-8 输出；
+- WordPress 插件 3.1.2 已部署并通过官方 Plugin Check；
+- Device Agent 0.3.3 已修复 Windows 物理网卡查询重试、JSON 数组处理和 PowerShell UTF-8 输出，并补齐高价值硬件观测；
 - 35 已正确定位到资产 35；
 - 133 可通过 PCI 永久 MAC 形成身份；
 - 103、174 上传正常；
-- 3.1.1 已阻止缺乏硬件证据连续性的旧 v1 → v2 自动迁移。
+- 3.1.2 保留旧 v1 → v2 证据连续性保护，并将资产编号冲突明确返回 `409 duplicate_number`。
 
 这组设备证明当前路径可用，但不是删除 v1 过渡逻辑的充分条件。删除前仍需确认全部存量资产已经至少成功完成一次 v2 上传。

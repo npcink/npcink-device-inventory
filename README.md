@@ -7,6 +7,9 @@ Npcink Device Inventory 是一个 WordPress 设备资产管理插件，用于小
 [`docs/identity-contract.md`](docs/identity-contract.md) 为准；历史 v1 身份
 文档不代表当前上传行为。
 
+本阶段设备身份、资产编号、硬件采集和发布经验的集中复盘见
+[`docs/device-identity-collection-release-retrospective-2026-08-05.md`](docs/device-identity-collection-release-retrospective-2026-08-05.md)。
+
 ## 组成
 
 - `npcink-device-inventory.php`：WordPress 插件入口。

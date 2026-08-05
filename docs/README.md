@@ -12,12 +12,15 @@ This folder keeps the current product contracts, development guardrails, release
 - `decisions/ADR-004-hardware-identity-v2.md`: current hardware identity design and v1 transition rule.
 - `decisions/ADR-006-guard-legacy-identity-migration.md`: evidence-continuity guard for legacy identity migration.
 - `decisions/ADR-007-keep-production-diagnostics-lightweight.md`: decision to keep production diagnostics lightweight.
+- `decisions/ADR-008-separate-asset-number-identity-and-observation.md`: boundary between business asset numbers, hardware identity, and replaceable hardware observations.
+- `device-identity-collection-release-retrospective-2026-08-05.md`: consolidated incident, collection, operating, and release lessons from the 3.1.2/0.3.3 phase.
 - `release-readiness-checklist.md`: release gate and manual smoke-test checklist.
 - `github-release.md`: GitHub release workflow notes.
 
 ## Release Records
 
-- `release-verification-2026-08-05-v3.1.1.md`: current release verification record for plugin 3.1.1 and Device Agent 0.3.2.
+- `release-verification-2026-08-05-v3.1.2.md`: current release verification record for plugin 3.1.2 and Device Agent 0.3.3.
+- `release-verification-2026-08-05-v3.1.1.md`: previous release verification record for plugin 3.1.1 and Device Agent 0.3.2.
 - `release-verification-2026-08-03-v3.1.0.md`: previous release verification record for plugin 3.1.0 and Device Agent 0.3.0.
 - `release-verification-2026-07-10-v2.8.0.md`: v2.8.0 release verification record.
 - `release-verification-2026-07-09-v2.7.9.md`: v2.7.9 release verification record.
