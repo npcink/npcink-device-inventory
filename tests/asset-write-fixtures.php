@@ -180,6 +180,14 @@ class Npcink_Device_Inventory_Identity_Repository
 
 class Npcink_Device_Inventory_Observation_Repository
 {
+	public $daily_counts = array();
+	public $daily_count_args = array();
+
+	public function daily_counts_between($start_at, $end_at)
+	{
+		$this->daily_count_args = array($start_at, $end_at);
+		return $this->daily_counts;
+	}
 }
 
 class Npcink_Device_Inventory_Event_Repository
@@ -278,18 +286,38 @@ function npcink_asset_write_controller($rows)
 {
 	$assets = new Npcink_Device_Inventory_Asset_Repository($rows);
 	$events = new Npcink_Device_Inventory_Event_Service();
+	$observations = new Npcink_Device_Inventory_Observation_Repository();
 	$controller = new Npcink_Device_Inventory_Assets_Controller(
 		$assets,
 		new Npcink_Device_Inventory_Identity_Repository(),
-		new Npcink_Device_Inventory_Observation_Repository(),
+		$observations,
 		new Npcink_Device_Inventory_Event_Repository(),
 		$events
 	);
-	return array($controller, $assets, $events);
+	return array($controller, $assets, $events, $observations);
 }
 
 $wpdb = new Npcink_Asset_Write_Wpdb();
 list($controller) = npcink_asset_write_controller(array());
+$trend_observations = new Npcink_Device_Inventory_Observation_Repository();
+$trend_observations->daily_counts = array(
+	array('day' => '2026-07-14', 'count' => '2'),
+	array('day' => '2026-07-15', 'count' => '3'),
+);
+$trend_controller = new Npcink_Device_Inventory_Assets_Controller(
+	new Npcink_Device_Inventory_Asset_Repository(),
+	new Npcink_Device_Inventory_Identity_Repository(),
+	$trend_observations,
+	new Npcink_Device_Inventory_Event_Repository(),
+	new Npcink_Device_Inventory_Event_Service()
+);
+$trend_response = $trend_controller->get_collection_trends(new Npcink_Asset_Write_Request(array()));
+$trend_data = $trend_response->get_data()['data'];
+npcink_asset_write_assert($trend_data['days'] === 30, 'collection trends must return a fixed 30-day window');
+npcink_asset_write_assert(count($trend_data['collection']) === 30, 'collection trends must fill every day in the window');
+npcink_asset_write_assert($trend_data['startDate'] === '2026-06-16' && $trend_data['endDate'] === '2026-07-15', 'collection trends must use the WordPress current date');
+npcink_asset_write_assert($trend_data['collection'][28]['count'] === 2 && $trend_data['collection'][29]['count'] === 3, 'collection trends must merge aggregate counts into the filled window');
+npcink_asset_write_assert($trend_observations->daily_count_args === array('2026-06-16 00:00:00', '2026-07-16 00:00:00'), 'collection trend query must use a bounded half-open range');
 $invalid = $controller->create_item(new Npcink_Asset_Write_Request(array('status' => 'unknown')));
 npcink_asset_write_assert(is_wp_error($invalid) && $invalid->get_error_code() === 'invalid_asset_status', 'invalid status must fail validation');
 npcink_asset_write_assert($wpdb->commands === array(), 'validation failure must not start a transaction');

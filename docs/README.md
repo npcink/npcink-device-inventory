@@ -5,15 +5,18 @@ This folder keeps the current product contracts, development guardrails, release
 ## Start Here
 
 - `development-playbook.md`: the working agreement for new changes: scope, evidence, contracts, testing, and release gates.
+- `admin-read-only-analysis-development-standard.md`: implementation, data-semantics, UI, permission, and verification rules for read-only admin analytics.
 - `asset-data-model.md`: v3 asset, identity, observation, and event model contract.
 - `identity-contract.md`: current hardware identity v2 upload contract.
 - `device-upload-troubleshooting-and-operations.md`: production upload troubleshooting, evidence, and recovery runbook.
-- `decisions/ADR-003-pre-ga-scope-reset.md`: current product-scope and data-boundary decision.
+- `decisions/ADR-003-pre-ga-scope-reset.md`: pre-GA scope reset; its analysis restriction is partially superseded by ADR-009.
 - `decisions/ADR-004-hardware-identity-v2.md`: current hardware identity design and v1 transition rule.
 - `decisions/ADR-006-guard-legacy-identity-migration.md`: evidence-continuity guard for legacy identity migration.
 - `decisions/ADR-007-keep-production-diagnostics-lightweight.md`: decision to keep production diagnostics lightweight.
 - `decisions/ADR-008-separate-asset-number-identity-and-observation.md`: boundary between business asset numbers, hardware identity, and replaceable hardware observations.
+- `decisions/ADR-009-restore-read-only-analysis.md`: current boundary for read-only trends, distributions, value summaries, and excluded writable analysis workflows.
 - `device-identity-collection-release-retrospective-2026-08-05.md`: consolidated incident, collection, operating, and release lessons from the 3.1.2/0.3.3 phase.
+- `read-only-analysis-restoration-retrospective-2026-08-06.md`: history, real-data findings, UI iterations, and reusable lessons from restoring read-only analytics and multi-factor queries.
 - `release-readiness-checklist.md`: release gate and manual smoke-test checklist.
 - `github-release.md`: GitHub release workflow notes.
 

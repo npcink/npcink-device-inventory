@@ -145,6 +145,16 @@ class Npcink_Device_Inventory_Assets_Controller
 				'permission_callback' => array($this, 'admin_permissions_check'),
 			)
 		);
+
+		register_rest_route(
+			'npcink-device-inventory/v1',
+			'/analysis/collection-trends',
+			array(
+				'methods' => WP_REST_Server::READABLE,
+				'callback' => array($this, 'get_collection_trends'),
+				'permission_callback' => array($this, 'admin_permissions_check'),
+			)
+		);
 	}
 
 	public function admin_permissions_check()
@@ -505,6 +515,48 @@ class Npcink_Device_Inventory_Assets_Controller
 		$items = array_map(array($this, 'format_observation'), $result['items']);
 		return rest_ensure_response(
 			Npcink_Device_Inventory_V3_Response::paginated($items, $result['page'], $result['pageSize'], $result['total'])
+		);
+	}
+
+	public function get_collection_trends($request)
+	{
+		$days = 30;
+		$today = current_time('Y-m-d');
+		$today_date = DateTimeImmutable::createFromFormat('!Y-m-d', $today);
+		if (!$today_date) {
+			$today_date = new DateTimeImmutable($today);
+		}
+		$start = $today_date->modify('-' . ($days - 1) . ' days');
+		$end = $today_date->modify('+1 day');
+		$start_date = $start->format('Y-m-d');
+		$end_date = $end->format('Y-m-d');
+		$counts_by_day = array();
+
+		foreach ($this->observations->daily_counts_between($start_date . ' 00:00:00', $end_date . ' 00:00:00') as $row) {
+			$day = isset($row['day']) ? sanitize_text_field((string) $row['day']) : '';
+			if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $day)) {
+				$counts_by_day[$day] = intval(isset($row['count']) ? $row['count'] : 0);
+			}
+		}
+
+		$collection = array();
+		for ($offset = 0; $offset < $days; $offset++) {
+			$day = $start->modify('+' . $offset . ' days')->format('Y-m-d');
+			$collection[] = array(
+				'date' => $day,
+				'count' => isset($counts_by_day[$day]) ? $counts_by_day[$day] : 0,
+			);
+		}
+
+		return rest_ensure_response(
+			array(
+				'data' => array(
+					'days' => $days,
+					'startDate' => $start_date,
+					'endDate' => $today,
+					'collection' => $collection,
+				),
+			)
 		);
 	}
 

@@ -4,14 +4,14 @@
 
 这份手册把项目截至 2026-08-05 的真实试点、身份事故、采集补齐和 3.1.2/Agent 0.3.3 发布经验整理为后续开发的默认工作方式。它不是另一套功能需求；现行功能契约仍以数据模型、身份契约和 ADR 为准。
 
-产品的核心价值很窄且明确：管理员维护资产；Device Agent 上传电脑硬件事实；系统以可解释、可审计的规则匹配资产并保留观测与事件。它不是公开查询门户、ITSM、远程运维、工单或趋势/价值分析平台。
+产品的核心价值很窄且明确：管理员维护资产；Device Agent 上传电脑硬件事实；系统以可解释、可审计的规则匹配资产并保留观测与事件；管理端可以基于这些事实提供受约束的只读分析。它不是公开查询门户、ITSM、远程运维、工单或通用报表平台。
 
 ## 当前不可随意突破的边界
 
 - 顶层资产类型只有 `computer` 和 `custom`；其余分类使用 `category`。
 - 资产、身份、观测、事件四表分别承担业务记录、匹配证据、硬件快照和审计时间线，不能混为一个“设备指纹”字段。
 - 所有资产查询和管理操作留在已授权的 WordPress 管理端；不恢复匿名查询或访问码。
-- 分析中心只展示从当前事实派生的只读结果；不新增“已处理”、工单、趋势或批量处置状态。
+- 分析中心只展示从当前事实和已有观测派生的只读结果；不新增“已处理”、工单或批量处置状态。具体边界见 ADR-009。
 - 服务端根据上传事实计算身份，不信任客户端传入的身份哈希；身份冲突必须失败关闭，绝不自动合并资产。
 - 资产编号是可变管理字段，不是硬件身份；编号复用前必须先处理旧资产并核对身份、观测和 latest 指针。
 - 已归档资产仍占用原编号；复用前必须先给旧资产重编号，编号冲突统一返回 `409 duplicate_number`。
@@ -83,6 +83,9 @@
 - [`decisions/ADR-006-guard-legacy-identity-migration.md`](decisions/ADR-006-guard-legacy-identity-migration.md)：旧 v1 → v2 迁移的证据连续性保护。
 - [`decisions/ADR-007-keep-production-diagnostics-lightweight.md`](decisions/ADR-007-keep-production-diagnostics-lightweight.md)：正式环境保持轻量诊断的决定。
 - [`decisions/ADR-008-separate-asset-number-identity-and-observation.md`](decisions/ADR-008-separate-asset-number-identity-and-observation.md)：资产编号、设备身份和硬件观测的责任边界。
+- [`decisions/ADR-009-restore-read-only-analysis.md`](decisions/ADR-009-restore-read-only-analysis.md)：只读分析、组合查询、价值口径和被排除的可写工作流。
+- [`admin-read-only-analysis-development-standard.md`](admin-read-only-analysis-development-standard.md)：只读分析的数据、查询、界面、权限和验收规范。
+- [`read-only-analysis-restoration-retrospective-2026-08-06.md`](read-only-analysis-restoration-retrospective-2026-08-06.md)：本阶段恢复分析功能的历史、真实数据证据和开发经验。
 - [`device-identity-collection-release-retrospective-2026-08-05.md`](device-identity-collection-release-retrospective-2026-08-05.md)：本阶段问题、根因、方法和发布闭环复盘。
 - [`device-upload-troubleshooting-and-operations.md`](device-upload-troubleshooting-and-operations.md)：Agent 与 WordPress 分层排障和生产修复规范。
 - [`windows-identity-and-asset-reconciliation-incident-2026-08-05.md`](windows-identity-and-asset-reconciliation-incident-2026-08-05.md)：133 采集故障与 32/35 串号的完整复盘和修复规范。

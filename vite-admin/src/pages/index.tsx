@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AppleFilled, DesktopOutlined, PlusOutlined, SearchOutlined, WindowsFilled } from "@ant-design/icons";
+import { AppleFilled, DesktopOutlined, PlusOutlined, QuestionCircleOutlined, SearchOutlined, WindowsFilled } from "@ant-design/icons";
 import {
   Alert,
   Button,
@@ -20,6 +20,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from "antd";
@@ -38,7 +39,9 @@ import {
   getAssetIdentities,
   getAssetObservations,
   getAssets,
+  getCollectionTrends,
   getEvents,
+  getObservations,
   getSettings,
   updateClientToken,
   updateSettings,
@@ -62,12 +65,16 @@ import type {
 } from "@/type/v3";
 import {
   assetHardwareContext,
+  collectionAgeBand,
+  collectionAgeDays,
   detectHardwareIssues,
   firstText,
   formatBytes,
   getArray,
   getRecord,
   hardwareSummary,
+  hardwareDiskBytes,
+  hardwareMemoryBytes,
   issueGroup,
   toNumber,
   type HardwareIssue,
@@ -363,6 +370,17 @@ const fetchAllAssets = async (params: AssetListParams = {}) => {
     assets.push(...next.data);
   }
   return assets;
+};
+
+const fetchAllObservations = async () => {
+  const first = await getObservations({ page: 1, pageSize: 100 });
+  const observations = [...first.data];
+  const totalPages = first.pagination.totalPages || 1;
+  for (let nextPage = 2; nextPage <= totalPages; nextPage += 1) {
+    const next = await getObservations({ page: nextPage, pageSize: 100 });
+    observations.push(...next.data);
+  }
+  return observations;
 };
 
 const hardwareModelLabel = (value: unknown, fallback: string) => {
@@ -2794,6 +2812,7 @@ interface CustomAssetDetailProps {
   autoRecordRows: AutoChangeRow[];
   onUpdated: (asset: Asset) => void;
   onArchive: (asset: Asset) => void;
+  readOnly?: boolean;
 }
 
 const CustomAssetDetail = ({
@@ -2801,6 +2820,7 @@ const CustomAssetDetail = ({
   autoRecordRows,
   onUpdated,
   onArchive,
+  readOnly = false,
 }: CustomAssetDetailProps) => {
   const info = customAssetInfo(asset);
   const productLink = /^https?:\/\//i.test(info.link) ? info.link : "";
@@ -2902,7 +2922,7 @@ const CustomAssetDetail = ({
             />
           ),
         },
-        {
+        ...(!readOnly ? [{
           key: "settings",
           label: "信息修改",
           children: (
@@ -2912,7 +2932,7 @@ const CustomAssetDetail = ({
               onArchive={onArchive}
             />
           ),
-        },
+        }] : []),
       ]}
     />
   );
@@ -2925,9 +2945,26 @@ interface DetailDrawerProps {
   departmentOptions?: string[];
   onClose: () => void;
   onArchive: (asset: Asset) => void;
+  readOnly?: boolean;
+  previousAsset?: Asset;
+  nextAsset?: Asset;
+  navigationLabel?: string;
+  onNavigate?: (asset: Asset) => void;
 }
 
-const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [], onClose, onArchive }: DetailDrawerProps) => {
+const DetailDrawer = ({
+  uuid,
+  open,
+  initialAsset = null,
+  departmentOptions = [],
+  onClose,
+  onArchive,
+  readOnly = false,
+  previousAsset,
+  nextAsset,
+  navigationLabel,
+  onNavigate,
+}: DetailDrawerProps) => {
   const queryClient = useQueryClient();
   const [manualRecordOpen, setManualRecordOpen] = useState(false);
   const [manualRecordKeyword, setManualRecordKeyword] = useState("");
@@ -3001,6 +3038,14 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
       return text.includes(keyword);
     });
   }, [manualRecordSearch, manualRecords]);
+  const purchaseRecord = asset ? assetPurchaseRecord(asset) : {};
+  const purchaseDate = firstText(purchaseRecord.order_time);
+  const purchasePrice = Number(asset?.purchasePrice || 0);
+  const residualValue = Number(asset?.residualValue || 0);
+  const hasPurchasePrice = purchasePrice > 0;
+  const hasResidualValue = residualValue > 0;
+  const knownDepreciation = hasPurchasePrice && hasResidualValue ? Math.max(0, purchasePrice - residualValue) : null;
+  const residualRate = hasPurchasePrice && hasResidualValue ? Math.round((residualValue / purchasePrice) * 100) : null;
   const createEventMutation = useMutation(
     (input: AssetEventInput) => createAssetEvent(uuid || "", input),
     {
@@ -3088,7 +3133,7 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
       open={open}
       onCancel={onClose}
       footer={null}
-      width={isComputerAsset(asset) ? "min(840px, calc(100vw - 40px))" : "min(860px, calc(100vw - 40px))"}
+      width={readOnly ? "min(780px, calc(100vw - 32px))" : (isComputerAsset(asset) ? "min(840px, calc(100vw - 32px))" : "min(860px, calc(100vw - 32px))")}
       className="npcink-v3-detail-modal"
       destroyOnClose
     >
@@ -3100,9 +3145,19 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
           autoRecordRows={autoRecordRows}
           onUpdated={handleAssetUpdated}
           onArchive={onArchive}
+          readOnly={readOnly}
         />
       ) : asset ? (
         <Space direction="vertical" size={12} className="npcink-v3-detail-stack">
+          {readOnly && navigationLabel ? (
+            <div className="npcink-v3-detail-navigation">
+              <Text type="secondary">{navigationLabel}</Text>
+              <Space.Compact>
+                <Button disabled={!previousAsset} onClick={() => previousAsset && onNavigate?.(previousAsset)}>上一台</Button>
+                <Button disabled={!nextAsset} onClick={() => nextAsset && onNavigate?.(nextAsset)}>下一台</Button>
+              </Space.Compact>
+            </div>
+          ) : null}
           <div className={`npcink-v3-device-hero is-${platformVisual.kind}`}>
             <div className="npcink-v3-device-brand">
               <PlatformMark visual={platformVisual} variant="hero" />
@@ -3111,19 +3166,22 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
             <div>
               <h3>{asset.ownerName || asset.name || "未命名资产"}</h3>
               <p>
-                {formatHardwareHeroText(
-                  extracted.cpu,
-                  summary,
-                  hardwareContext.manualHardware,
-                  assetTypeLabel(asset.assetType)
-                )}
+                {firstText(extracted.deviceModel, extracted.baseboard, formatHardwareHeroText(extracted.cpu, summary, hardwareContext.manualHardware, assetTypeLabel(asset.assetType)))}
               </p>
               <div className="npcink-v3-device-meta">
                 <span>部门：{asset.department || "-"}</span>
                 <span>状态：{statusLabel(asset.status)}</span>
                 <span>编号：{asset.assetNumber || "-"}</span>
+                <span>采集：{formatDate(asset.latestObservation?.observedAt)}</span>
               </div>
             </div>
+          </div>
+          <div className="npcink-v3-detail-finance-summary" aria-label="资产财务摘要">
+            <div><span>购置日期</span><strong>{purchaseDate ? formatDate(purchaseDate) : "未登记"}</strong></div>
+            <div><span>采购价</span><strong>{hasPurchasePrice ? formatMoney(purchasePrice) : "未登记"}</strong></div>
+            <div className="is-emphasis"><span>当前残值</span><strong>{hasResidualValue ? formatMoney(residualValue) : "未登记"}</strong></div>
+            <div><span>已知折价</span><strong>{knownDepreciation === null ? "无法计算" : formatMoney(knownDepreciation)}</strong></div>
+            <div><span>残值率</span><strong>{residualRate === null ? "无法计算" : `${residualRate}%`}</strong></div>
           </div>
           <Tabs
             defaultActiveKey="overview"
@@ -3285,7 +3343,7 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
                 </Space>
               ),
             },
-            {
+            ...(!readOnly ? [{
               key: "events",
               label: "手动记录",
               children: (
@@ -3323,7 +3381,7 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
                   />
                 </Space>
               ),
-            },
+            }] : []),
             {
               key: "debug",
               label: "调试",
@@ -3413,7 +3471,7 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
                 />
               ),
             },
-            {
+            ...(!readOnly ? [{
               key: "settings",
               label: "设置",
               children: (
@@ -3424,16 +3482,18 @@ const DetailDrawer = ({ uuid, open, initialAsset = null, departmentOptions = [],
                   onArchive={onArchive}
                 />
               ),
-            },
+            }] : []),
             ]}
           />
-          <ManualRecordModal
-            open={manualRecordOpen}
-            asset={asset}
-            loading={createEventMutation.isLoading}
-            onClose={() => setManualRecordOpen(false)}
-            onSubmit={(values) => createEventMutation.mutateAsync(values)}
-          />
+          {!readOnly ? (
+            <ManualRecordModal
+              open={manualRecordOpen}
+              asset={asset}
+              loading={createEventMutation.isLoading}
+              onClose={() => setManualRecordOpen(false)}
+              onSubmit={(values) => createEventMutation.mutateAsync(values)}
+            />
+          ) : null}
         </Space>
       ) : (
         <Empty description="未找到资产" />
@@ -3575,18 +3635,254 @@ const ISSUE_LEVEL_META: Record<HardwareIssue["level"], { label: string; color: s
   info: { label: "低", color: "blue" },
 };
 
+type AnalysisTabKey = "summary" | "query" | "collection" | "quality" | "changes" | "renewal" | "value";
+
+const COLLECTION_BAND_META = {
+  fresh: { label: "7 天内", color: "green" },
+  aging: { label: "8–30 天", color: "blue" },
+  stale_31_60: { label: "31–60 天", color: "gold" },
+  stale_61_90: { label: "61–90 天", color: "orange" },
+  stale_90_plus: { label: "90 天以上", color: "red" },
+  missing: { label: "从未采集", color: "default" },
+} as const;
+
+interface AssetCompletenessRow {
+  asset: Asset;
+  score: number;
+  missing: string[];
+}
+
+interface RenewalCandidateRow {
+  asset: Asset;
+  reasons: string[];
+}
+
+interface HardwareChangeRow {
+  key: string;
+  asset: Asset;
+  field: string;
+  before: string;
+  after: string;
+  observedAt: string;
+}
+
+type HardwareTextMatchMode = "contains" | "exact";
+
+interface HardwareQueryState {
+  departments: string[];
+  statuses: string[];
+  ownerMode?: "assigned" | "unassigned";
+  ownerKeyword: string;
+  graphicsTerms: string[];
+  graphicsMode: HardwareTextMatchMode;
+  cpuTerms: string[];
+  cpuMode: HardwareTextMatchMode;
+  minMemoryGb?: number;
+  minDiskGb?: number;
+}
+
+interface HardwareQueryItem {
+  asset: Asset;
+  cpu: string;
+  graphics: string;
+  memoryGb: number;
+  diskGb: number;
+}
+
+const EMPTY_HARDWARE_QUERY: HardwareQueryState = {
+  departments: [],
+  statuses: [],
+  ownerKeyword: "",
+  graphicsTerms: [],
+  graphicsMode: "contains",
+  cpuTerms: [],
+  cpuMode: "contains",
+};
+
+const createEmptyHardwareQuery = (): HardwareQueryState => ({
+  ...EMPTY_HARDWARE_QUERY,
+  departments: [],
+  statuses: [],
+  graphicsTerms: [],
+  cpuTerms: [],
+});
+
+const normalizeHardwareSearchText = (value: string) => value
+  .toLowerCase()
+  .replace(/[®™()]/g, " ")
+  .replace(/\bnvidia\b|\bgeforce\b|\bintel\b|\bcore\b/g, " ")
+  .replace(/\s+/g, " ")
+  .trim();
+
+const hardwareTextMatches = (value: string, terms: string[], mode: HardwareTextMatchMode) => {
+  if (!terms.length) return true;
+  const normalizedValue = normalizeHardwareSearchText(value);
+  return terms.some((term) => {
+    const normalizedTerm = normalizeHardwareSearchText(term);
+    return normalizedTerm && (mode === "exact" ? normalizedValue === normalizedTerm : normalizedValue.includes(normalizedTerm));
+  });
+};
+
+interface AnalysisDistributionRow {
+  label: string;
+  value: number;
+  meta?: string;
+}
+
+const analysisDistribution = (values: string[], fallback = "未填写"): AnalysisDistributionRow[] => {
+  const counts = new Map<string, number>();
+  values.forEach((value) => {
+    const label = value.trim() || fallback;
+    counts.set(label, (counts.get(label) || 0) + 1);
+  });
+  return Array.from(counts, ([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label, "zh-CN"));
+};
+
+const AnalysisDistribution = ({
+  rows,
+  emptyText = "暂无数据",
+  onSelect,
+}: {
+  rows: AnalysisDistributionRow[];
+  emptyText?: string;
+  onSelect?: (row: AnalysisDistributionRow) => void;
+}) => {
+  const max = Math.max(...rows.map((row) => row.value), 1);
+  if (!rows.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} />;
+  }
+  return (
+    <div className="npcink-v3-analysis-distribution">
+      {rows.map((row) => (
+        <div
+          key={row.label}
+          className={`npcink-v3-analysis-distribution-row${onSelect ? " is-clickable" : ""}`}
+          role={onSelect ? "button" : undefined}
+          tabIndex={onSelect ? 0 : undefined}
+          onClick={() => onSelect?.(row)}
+          onKeyDown={(event) => {
+            if (onSelect && (event.key === "Enter" || event.key === " ")) {
+              event.preventDefault();
+              onSelect(row);
+            }
+          }}
+        >
+          <div>
+            <span>{row.label}</span>
+            <strong>{row.meta || row.value}</strong>
+          </div>
+          <div className="npcink-v3-analysis-meter" aria-hidden="true">
+            <i style={{ width: `${Math.max((row.value / max) * 100, 2)}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const observationCapacityBytes = (observation: AssetObservation, kind: "memory" | "disk") => {
+  const summaryKey = kind === "memory" ? "memory_bytes" : "disk_bytes";
+  const summaryBytes = toNumber(observation.summary[summaryKey]);
+  if (summaryBytes > 0) return summaryBytes;
+  const candidates = kind === "memory"
+    ? [observation.hardware.memory, observation.hardware.mem, observation.hardware.memLayout]
+    : [observation.hardware.disks, observation.hardware.disk, observation.hardware.diskLayout];
+  const items = candidates.map(getArray).find((value) => value.length) || [];
+  return items.reduce((total, item) => total + toNumber(item.size), 0);
+};
+
+const observationComparableFields = (observation: AssetObservation) => {
+  const extracted = hardwareSummary(getRecord(observation.summary), getRecord(observation.hardware));
+  const memoryBytes = observationCapacityBytes(observation, "memory");
+  const diskBytes = observationCapacityBytes(observation, "disk");
+  return {
+    "操作系统": extracted.platform,
+    "CPU": extracted.cpu,
+    "内存": memoryBytes > 0 ? formatBytes(memoryBytes) : "",
+    "硬盘": diskBytes > 0 ? formatBytes(diskBytes) : "",
+    "主板/机型": firstText(extracted.baseboard, extracted.deviceModel),
+    "显卡": extracted.graphics,
+  };
+};
+
 const AnalysisWorkspace = () => {
+  const [analysisNow] = useState(() => Date.now());
+  const [activeTab, setActiveTab] = useState<AnalysisTabKey>("summary");
   const [selectedGroup, setSelectedGroup] = useState<string>();
   const [selectedType, setSelectedType] = useState<string>();
+  const [selectedChangeType, setSelectedChangeType] = useState<string>();
+  const [selectedRenewalUuids, setSelectedRenewalUuids] = useState<Set<string>>(new Set());
+  const [hardwareQuery, setHardwareQuery] = useState<HardwareQueryState>(createEmptyHardwareQuery);
+  const [drillDown, setDrillDown] = useState<{ title: string; assets: Asset[] } | null>(null);
+  const [detailAsset, setDetailAsset] = useState<Asset | null>(null);
+  const [detailAssets, setDetailAssets] = useState<Asset[]>([]);
   const assetsQuery = useQuery(
     ["v3-analysis-assets"],
-    () => fetchAllAssets({ assetScope: "computer" }),
+    () => fetchAllAssets({ assetScope: "all" }),
     { staleTime: 60_000 }
   );
-  const assets = useMemo(
+  const trendsQuery = useQuery(["v3-analysis-collection-trends"], getCollectionTrends, { staleTime: 60_000 });
+  const settingsQuery = useQuery(["v3-settings"], getSettings, { staleTime: 60_000 });
+  const observationsQuery = useQuery(["v3-analysis-observations"], fetchAllObservations, {
+    enabled: activeTab === "changes",
+    staleTime: 60_000,
+  });
+  const allAssets = useMemo(
     () => (assetsQuery.data || []).filter((asset) => asset.status !== "deleted"),
     [assetsQuery.data]
   );
+  const assets = useMemo(() => allAssets.filter((asset) => asset.assetType === "computer"), [allAssets]);
+  const hardwareQueryItems = useMemo<HardwareQueryItem[]>(() => assets.map((asset) => {
+    const context = assetHardwareContext(asset);
+    return {
+      asset,
+      cpu: context.extracted.cpu || "",
+      graphics: context.extracted.graphics || "",
+      memoryGb: hardwareMemoryBytes(asset) / (1024 ** 3),
+      diskGb: hardwareDiskBytes(asset) / (1024 ** 3),
+    };
+  }), [assets]);
+  const matchedHardwareQueryItems = useMemo(() => hardwareQueryItems.filter((item) => {
+    if (hardwareQuery.departments.length && !hardwareQuery.departments.includes(item.asset.department || "未填写")) return false;
+    if (hardwareQuery.statuses.length && !hardwareQuery.statuses.includes(item.asset.status)) return false;
+    if (hardwareQuery.ownerMode === "assigned" && !item.asset.ownerName.trim()) return false;
+    if (hardwareQuery.ownerMode === "unassigned" && item.asset.ownerName.trim()) return false;
+    if (hardwareQuery.ownerKeyword.trim() && !item.asset.ownerName.toLowerCase().includes(hardwareQuery.ownerKeyword.trim().toLowerCase())) return false;
+    if (!hardwareTextMatches(item.graphics, hardwareQuery.graphicsTerms, hardwareQuery.graphicsMode)) return false;
+    if (!hardwareTextMatches(item.cpu, hardwareQuery.cpuTerms, hardwareQuery.cpuMode)) return false;
+    if (hardwareQuery.minMemoryGb && item.memoryGb < hardwareQuery.minMemoryGb * 0.92) return false;
+    if (hardwareQuery.minDiskGb && item.diskGb < hardwareQuery.minDiskGb * 0.92) return false;
+    return true;
+  }), [hardwareQuery, hardwareQueryItems]);
+  const matchedHardwareQueryAssets = useMemo(
+    () => matchedHardwareQueryItems.map((item) => item.asset),
+    [matchedHardwareQueryItems]
+  );
+  const hardwareQueryDepartmentRows = useMemo(() => analysisDistribution(matchedHardwareQueryItems.map((item) => item.asset.department || "未填写")), [matchedHardwareQueryItems]);
+  const hardwareDepartmentOptions = useMemo(() => analysisDistribution(assets.map((asset) => asset.department || "未填写")).map((row) => ({ label: `${row.label}（${row.value}）`, value: row.label })), [assets]);
+  const hardwareGraphicsOptions = useMemo(() => analysisDistribution(hardwareQueryItems.map((item) => item.graphics).filter(Boolean)).map((row) => ({ label: `${row.label}（${row.value}）`, value: row.label })), [hardwareQueryItems]);
+  const hardwareCpuOptions = useMemo(() => analysisDistribution(hardwareQueryItems.map((item) => item.cpu).filter(Boolean)).map((row) => ({ label: `${row.label}（${row.value}）`, value: row.label })), [hardwareQueryItems]);
+  const hardwareQueryConditions = [
+    ...hardwareQuery.departments.map((value) => `部门：${value}`),
+    ...hardwareQuery.statuses.map((value) => `状态：${statusLabel(value)}`),
+    ...(hardwareQuery.ownerMode ? [`使用人：${hardwareQuery.ownerMode === "assigned" ? "已分配" : "未分配"}`] : []),
+    ...(hardwareQuery.ownerKeyword.trim() ? [`使用人包含：${hardwareQuery.ownerKeyword.trim()}`] : []),
+    ...hardwareQuery.graphicsTerms.map((value) => `显卡${hardwareQuery.graphicsMode === "exact" ? "等于" : "包含"}：${value}`),
+    ...hardwareQuery.cpuTerms.map((value) => `CPU${hardwareQuery.cpuMode === "exact" ? "等于" : "包含"}：${value}`),
+    ...(hardwareQuery.minMemoryGb ? [`内存 ≥ ${hardwareQuery.minMemoryGb} GB`] : []),
+    ...(hardwareQuery.minDiskGb ? [`硬盘 ≥ ${hardwareQuery.minDiskGb} GB`] : []),
+  ];
+  const hardwareQueryTags: ReactNode[] = [
+    ...hardwareQuery.departments.map((item) => <Tag key={`department:${item}`} closable color="blue" onClose={() => setHardwareQuery((value) => ({ ...value, departments: value.departments.filter((entry) => entry !== item) }))}>部门：{item}</Tag>),
+    ...hardwareQuery.statuses.map((item) => <Tag key={`status:${item}`} closable color="blue" onClose={() => setHardwareQuery((value) => ({ ...value, statuses: value.statuses.filter((entry) => entry !== item) }))}>状态：{statusLabel(item)}</Tag>),
+    ...(hardwareQuery.ownerMode ? [<Tag key="owner-mode" closable color="blue" onClose={() => setHardwareQuery((value) => ({ ...value, ownerMode: undefined }))}>使用人：{hardwareQuery.ownerMode === "assigned" ? "已分配" : "未分配"}</Tag>] : []),
+    ...(hardwareQuery.ownerKeyword.trim() ? [<Tag key="owner-keyword" closable color="blue" onClose={() => setHardwareQuery((value) => ({ ...value, ownerKeyword: "" }))}>使用人包含：{hardwareQuery.ownerKeyword.trim()}</Tag>] : []),
+    ...hardwareQuery.graphicsTerms.map((item) => <Tag key={`graphics:${item}`} closable color="blue" onClose={() => setHardwareQuery((value) => ({ ...value, graphicsTerms: value.graphicsTerms.filter((entry) => entry !== item) }))}>显卡{hardwareQuery.graphicsMode === "exact" ? "等于" : "包含"}：{item}</Tag>),
+    ...hardwareQuery.cpuTerms.map((item) => <Tag key={`cpu:${item}`} closable color="blue" onClose={() => setHardwareQuery((value) => ({ ...value, cpuTerms: value.cpuTerms.filter((entry) => entry !== item) }))}>CPU{hardwareQuery.cpuMode === "exact" ? "等于" : "包含"}：{item}</Tag>),
+    ...(hardwareQuery.minMemoryGb ? [<Tag key="min-memory" closable color="blue" onClose={() => setHardwareQuery((value) => ({ ...value, minMemoryGb: undefined }))}>内存 ≥ {hardwareQuery.minMemoryGb} GB</Tag>] : []),
+    ...(hardwareQuery.minDiskGb ? [<Tag key="min-disk" closable color="blue" onClose={() => setHardwareQuery((value) => ({ ...value, minDiskGb: undefined }))}>硬盘 ≥ {hardwareQuery.minDiskGb} GB</Tag>] : []),
+  ];
   const issues = useMemo(() => detectHardwareIssues(assets), [assets]);
   const groupOptions = useMemo(
     () =>
@@ -3624,6 +3920,207 @@ const AnalysisWorkspace = () => {
       .map((issue) => issue.duplicateGroupKey)
       .filter(Boolean)
   ).size;
+  const departmentRows = useMemo(() => analysisDistribution(allAssets.map((asset) => asset.department)), [allAssets]);
+  const statusRows = useMemo(
+    () => analysisDistribution(allAssets.map((asset) => STATUS_OPTIONS.find((item) => item.value === asset.status)?.label || asset.status)),
+    [allAssets]
+  );
+  const platformRows = useMemo(
+    () => analysisDistribution(assets.map((asset) => assetHardwareContext(asset).extracted.platform || "未采集"), "未采集"),
+    [assets]
+  );
+  const issueGroupRows = useMemo(() => analysisDistribution(issues.map((issue) => issueGroup(issue.type))), [issues]);
+  const totalPurchase = allAssets.reduce((total, asset) => total + Math.max(0, Number(asset.purchasePrice || 0)), 0);
+  const totalResidual = allAssets.reduce((total, asset) => total + Math.max(0, Number(asset.residualValue || 0)), 0);
+  const valuedAssets = allAssets.filter((asset) => Number(asset.purchasePrice || 0) > 0 || Number(asset.residualValue || 0) > 0);
+  const fullyValuedAssets = allAssets.filter((asset) => Number(asset.purchasePrice || 0) > 0 && Number(asset.residualValue || 0) > 0);
+  const knownDepreciation = fullyValuedAssets.reduce(
+    (total, asset) => total + Math.max(0, Number(asset.purchasePrice) - Number(asset.residualValue)),
+    0
+  );
+  const departmentValueRows = useMemo(() => {
+    const totals = new Map<string, { count: number; value: number }>();
+    allAssets.forEach((asset) => {
+      const label = asset.department.trim() || "未填写";
+      const current = totals.get(label) || { count: 0, value: 0 };
+      totals.set(label, { count: current.count + 1, value: current.value + Math.max(0, Number(asset.residualValue || 0)) });
+    });
+    return Array.from(totals, ([label, value]) => ({ label, value: value.value, meta: `${formatMoney(value.value)} · ${value.count} 条` }))
+      .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label, "zh-CN"));
+  }, [allAssets]);
+  const trend = trendsQuery.data?.collection || [];
+  const trendMax = Math.max(...trend.map((item) => item.count), 1);
+  const openDrillDown = (title: string, rows: Asset[]) => setDrillDown({ title, assets: rows });
+  const openAnalysisAsset = (asset: Asset, candidates?: Asset[]) => {
+    setDetailAssets(candidates?.length ? candidates : (drillDown?.assets.length ? drillDown.assets : assets));
+    setDetailAsset(asset);
+    setDrillDown(null);
+  };
+  const analysisAssetLink = (asset: Asset, candidates?: Asset[]) => (
+    <Button type="link" className="npcink-v3-link" onClick={() => openAnalysisAsset(asset, candidates)}>
+      {asset.assetNumber || asset.name || asset.uuid}
+    </Button>
+  );
+  const detailAssetIndex = detailAsset ? detailAssets.findIndex((asset) => asset.uuid === detailAsset.uuid) : -1;
+  const previousDetailAsset = detailAssetIndex > 0 ? detailAssets[detailAssetIndex - 1] : undefined;
+  const nextDetailAsset = detailAssetIndex >= 0 && detailAssetIndex < detailAssets.length - 1 ? detailAssets[detailAssetIndex + 1] : undefined;
+  const collectionRows = useMemo(
+    () => assets.map((asset) => ({ asset, band: collectionAgeBand(asset, analysisNow), days: collectionAgeDays(asset, analysisNow) })),
+    [analysisNow, assets]
+  );
+  const collectionBandRows = useMemo(
+    () => Object.entries(COLLECTION_BAND_META).map(([key, meta]) => ({
+      label: meta.label,
+      value: collectionRows.filter((row) => row.band === key).length,
+    })),
+    [collectionRows]
+  );
+  const departmentCoverageRows = useMemo(() => {
+    const groups = new Map<string, { total: number; connected: number }>();
+    assets.forEach((asset) => {
+      const label = asset.department.trim() || "未填写";
+      const current = groups.get(label) || { total: 0, connected: 0 };
+      groups.set(label, {
+        total: current.total + 1,
+        connected: current.connected + ((collectionAgeDays(asset, analysisNow) ?? Number.POSITIVE_INFINITY) <= 30 ? 1 : 0),
+      });
+    });
+    return Array.from(groups, ([label, group]) => ({
+      label,
+      value: group.total ? Math.round((group.connected / group.total) * 100) : 0,
+      meta: `${group.connected}/${group.total} · ${group.total ? Math.round((group.connected / group.total) * 100) : 0}%`,
+    })).sort((a, b) => a.value - b.value || a.label.localeCompare(b.label, "zh-CN"));
+  }, [assets]);
+  const completenessRows = useMemo<AssetCompletenessRow[]>(() => assets.map((asset) => {
+    const context = assetHardwareContext(asset);
+    const checks = [
+      { label: "资产编号", complete: Boolean(asset.assetNumber.trim()) },
+      { label: "资产名称", complete: Boolean(asset.name.trim()) },
+      { label: "具体部门", complete: Boolean(asset.department.trim() && !["未分配", "默认"].includes(asset.department.trim())) },
+      ...(asset.status === "active" ? [{ label: "责任人", complete: Boolean(asset.ownerName.trim()) }] : []),
+      { label: "采集快照", complete: Boolean(asset.latestObservation?.observedAt) },
+      { label: "CPU", complete: Boolean(context.extracted.cpu) },
+      { label: "内存", complete: hardwareMemoryBytes(asset) > 0 },
+      { label: "硬盘", complete: hardwareDiskBytes(asset) > 0 },
+      { label: "采购价", complete: Number(asset.purchasePrice || 0) > 0 },
+      { label: "残值", complete: Number(asset.residualValue || 0) > 0 },
+    ];
+    const missing = checks.filter((check) => !check.complete).map((check) => check.label);
+    return { asset, missing, score: Math.round(((checks.length - missing.length) / checks.length) * 100) };
+  }).sort((a, b) => a.score - b.score || a.asset.assetNumber.localeCompare(b.asset.assetNumber, "zh-CN")), [assets]);
+  const completenessFieldRows = useMemo(() => {
+    const fields = new Map<string, number>();
+    completenessRows.forEach((row) => row.missing.forEach((field) => fields.set(field, (fields.get(field) || 0) + 1)));
+    return Array.from(fields, ([label, missing]) => ({
+      label,
+      value: assets.length ? Math.round(((assets.length - missing) / assets.length) * 100) : 0,
+      meta: `${assets.length - missing}/${assets.length} · 缺 ${missing}`,
+    })).sort((a, b) => a.value - b.value || a.label.localeCompare(b.label, "zh-CN"));
+  }, [assets.length, completenessRows]);
+  const averageCompleteness = completenessRows.length
+    ? Math.round(completenessRows.reduce((total, row) => total + row.score, 0) / completenessRows.length)
+    : 0;
+  const renewalSettings = settingsQuery.data || {
+    renewalAgeYears: 5,
+    renewalMinMemoryGb: 8,
+    renewalMinDiskGb: 256,
+    renewalMaxResidualRate: 20,
+  };
+  const renewalRows = useMemo<RenewalCandidateRow[]>(() => assets.map((asset) => {
+    const reasons: string[] = [];
+    const purchaseDate = parseDateValue(assetPurchaseDateText(asset));
+    if (purchaseDate) {
+      const years = (analysisNow - purchaseDate.getTime()) / (365.25 * 86400000);
+      if (years >= renewalSettings.renewalAgeYears) reasons.push(`购置约 ${years.toFixed(1)} 年`);
+    }
+    const memoryGb = hardwareMemoryBytes(asset) / (1024 ** 3);
+    if (memoryGb > 0 && memoryGb < renewalSettings.renewalMinMemoryGb) reasons.push(`内存 ${Number(memoryGb.toFixed(1))} GB`);
+    const diskGb = hardwareDiskBytes(asset) / (1024 ** 3);
+    if (diskGb > 0 && diskGb < renewalSettings.renewalMinDiskGb * 0.92) reasons.push(`硬盘 ${Number(diskGb.toFixed(0))} GB`);
+    if (asset.status === "maintenance") reasons.push("当前处于维护状态");
+    if (asset.purchasePrice > 0 && asset.residualValue > 0) {
+      const residualRate = (asset.residualValue / asset.purchasePrice) * 100;
+      if (residualRate <= renewalSettings.renewalMaxResidualRate) reasons.push(`残值率 ${Math.round(residualRate)}%`);
+    }
+    return { asset, reasons };
+  }).filter((row) => row.reasons.length > 0).sort((a, b) => b.reasons.length - a.reasons.length), [analysisNow, assets, renewalSettings.renewalAgeYears, renewalSettings.renewalMaxResidualRate, renewalSettings.renewalMinDiskGb, renewalSettings.renewalMinMemoryGb]);
+  const hardwareChangeRows = useMemo<HardwareChangeRow[]>(() => {
+    const observationsByAsset = new Map<number, AssetObservation[]>();
+    (observationsQuery.data || []).forEach((observation) => {
+      observationsByAsset.set(observation.assetId, [...(observationsByAsset.get(observation.assetId) || []), observation]);
+    });
+    const changes: HardwareChangeRow[] = [];
+    assets.forEach((asset) => {
+      const observations = (observationsByAsset.get(asset.id) || [])
+        .sort((a, b) => b.observedAt.localeCompare(a.observedAt) || b.id - a.id)
+        .slice(0, 2);
+      if (observations.length < 2) return;
+      const latest = observationComparableFields(observations[0]);
+      const previous = observationComparableFields(observations[1]);
+      Object.entries(latest).forEach(([field, after]) => {
+        const before = previous[field as keyof typeof previous];
+        if (!before || !after || before.trim().toLowerCase() === after.trim().toLowerCase()) return;
+        changes.push({
+          key: `${asset.uuid}:${field}`,
+          asset,
+          field,
+          before,
+          after,
+          observedAt: observations[0].observedAt,
+        });
+      });
+    });
+    return changes.sort((a, b) => b.observedAt.localeCompare(a.observedAt) || a.asset.assetNumber.localeCompare(b.asset.assetNumber, "zh-CN"));
+  }, [assets, observationsQuery.data]);
+  const visibleHardwareChanges = selectedChangeType
+    ? hardwareChangeRows.filter((row) => row.field === selectedChangeType)
+    : hardwareChangeRows;
+  const hardwareChangeTypes = Array.from(new Set(hardwareChangeRows.map((row) => row.field))).map((value) => ({ label: value, value }));
+  const selectedRenewalRows = renewalRows.filter((row) => selectedRenewalUuids.has(row.asset.uuid));
+  const selectedRenewalPurchase = selectedRenewalRows.reduce((total, row) => total + Math.max(0, row.asset.purchasePrice || 0), 0);
+  const selectedRenewalResidual = selectedRenewalRows.reduce((total, row) => total + Math.max(0, row.asset.residualValue || 0), 0);
+  const renewalDepartmentPlanRows = useMemo(() => {
+    const groups = new Map<string, { count: number; purchase: number; residual: number }>();
+    selectedRenewalRows.forEach(({ asset }) => {
+      const label = asset.department.trim() || "未填写";
+      const current = groups.get(label) || { count: 0, purchase: 0, residual: 0 };
+      groups.set(label, {
+        count: current.count + 1,
+        purchase: current.purchase + Math.max(0, asset.purchasePrice || 0),
+        residual: current.residual + Math.max(0, asset.residualValue || 0),
+      });
+    });
+    return Array.from(groups, ([label, value]) => ({
+      label,
+      value: value.purchase,
+      meta: `${value.count} 台 · 历史采购 ${formatMoney(value.purchase)} · 残值 ${formatMoney(value.residual)}`,
+    })).sort((a, b) => b.value - a.value);
+  }, [selectedRenewalRows]);
+  const exportRenewalPlan = () => {
+    const rows = [["资产编号", "资产名称", "部门", "状态", "候选依据", "历史采购价", "现有残值", "参考净额"], ...selectedRenewalRows.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, statusLabel(row.asset.status), row.reasons.join("、"), String(row.asset.purchasePrice || 0), String(row.asset.residualValue || 0), String(Math.max(0, (row.asset.purchasePrice || 0) - (row.asset.residualValue || 0)))])];
+    downloadCsvFile(`设备更新计划草案-${formatDateInput(new Date().toISOString())}.csv`, rows.map((row) => row.map(csvCell).join(",")).join("\n"));
+  };
+  const exportAnalysisCsv = () => {
+    let filename = `设备分析-${activeTab}-${formatDateInput(new Date().toISOString())}.csv`;
+    let rows: string[][];
+    if (activeTab === "query") {
+      rows = [["使用人", "部门", "资产编号", "资产名称", "显卡", "CPU", "内存GB", "硬盘GB", "状态", "最后采集"], ...matchedHardwareQueryItems.map((item) => [item.asset.ownerName, item.asset.department, item.asset.assetNumber, item.asset.name, item.graphics, item.cpu, item.memoryGb ? String(Number(item.memoryGb.toFixed(1))) : "", item.diskGb ? String(Number(item.diskGb.toFixed(1))) : "", statusLabel(item.asset.status), item.asset.latestObservation?.observedAt || ""])];
+    } else if (activeTab === "collection") {
+      rows = [["资产编号", "资产名称", "部门", "采集状态", "距今天数", "最后采集"], ...collectionRows.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, COLLECTION_BAND_META[row.band].label, row.days === null ? "" : String(row.days), row.asset.latestObservation?.observedAt || ""])];
+    } else if (activeTab === "quality") {
+      rows = [["资产编号", "资产名称", "部门", "完整度", "缺失项目"], ...completenessRows.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, `${row.score}%`, row.missing.join("、")])];
+    } else if (activeTab === "changes") {
+      rows = [["资产编号", "资产名称", "部门", "变化字段", "变化前", "变化后", "采集时间"], ...visibleHardwareChanges.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, row.field, row.before, row.after, row.observedAt])];
+    } else if (activeTab === "renewal") {
+      rows = [["资产编号", "资产名称", "部门", "状态", "候选依据", "采购价", "残值"], ...renewalRows.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, statusLabel(row.asset.status), row.reasons.join("、"), String(row.asset.purchasePrice || 0), String(row.asset.residualValue || 0)])];
+    } else if (activeTab === "value") {
+      rows = [["资产编号", "资产名称", "类型", "部门", "采购价", "残值"], ...allAssets.map((asset) => [asset.assetNumber, asset.name, assetTypeLabel(asset.assetType), asset.department, String(asset.purchasePrice || 0), String(asset.residualValue || 0)])];
+    } else {
+      rows = [["资产编号", "资产名称", "类型", "部门", "状态", "最后采集"], ...allAssets.map((asset) => [asset.assetNumber, asset.name, assetTypeLabel(asset.assetType), asset.department, statusLabel(asset.status), asset.latestObservation?.observedAt || ""])];
+      filename = `设备分析-管理摘要-${formatDateInput(new Date().toISOString())}.csv`;
+    }
+    downloadCsvFile(filename, rows.map((row) => row.map(csvCell).join(",")).join("\n"));
+  };
 
   return (
     <div className="npcink-v3-analysis-workspace">
@@ -3631,9 +4128,10 @@ const AnalysisWorkspace = () => {
         <div>
           <Title level={3}>分析概览</Title>
           <Text type="secondary">
-            统计所有未归档电脑。问题由当前资产与最近采集快照实时计算，不写回处理状态。
+            只读统计当前资产与采集快照，不写回问题状态，也不在分析页修改资产。
           </Text>
         </div>
+        <Button onClick={exportAnalysisCsv}>导出当前分析</Button>
       </div>
       {assetsQuery.isError ? (
         <Alert type="error" showIcon message="分析数据加载失败" description="请刷新页面后重试。" />
@@ -3651,7 +4149,200 @@ const AnalysisWorkspace = () => {
           </div>
         ))}
       </div>
-      <div className="npcink-v3-analysis-issues">
+      <Tabs
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as AnalysisTabKey)}
+        items={[
+          { key: "summary", label: "管理摘要" },
+          { key: "query", label: "组合查询" },
+          { key: "collection", label: "采集健康" },
+          { key: "quality", label: "数据完整度" },
+          { key: "changes", label: "硬件变化" },
+          { key: "renewal", label: "更新候选" },
+          { key: "value", label: "资产价值" },
+        ]}
+        className="npcink-v3-analysis-tabs"
+      />
+      {activeTab === "summary" ? (
+        <div className="npcink-v3-analysis-grid">
+          <section className="npcink-v3-analysis-panel is-wide">
+            <div className="npcink-v3-analysis-panel-head">
+              <div><Title level={4}>近 30 天采集趋势</Title><Text type="secondary">按客户端采集时间统计接收快照数量。</Text></div>
+              <strong>{trend.reduce((total, item) => total + item.count, 0)} 次</strong>
+            </div>
+            {trendsQuery.isError ? <Alert type="error" showIcon message="采集趋势加载失败" /> : (
+              <div className="npcink-v3-analysis-trend" aria-label="近 30 天采集数量">
+                {trend.map((item, index) => (
+                  <div key={item.date} title={`${item.date}：${item.count} 次`}>
+                    <i style={{ height: `${Math.max((item.count / trendMax) * 100, item.count ? 6 : 1)}%` }} />
+                    {(index === 0 || index === trend.length - 1 || index % 7 === 0) ? <span>{item.date.slice(5)}</span> : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+          <section className="npcink-v3-analysis-panel"><Title level={4}>全部资产部门分布</Title><Text type="secondary">统计 {allAssets.length} 条未归档电脑和自定义资产。</Text><AnalysisDistribution rows={departmentRows.slice(0, 8)} onSelect={(row) => openDrillDown(`${row.label}资产`, allAssets.filter((asset) => (asset.department.trim() || "未填写") === row.label))} /></section>
+          <section className="npcink-v3-analysis-panel"><Title level={4}>全部资产状态</Title><Text type="secondary">与左侧部门分布使用相同口径。</Text><AnalysisDistribution rows={statusRows} onSelect={(row) => openDrillDown(`${row.label}资产`, allAssets.filter((asset) => (STATUS_OPTIONS.find((item) => item.value === asset.status)?.label || asset.status) === row.label))} /></section>
+        </div>
+      ) : null}
+      {activeTab === "query" ? (
+        <div className="npcink-v3-analysis-grid">
+          <section className="npcink-v3-analysis-panel is-wide">
+            <div className="npcink-v3-analysis-panel-head">
+              <div><Title level={4}>组合查询条件</Title><Text type="secondary">不同字段之间为 AND；部门、状态、显卡和 CPU 的多个值在字段内部为 OR。</Text></div>
+              {hardwareQueryConditions.length ? <Button onClick={() => setHardwareQuery(createEmptyHardwareQuery())}>重置条件</Button> : null}
+            </div>
+            <div className="npcink-v3-hardware-query-controls">
+              <div><Text type="secondary">部门</Text><Select mode="multiple" allowClear showSearch placeholder="选择部门" options={hardwareDepartmentOptions} value={hardwareQuery.departments} onChange={(departments) => setHardwareQuery((value) => ({ ...value, departments }))} filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())} /></div>
+              <div><Text type="secondary">状态</Text><Select mode="multiple" allowClear placeholder="选择状态" options={EDITABLE_STATUS_OPTIONS} value={hardwareQuery.statuses} onChange={(statuses) => setHardwareQuery((value) => ({ ...value, statuses }))} /></div>
+              <div><Text type="secondary">使用人</Text><Select allowClear placeholder="全部使用人" options={[{ label: "已分配", value: "assigned" }, { label: "未分配", value: "unassigned" }]} value={hardwareQuery.ownerMode} onChange={(ownerMode) => setHardwareQuery((value) => ({ ...value, ownerMode }))} /></div>
+              <div><div className="npcink-v3-query-label"><Text type="secondary">显卡</Text><Tooltip title="系列包含会忽略 NVIDIA、GeForce 等常见厂商词；精确型号要求规范化后的完整型号一致。"><QuestionCircleOutlined /></Tooltip></div><Select mode="tags" allowClear showSearch placeholder="例如：4060" options={hardwareGraphicsOptions} value={hardwareQuery.graphicsTerms} onChange={(graphicsTerms) => setHardwareQuery((value) => ({ ...value, graphicsTerms }))} filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())} /><Radio.Group size="small" optionType="button" buttonStyle="solid" options={[{ label: "系列包含", value: "contains" }, { label: "精确型号", value: "exact" }]} value={hardwareQuery.graphicsMode} onChange={(event) => setHardwareQuery((value) => ({ ...value, graphicsMode: event.target.value }))} /></div>
+              <div><div className="npcink-v3-query-label"><Text type="secondary">CPU</Text><Tooltip title="可输入多个 CPU 系列或型号；多个值之间按 OR 匹配。"><QuestionCircleOutlined /></Tooltip></div><Select mode="tags" allowClear showSearch placeholder="例如：i5-12400 或 Ryzen 7" options={hardwareCpuOptions} value={hardwareQuery.cpuTerms} onChange={(cpuTerms) => setHardwareQuery((value) => ({ ...value, cpuTerms }))} filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())} /><Radio.Group size="small" optionType="button" buttonStyle="solid" options={[{ label: "系列包含", value: "contains" }, { label: "精确型号", value: "exact" }]} value={hardwareQuery.cpuMode} onChange={(event) => setHardwareQuery((value) => ({ ...value, cpuMode: event.target.value }))} /></div>
+              <div><Text type="secondary">使用人姓名</Text><Input allowClear placeholder="姓名包含关键词" value={hardwareQuery.ownerKeyword} onChange={(event) => setHardwareQuery((value) => ({ ...value, ownerKeyword: event.target.value }))} /></div>
+              <div><Text type="secondary">最低内存</Text><InputNumber min={1} max={1024} placeholder="不限" addonAfter="GB" value={hardwareQuery.minMemoryGb} onChange={(value) => setHardwareQuery((query) => ({ ...query, minMemoryGb: value || undefined }))} /></div>
+              <div><Text type="secondary">最低硬盘</Text><InputNumber min={1} max={16384} placeholder="不限" addonAfter="GB" value={hardwareQuery.minDiskGb} onChange={(value) => setHardwareQuery((query) => ({ ...query, minDiskGb: value || undefined }))} /></div>
+            </div>
+            {hardwareQueryTags.length ? <div className="npcink-v3-query-conditions">{hardwareQueryTags}</div> : null}
+            <div className="npcink-v3-query-kpis">
+              <div><span>筛选范围</span><strong>{assets.length} 台</strong></div>
+              <div><span>命中设备</span><strong>{matchedHardwareQueryItems.length} 台</strong></div>
+              <div><span>涉及人员</span><strong>{new Set(matchedHardwareQueryItems.map((item) => item.asset.ownerName.trim()).filter(Boolean)).size} 人</strong></div>
+              <div><span>涉及部门</span><strong>{new Set(matchedHardwareQueryItems.map((item) => item.asset.department || "未填写")).size} 个</strong></div>
+            </div>
+          </section>
+          <section className="npcink-v3-analysis-panel is-wide npcink-v3-query-distribution"><Title level={4}>命中部门分布</Title><AnalysisDistribution rows={hardwareQueryDepartmentRows} onSelect={(row) => openDrillDown(`${row.label}命中设备`, matchedHardwareQueryItems.filter((item) => (item.asset.department || "未填写") === row.label).map((item) => item.asset))} emptyText="暂无命中部门" /></section>
+          <section className="npcink-v3-analysis-panel is-wide">
+            <div className="npcink-v3-analysis-panel-head"><div><Title level={4}>命中人员与设备</Title><Text type="secondary">点击资产编号可在当前分析页查看只读详情。</Text></div><Text type="secondary">共 {matchedHardwareQueryItems.length} 台</Text></div>
+            <Table<HardwareQueryItem>
+              rowKey={(item) => item.asset.uuid}
+              size="middle"
+              loading={assetsQuery.isLoading || assetsQuery.isFetching}
+              dataSource={matchedHardwareQueryItems}
+              pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 台` }}
+              columns={[
+                { title: "使用人", width: 120, render: (_, item) => item.asset.ownerName || <Text type="secondary">未分配</Text> },
+                { title: "部门", width: 120, render: (_, item) => item.asset.department || "未填写" },
+                { title: "资产", width: 110, render: (_, item) => analysisAssetLink(item.asset, matchedHardwareQueryAssets) },
+                { title: "显卡", dataIndex: "graphics", ellipsis: true },
+                { title: "CPU", dataIndex: "cpu", ellipsis: true },
+                { title: "配置", width: 150, render: (_, item) => `${item.memoryGb > 0 ? `${Number(item.memoryGb.toFixed(1))} GB` : "-"} / ${item.diskGb > 0 ? `${Number(item.diskGb.toFixed(0))} GB` : "-"}` },
+                { title: "状态", width: 90, render: (_, item) => statusLabel(item.asset.status) },
+                { title: "最后采集", width: 180, render: (_, item) => formatDate(item.asset.latestObservation?.observedAt) },
+                { title: "操作", width: 80, fixed: "right", render: (_, item) => <Button type="link" className="npcink-v3-link" onClick={() => openAnalysisAsset(item.asset, matchedHardwareQueryAssets)}>查看</Button> },
+              ]}
+              scroll={{ x: 1040 }}
+              locale={{ emptyText: <Empty description="没有符合全部条件的电脑" /> }}
+            />
+          </section>
+        </div>
+      ) : null}
+      {activeTab === "collection" ? (
+        <div className="npcink-v3-analysis-grid">
+          <section className="npcink-v3-analysis-panel"><Title level={4}>采集新鲜度</Title><AnalysisDistribution rows={collectionBandRows} onSelect={(row) => openDrillDown(row.label, collectionRows.filter((item) => COLLECTION_BAND_META[item.band].label === row.label).map((item) => item.asset))} /></section>
+          <section className="npcink-v3-analysis-panel"><Title level={4}>部门 30 天采集覆盖率</Title><Text type="secondary">仅把最近 30 天内有采集的电脑计为新鲜覆盖。</Text><AnalysisDistribution rows={departmentCoverageRows} onSelect={(row) => openDrillDown(`${row.label}电脑`, assets.filter((asset) => (asset.department.trim() || "未填写") === row.label))} /></section>
+          <section className="npcink-v3-analysis-panel is-wide">
+            <Title level={4}>采集待关注设备</Title>
+            <Table
+              rowKey={(row) => row.asset.uuid}
+              size="middle"
+              dataSource={collectionRows.filter((row) => !["fresh", "aging"].includes(row.band))}
+              pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
+              columns={[
+                { title: "资产", render: (_, row) => analysisAssetLink(row.asset) },
+                { title: "部门", render: (_, row) => row.asset.department || "-", width: 150 },
+                { title: "采集状态", width: 140, render: (_, row) => <Tag color={COLLECTION_BAND_META[row.band].color}>{COLLECTION_BAND_META[row.band].label}</Tag> },
+                { title: "距今", width: 120, render: (_, row) => row.days === null ? "从未采集" : `${row.days} 天` },
+                { title: "最后采集", width: 180, render: (_, row) => formatDate(row.asset.latestObservation?.observedAt) },
+              ]}
+              locale={{ emptyText: <Empty description="所有电脑最近 30 天内均有采集" /> }}
+            />
+          </section>
+        </div>
+      ) : null}
+      {activeTab === "quality" ? (
+        <div className="npcink-v3-analysis-grid">
+          <section className="npcink-v3-analysis-panel"><Title level={4}>平均完整度</Title><div className="npcink-v3-analysis-score">{averageCompleteness}%</div><Text type="secondary">按基础资料、采集硬件和金额字段计算。</Text></section>
+          <section className="npcink-v3-analysis-panel"><Title level={4}>字段覆盖率</Title><AnalysisDistribution rows={completenessFieldRows} onSelect={(row) => openDrillDown(`缺少${row.label}`, completenessRows.filter((item) => item.missing.includes(row.label)).map((item) => item.asset))} /></section>
+          <section className="npcink-v3-analysis-panel is-wide"><Title level={4}>资料待补设备</Title><Table rowKey={(row) => row.asset.uuid} size="middle" dataSource={completenessRows.filter((row) => row.missing.length)} pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }} columns={[
+            { title: "资产", render: (_, row) => analysisAssetLink(row.asset) },
+            { title: "部门", render: (_, row) => row.asset.department || "-", width: 150 },
+            { title: "完整度", dataIndex: "score", width: 110, render: (score) => <Tag color={score >= 80 ? "green" : score >= 60 ? "orange" : "red"}>{score}%</Tag> },
+            { title: "缺失项目", render: (_, row) => row.missing.join("、") },
+          ]} locale={{ emptyText: <Empty description="资料完整" /> }} /></section>
+        </div>
+      ) : null}
+      {activeTab === "changes" ? (
+        <div className="npcink-v3-analysis-grid">
+          <section className="npcink-v3-analysis-panel is-wide">
+            <div className="npcink-v3-analysis-panel-head">
+              <div><Title level={4}>最近两次有效采集变化</Title><Text type="secondary">仅当变化前后字段均存在时展示，缺失字段不视为硬件移除。</Text></div>
+              <Select allowClear placeholder="变化类型" options={hardwareChangeTypes} value={selectedChangeType} onChange={setSelectedChangeType} className="npcink-v3-filter" />
+            </div>
+          </section>
+          <section className="npcink-v3-analysis-panel is-wide">
+            {observationsQuery.isError ? <Alert type="error" showIcon message="历史采集加载失败" /> : null}
+            <Table<HardwareChangeRow>
+              rowKey="key"
+              size="middle"
+              loading={observationsQuery.isLoading || observationsQuery.isFetching}
+              dataSource={visibleHardwareChanges}
+              pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 项变化` }}
+              columns={[
+                { title: "资产", width: 130, render: (_, row) => analysisAssetLink(row.asset) },
+                { title: "部门", width: 120, render: (_, row) => row.asset.department || "-" },
+                { title: "字段", dataIndex: "field", width: 120 },
+                { title: "变化前", dataIndex: "before" },
+                { title: "变化后", dataIndex: "after" },
+                { title: "采集时间", dataIndex: "observedAt", width: 180, render: formatDate },
+              ]}
+              scroll={{ x: 900 }}
+              locale={{ emptyText: <Empty description="最近两次采集未发现可确认的硬件变化" /> }}
+            />
+          </section>
+        </div>
+      ) : null}
+      {activeTab === "renewal" ? (
+        <div className="npcink-v3-analysis-grid">
+          <section className="npcink-v3-analysis-panel is-wide"><div className="npcink-v3-analysis-panel-head"><div><Title level={4}>设备更新候选</Title><Text type="secondary">仅依据设置阈值列出候选，不代表必须淘汰。</Text></div><strong>{renewalRows.length} 台</strong></div><div className="npcink-v3-threshold-summary"><span>年限 ≥ {renewalSettings.renewalAgeYears} 年</span><span>内存 &lt; {renewalSettings.renewalMinMemoryGb} GB</span><span>硬盘 &lt; {renewalSettings.renewalMinDiskGb} GB</span><span>残值率 ≤ {renewalSettings.renewalMaxResidualRate}%</span></div></section>
+          <section className="npcink-v3-analysis-panel is-wide"><Table rowKey={(row) => row.asset.uuid} size="middle" loading={settingsQuery.isLoading} dataSource={renewalRows} rowSelection={{ selectedRowKeys: Array.from(selectedRenewalUuids), onChange: (keys) => setSelectedRenewalUuids(new Set(keys.map(String))) }} pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 台候选` }} columns={[
+            { title: "资产", render: (_, row) => analysisAssetLink(row.asset) },
+            { title: "部门", render: (_, row) => row.asset.department || "-", width: 150 },
+            { title: "状态", render: (_, row) => statusLabel(row.asset.status), width: 100 },
+            { title: "候选依据", render: (_, row) => row.reasons.map((reason) => <Tag key={reason} color="orange">{reason}</Tag>) },
+          ]} locale={{ emptyText: <Empty description="暂无符合阈值的更新候选" /> }} /></section>
+          <section className="npcink-v3-analysis-panel is-wide">
+            <div className="npcink-v3-analysis-panel-head">
+              <div><Title level={4}>更新计划草案</Title><Text type="secondary">勾选候选设备后按部门汇总；金额来自现有资产事实，不是未来采购报价。</Text></div>
+              <Space><Button disabled={!selectedRenewalRows.length} onClick={() => setSelectedRenewalUuids(new Set())}>清空选择</Button><Button type="primary" disabled={!selectedRenewalRows.length} onClick={exportRenewalPlan}>导出计划草案</Button></Space>
+            </div>
+            <div className="npcink-v3-value-kpis npcink-v3-renewal-plan-kpis">
+              <div><span>已选设备</span><strong>{selectedRenewalRows.length} 台</strong></div>
+              <div><span>历史采购价</span><strong>{formatMoney(selectedRenewalPurchase)}</strong></div>
+              <div><span>现有残值</span><strong>{formatMoney(selectedRenewalResidual)}</strong></div>
+              <div><span>参考净额</span><strong>{formatMoney(Math.max(0, selectedRenewalPurchase - selectedRenewalResidual))}</strong><small>历史采购价 - 现有残值</small></div>
+            </div>
+            <AnalysisDistribution rows={renewalDepartmentPlanRows} emptyText="请先勾选更新候选设备" />
+          </section>
+        </div>
+      ) : null}
+      {activeTab === "value" ? (
+        <div className="npcink-v3-analysis-grid">
+          <section className="npcink-v3-analysis-panel is-wide">
+            <div className="npcink-v3-value-kpis">
+              <div><span>采购价合计</span><strong>{formatMoney(totalPurchase)}</strong></div>
+              <div><span>已登记残值</span><strong>{formatMoney(totalResidual)}</strong></div>
+              <div><span>已知折价</span><strong>{formatMoney(knownDepreciation)}</strong></div>
+              <div><span>估值覆盖</span><strong>{allAssets.length ? `${Math.round((valuedAssets.length / allAssets.length) * 100)}%` : "-"}</strong><small>{valuedAssets.length}/{allAssets.length} 条有金额</small></div>
+            </div>
+          </section>
+          <section className="npcink-v3-analysis-panel is-wide"><Title level={4}>全部资产部门残值分布</Title><Text type="secondary">汇总 {allAssets.length} 条未归档电脑和自定义资产中已登记的残值，不对缺失金额做推算。</Text><AnalysisDistribution rows={departmentValueRows} emptyText="暂无残值数据" /></section>
+        </div>
+      ) : null}
+      {activeTab === "quality" ? <div className="npcink-v3-analysis-grid">
+        <section className="npcink-v3-analysis-panel"><Title level={4}>操作系统分布</Title><AnalysisDistribution rows={platformRows} /></section>
+        <section className="npcink-v3-analysis-panel"><Title level={4}>问题分组</Title><AnalysisDistribution rows={issueGroupRows} emptyText="暂无硬件问题" /></section>
+      </div> : null}
+      {activeTab === "quality" ? <div className="npcink-v3-analysis-issues">
         <div className="npcink-v3-analysis-issues-head">
           <div>
             <Title level={4}>问题清单</Title>
@@ -3720,7 +4411,42 @@ const AnalysisWorkspace = () => {
             ),
           }}
         />
-      </div>
+      </div> : null}
+      <Modal
+        title={drillDown?.title || "分析下钻"}
+        open={Boolean(drillDown)}
+        onCancel={() => setDrillDown(null)}
+        footer={null}
+        width="min(900px, calc(100vw - 40px))"
+        destroyOnClose
+      >
+        <Table
+          rowKey="uuid"
+          size="middle"
+          dataSource={drillDown?.assets || []}
+          pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
+          columns={[
+            { title: "资产", render: (_, asset) => analysisAssetLink(asset) },
+            { title: "名称", dataIndex: "name" },
+            { title: "部门", dataIndex: "department", width: 140 },
+            { title: "状态", dataIndex: "status", width: 100, render: statusLabel },
+            { title: "最后采集", width: 180, render: (_, asset) => formatDate(asset.latestObservation?.observedAt) },
+          ]}
+        />
+      </Modal>
+      <DetailDrawer
+        uuid={detailAsset?.uuid || null}
+        open={Boolean(detailAsset)}
+        initialAsset={detailAsset}
+        departmentOptions={normalizeDepartmentList(settingsQuery.data?.departments || [])}
+        readOnly
+        previousAsset={previousDetailAsset}
+        nextAsset={nextDetailAsset}
+        navigationLabel={detailAssetIndex >= 0 ? `当前筛选结果第 ${detailAssetIndex + 1} / ${detailAssets.length} 台` : undefined}
+        onNavigate={setDetailAsset}
+        onClose={() => setDetailAsset(null)}
+        onArchive={() => undefined}
+      />
     </div>
   );
 };
@@ -3839,6 +4565,24 @@ const SettingsWorkspace = () => {
                 className="npcink-v3-settings-wide"
               >
                 <Input placeholder={RestUrl} />
+              </Form.Item>
+            </div>
+          </div>
+          <div className="npcink-v3-settings-section">
+            <Title level={4}>更新候选规则</Title>
+            <Text type="secondary">分析页只根据这些阈值列出候选，不会自动修改状态或归档设备。</Text>
+            <div className="npcink-v3-settings-grid npcink-v3-settings-grid-four">
+              <Form.Item name="renewalAgeYears" label="使用年限阈值（年）" extra="有购置日期且达到该年限时进入候选。">
+                <InputNumber min={1} max={20} precision={0} addonAfter="年" />
+              </Form.Item>
+              <Form.Item name="renewalMinMemoryGb" label="最低内存（GB）" extra="已采集内存低于该容量时进入候选。">
+                <InputNumber min={1} max={512} precision={0} addonAfter="GB" />
+              </Form.Item>
+              <Form.Item name="renewalMinDiskGb" label="最低硬盘（GB）" extra="已采集硬盘容量低于该值时进入候选。">
+                <InputNumber min={1} max={8192} precision={0} addonAfter="GB" />
+              </Form.Item>
+              <Form.Item name="renewalMaxResidualRate" label="低残值率阈值（%）" extra="采购价和残值均存在时参与判断。">
+                <InputNumber min={0} max={100} precision={0} addonAfter="%" />
               </Form.Item>
             </div>
           </div>

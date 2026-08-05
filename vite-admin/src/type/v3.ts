@@ -118,6 +118,13 @@ export interface PaginatedResult<T> {
   pagination: Pagination;
 }
 
+export interface CollectionTrends {
+  days: number;
+  startDate: string;
+  endDate: string;
+  collection: Array<{ date: string; count: number }>;
+}
+
 export interface AssetListParams {
   page?: number;
   pageSize?: number;
@@ -141,6 +148,13 @@ export interface EventListParams {
   eventType?: string;
 }
 
+export interface ObservationListParams {
+  page?: number;
+  pageSize?: number;
+  source?: string;
+  search?: string;
+}
+
 export interface ClientToken {
   id: string;
   name: string;
@@ -158,6 +172,10 @@ export interface InventorySettings {
   assetNumberPrefix: string;
   depreciationPeriodMonths: number;
   defaultResidualRate: number;
+  renewalAgeYears: number;
+  renewalMinMemoryGb: number;
+  renewalMinDiskGb: number;
+  renewalMaxResidualRate: number;
   countAvailableAssetsOnly: boolean;
   departments: string[];
   deleteDataOnUninstall: boolean;

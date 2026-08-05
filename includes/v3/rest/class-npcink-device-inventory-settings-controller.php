@@ -90,6 +90,18 @@ class Npcink_Device_Inventory_Settings_Controller
 		if (array_key_exists('defaultResidualRate', $params)) {
 			$options['default_residual_rate'] = min(100, max(0, floatval($params['defaultResidualRate'])));
 		}
+		if (array_key_exists('renewalAgeYears', $params)) {
+			$options['renewal_age_years'] = min(20, max(1, intval($params['renewalAgeYears'])));
+		}
+		if (array_key_exists('renewalMinMemoryGb', $params)) {
+			$options['renewal_min_memory_gb'] = min(512, max(1, intval($params['renewalMinMemoryGb'])));
+		}
+		if (array_key_exists('renewalMinDiskGb', $params)) {
+			$options['renewal_min_disk_gb'] = min(8192, max(1, intval($params['renewalMinDiskGb'])));
+		}
+		if (array_key_exists('renewalMaxResidualRate', $params)) {
+			$options['renewal_max_residual_rate'] = min(100, max(0, floatval($params['renewalMaxResidualRate'])));
+		}
 		if (array_key_exists('countAvailableAssetsOnly', $params)) {
 			$options['count_available_assets_only'] = (bool) $params['countAvailableAssetsOnly'];
 		}
@@ -189,6 +201,10 @@ class Npcink_Device_Inventory_Settings_Controller
 			'assetNumberPrefix' => (string) $options['asset_number_prefix'],
 			'depreciationPeriodMonths' => intval($options['depreciation_period_months']),
 			'defaultResidualRate' => floatval($options['default_residual_rate']),
+			'renewalAgeYears' => intval($options['renewal_age_years']),
+			'renewalMinMemoryGb' => intval($options['renewal_min_memory_gb']),
+			'renewalMinDiskGb' => intval($options['renewal_min_disk_gb']),
+			'renewalMaxResidualRate' => floatval($options['renewal_max_residual_rate']),
 			'countAvailableAssetsOnly' => !empty($options['count_available_assets_only']),
 			'departments' => $this->settings_departments($options),
 			'deleteDataOnUninstall' => !empty($options['delete_data_on_uninstall']),

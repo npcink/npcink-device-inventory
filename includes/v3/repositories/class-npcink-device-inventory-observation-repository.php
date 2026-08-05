@@ -321,6 +321,42 @@ class Npcink_Device_Inventory_Observation_Repository
 		return $result;
 	}
 
+	public function daily_counts_between($start_at, $end_at)
+	{
+		global $wpdb;
+		$start_at = sanitize_text_field((string) $start_at);
+		$end_at = sanitize_text_field((string) $end_at);
+		$cache_key = $this->build_cache_key(
+			'daily-counts',
+			array(
+				'start_at' => $start_at,
+				'end_at' => $end_at,
+				'version' => $this->get_list_cache_version(),
+			)
+		);
+		$cached = wp_cache_get($cache_key, self::CACHE_GROUP);
+		if ($cached !== false) {
+			return $cached;
+		}
+
+		$table = Npcink_Device_Inventory_V3_Tables::observations();
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned aggregate is bounded to the requested date range and cached.
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT DATE(observed_at) AS day, COUNT(*) AS count FROM %i WHERE observed_at >= %s AND observed_at < %s GROUP BY DATE(observed_at) ORDER BY day ASC',
+				$table,
+				$start_at,
+				$end_at
+			),
+			ARRAY_A
+		);
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery
+
+		$result = $rows ?: array();
+		wp_cache_set($cache_key, $result, self::CACHE_GROUP, self::CACHE_TTL);
+		return $result;
+	}
+
 	private function build_cache_key($prefix, $parts)
 	{
 		$encoded = wp_json_encode($parts);

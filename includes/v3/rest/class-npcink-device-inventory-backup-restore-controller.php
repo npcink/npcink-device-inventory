@@ -324,6 +324,18 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 		if (array_key_exists('defaultResidualRate', $settings)) {
 			$options['default_residual_rate'] = min(100, max(0, floatval($settings['defaultResidualRate'])));
 		}
+		if (array_key_exists('renewalAgeYears', $settings)) {
+			$options['renewal_age_years'] = min(20, max(1, intval($settings['renewalAgeYears'])));
+		}
+		if (array_key_exists('renewalMinMemoryGb', $settings)) {
+			$options['renewal_min_memory_gb'] = min(512, max(1, intval($settings['renewalMinMemoryGb'])));
+		}
+		if (array_key_exists('renewalMinDiskGb', $settings)) {
+			$options['renewal_min_disk_gb'] = min(8192, max(1, intval($settings['renewalMinDiskGb'])));
+		}
+		if (array_key_exists('renewalMaxResidualRate', $settings)) {
+			$options['renewal_max_residual_rate'] = min(100, max(0, floatval($settings['renewalMaxResidualRate'])));
+		}
 		if (array_key_exists('countAvailableAssetsOnly', $settings)) {
 			$options['count_available_assets_only'] = (bool) $settings['countAvailableAssetsOnly'];
 		}

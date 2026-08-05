@@ -1,6 +1,12 @@
 import type { Asset, JsonRecord } from "@/type/v3";
 
 const DEFAULT_DEPARTMENT = "未分配";
+const LEGACY_DEFAULT_DEPARTMENT = "默认";
+
+const isUnassignedDepartment = (value: string) => {
+  const normalized = value.trim();
+  return !normalized || normalized === DEFAULT_DEPARTMENT || normalized === LEGACY_DEFAULT_DEPARTMENT;
+};
 
 export interface HardwareIssue {
   key: string;
@@ -448,7 +454,7 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
         });
       }
     }
-    if (!asset.department || asset.department === DEFAULT_DEPARTMENT) {
+    if (isUnassignedDepartment(asset.department)) {
       issues.push({
         key: `${asset.uuid}-missing-department`,
         level: "info",

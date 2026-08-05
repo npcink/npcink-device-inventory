@@ -230,6 +230,8 @@ function get_option($name, $fallback = false)
 
 function update_option($name, $value)
 {
+	global $npcink_updated_options;
+	$npcink_updated_options[$name] = $value;
 	return true;
 }
 
@@ -260,6 +262,7 @@ require_once __DIR__ . '/../includes/v3/services/class-npcink-device-inventory-b
 require_once __DIR__ . '/../includes/v3/rest/class-npcink-device-inventory-backup-restore-controller.php';
 
 $wpdb = new Npcink_Test_Wpdb();
+$npcink_updated_options = array();
 
 function npcink_request($backup, $dry_run)
 {
@@ -372,12 +375,35 @@ $exported_backup = $export_result['backup'];
 npcink_assert(count($exported_backup['assets']) === 1, 'server export must include the asset snapshot');
 npcink_assert(count($exported_backup['identities'][0]['identities']) === 1, 'server export must group identities by asset');
 npcink_assert($export_result['meta']['counts']['observations'] === 1, 'server export must report restorable section counts');
+npcink_assert($exported_backup['settings']['renewalAgeYears'] === 5, 'server export must include the renewal age threshold');
+npcink_assert($exported_backup['settings']['renewalMinMemoryGb'] === 8, 'server export must include the renewal memory threshold');
+npcink_assert($exported_backup['settings']['renewalMinDiskGb'] === 256, 'server export must include the renewal disk threshold');
+npcink_assert($exported_backup['settings']['renewalMaxResidualRate'] === 20.0, 'server export must include the renewal residual threshold');
 npcink_assert($wpdb->commands === array('START TRANSACTION WITH CONSISTENT SNAPSHOT', 'COMMIT'), 'all export sections must share one snapshot');
 
 $round_trip = npcink_restore($exported_backup, true);
 $round_trip_summary = npcink_data($round_trip)['data']['summary'];
 npcink_assert($round_trip_summary['available']['assets'] === 1, 'an exported backup must pass restore preview');
 npcink_assert($round_trip_summary['available']['identities'] === 1, 'restore preview must count exported nested identities');
+
+$settings_backup = array(
+	'schema' => 'npcink-device-inventory/v3-admin-export',
+	'exportedAt' => '2026-07-06T00:00:00+00:00',
+	'settings' => array(
+		'renewalAgeYears' => 7,
+		'renewalMinMemoryGb' => 16,
+		'renewalMinDiskGb' => 512,
+		'renewalMaxResidualRate' => 15,
+	),
+);
+$npcink_updated_options = array();
+$settings_restore = npcink_restore($settings_backup, false);
+npcink_assert($settings_restore instanceof WP_REST_Response, 'renewal settings restore should succeed');
+$restored_options = $npcink_updated_options[Npcink_Device_Inventory_V3_Tables::OPTION];
+npcink_assert($restored_options['renewal_age_years'] === 7, 'restore must apply the renewal age threshold');
+npcink_assert($restored_options['renewal_min_memory_gb'] === 16, 'restore must apply the renewal memory threshold');
+npcink_assert($restored_options['renewal_min_disk_gb'] === 512, 'restore must apply the renewal disk threshold');
+npcink_assert($restored_options['renewal_max_residual_rate'] === 15.0, 'restore must apply the renewal residual threshold');
 
 $wpdb->commands = array();
 $wpdb->fail_command = 'COMMIT';

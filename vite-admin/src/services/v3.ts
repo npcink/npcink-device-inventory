@@ -13,9 +13,11 @@ import type {
   BackupExportSection,
   BackupRestoreResult,
   ClientToken,
+  CollectionTrends,
   CreatedClientToken,
   EventListParams,
   InventorySettings,
+  ObservationListParams,
   PaginatedResult,
 } from "@/type/v3";
 
@@ -107,6 +109,16 @@ export const getAssetObservations = async (
   return response.data;
 };
 
+export const getObservations = async (
+  params: ObservationListParams
+): Promise<PaginatedResult<AssetObservation>> => {
+  const response = await restInstance.get<PaginatedResult<AssetObservation>>("/observations", {
+    params,
+    showSuccessMessage: false,
+  } as RequestConfig);
+  return response.data;
+};
+
 export const getAssetEvents = async (
   uuid: string,
   page = 1,
@@ -142,6 +154,14 @@ export const getEvents = async (
     showSuccessMessage: false,
   } as RequestConfig);
   return response.data;
+};
+
+export const getCollectionTrends = async (): Promise<CollectionTrends> => {
+  const response = await restInstance.get<DataEnvelope<CollectionTrends>>(
+    "/analysis/collection-trends",
+    { showSuccessMessage: false } as RequestConfig
+  );
+  return unwrapData(response.data);
 };
 
 export const getSettings = async (): Promise<InventorySettings> => {
