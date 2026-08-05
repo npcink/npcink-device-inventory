@@ -20,6 +20,8 @@ Npcink Device Inventory 是一个 WordPress 设备资产管理插件，用于小
 - `sj/`：WordPress.org 提交资料、展示素材和审核沟通文案归档。
 
 设备上传客户端以 `ele-rs/` 为准。
+各平台硬件字段的实际覆盖、已知限制和补齐顺序见
+[`docs/hardware-collection-coverage.md`](docs/hardware-collection-coverage.md)。
 
 ## 数据模型
 

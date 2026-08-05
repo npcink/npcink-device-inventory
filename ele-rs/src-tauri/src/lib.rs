@@ -930,7 +930,7 @@ fn collect_platform_diagnostics(
         ("computer-info.txt", "Get-ComputerInfo | Format-List"),
         (
             "hardware-info.txt",
-            "$classes='Win32_BIOS','Win32_BaseBoard','Win32_Processor','Win32_PhysicalMemory','Win32_VideoController','Win32_DiskDrive'; foreach ($class in $classes) { \"===== $class =====\"; Get-CimInstance -ClassName $class -ErrorAction SilentlyContinue | Format-List * }",
+            "$classes='Win32_BIOS','Win32_BaseBoard','Win32_SystemEnclosure','Win32_Processor','Win32_PhysicalMemory','Win32_VideoController','Win32_DesktopMonitor','Win32_DiskDrive','Win32_Battery'; foreach ($class in $classes) { \"===== $class =====\"; Get-CimInstance -ClassName $class -ErrorAction SilentlyContinue | Format-List * }; \"===== root\\wmi:WmiMonitorID =====\"; Get-CimInstance -Namespace root\\wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | Select-Object InstanceName,Active,ManufacturerName,UserFriendlyName,SerialNumberID,YearOfManufacture,WeekOfManufacture | Format-List *",
         ),
     ];
     run_command_group(out, &hardware_commands)?;
@@ -1229,6 +1229,8 @@ fn collect_platform_diagnostics(
             "SPSoftwareDataType",
             "SPPowerDataType",
             "SPStorageDataType",
+            "SPNVMeDataType",
+            "SPSerialATADataType",
             "SPDisplaysDataType",
         ],
     )];

@@ -130,6 +130,7 @@ class Npcink_Device_Inventory_Asset_Repository
 	public $fail_updates = array();
 	public $updates = array();
 	public $cache_invalidations = 0;
+	public $duplicate_write_failure = false;
 
 	public function __construct($assets = array())
 	{
@@ -141,14 +142,29 @@ class Npcink_Device_Inventory_Asset_Repository
 		return isset($this->assets[$uuid]) ? $this->assets[$uuid] : null;
 	}
 
+	public function find_by_asset_number($asset_number)
+	{
+		foreach ($this->assets as $asset) {
+			if ((string) $asset['asset_number'] === (string) $asset_number) {
+				return $asset;
+			}
+		}
+		return null;
+	}
+
 	public function update($uuid, $changes)
 	{
 		$this->updates[] = array($uuid, $changes);
-		if (in_array($uuid, $this->fail_updates, true) || !isset($this->assets[$uuid])) {
+		if ($this->duplicate_write_failure || in_array($uuid, $this->fail_updates, true) || !isset($this->assets[$uuid])) {
 			return null;
 		}
 		$this->assets[$uuid] = array_merge($this->assets[$uuid], $changes);
 		return $this->assets[$uuid];
+	}
+
+	public function last_write_was_duplicate_asset_number()
+	{
+		return $this->duplicate_write_failure;
 	}
 
 	public function invalidate_cache()
@@ -284,6 +300,45 @@ npcink_asset_write_assert($wpdb->commands === array(), 'legacy asset type failur
 $first_uuid = '11111111-1111-4111-8111-111111111111';
 $second_uuid = '22222222-2222-4222-8222-222222222222';
 $rows = array($first_uuid => npcink_asset_row(1, $first_uuid), $second_uuid => npcink_asset_row(2, $second_uuid));
+list($controller, $assets, $events) = npcink_asset_write_controller($rows);
+
+$archived_rows = $rows;
+$archived_rows[$second_uuid]['status'] = 'deleted';
+list($duplicate_controller, $duplicate_assets, $duplicate_events) = npcink_asset_write_controller($archived_rows);
+$duplicate_create = $duplicate_controller->create_item(
+	new Npcink_Asset_Write_Request(array('assetNumber' => 'ASSET-2'))
+);
+npcink_asset_write_assert(is_wp_error($duplicate_create) && $duplicate_create->get_error_code() === 'duplicate_number', 'create must reject a number owned by an archived asset');
+npcink_asset_write_assert($duplicate_create->get_error_data()['status'] === 409, 'duplicate create must return HTTP 409');
+npcink_asset_write_assert($wpdb->commands === array(), 'duplicate create must fail before starting a transaction');
+
+$duplicate_update = $duplicate_controller->update_item(
+	new Npcink_Asset_Write_Request(array('uuid' => $first_uuid, 'assetNumber' => 'ASSET-2'))
+);
+npcink_asset_write_assert(is_wp_error($duplicate_update) && $duplicate_update->get_error_code() === 'duplicate_number', 'update must reject a number owned by an archived asset');
+npcink_asset_write_assert($duplicate_update->get_error_data()['status'] === 409, 'duplicate update must return HTTP 409');
+npcink_asset_write_assert($duplicate_assets->updates === array(), 'duplicate update must not write the asset');
+npcink_asset_write_assert($duplicate_events->records === array(), 'duplicate update must not create an event');
+npcink_asset_write_assert($wpdb->commands === array(), 'duplicate update must fail before starting a transaction');
+
+$same_number_update = $duplicate_controller->update_item(
+	new Npcink_Asset_Write_Request(array('uuid' => $first_uuid, 'assetNumber' => 'ASSET-1'))
+);
+npcink_asset_write_assert($same_number_update instanceof WP_REST_Response, 'an asset may retain its own number');
+npcink_asset_write_assert($wpdb->commands === array('START TRANSACTION', 'COMMIT'), 'same-number update must commit normally');
+
+$wpdb = new Npcink_Asset_Write_Wpdb();
+list($race_controller, $race_assets, $race_events) = npcink_asset_write_controller($rows);
+$race_assets->duplicate_write_failure = true;
+$race_conflict = $race_controller->update_item(
+	new Npcink_Asset_Write_Request(array('uuid' => $first_uuid, 'assetNumber' => 'RACE-NUMBER'))
+);
+npcink_asset_write_assert(is_wp_error($race_conflict) && $race_conflict->get_error_code() === 'duplicate_number', 'database duplicate-key fallback must return duplicate_number');
+npcink_asset_write_assert($race_conflict->get_error_data()['status'] === 409, 'database duplicate-key fallback must return HTTP 409');
+npcink_asset_write_assert($wpdb->commands === array('START TRANSACTION', 'ROLLBACK'), 'database duplicate-key fallback must roll back');
+npcink_asset_write_assert($race_events->records === array(), 'database duplicate-key fallback must not create an event');
+
+$wpdb = new Npcink_Asset_Write_Wpdb();
 list($controller, $assets, $events) = npcink_asset_write_controller($rows);
 $legacy_identity = $controller->create_identity(
 	new Npcink_Asset_Write_Request(

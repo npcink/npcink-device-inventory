@@ -143,6 +143,7 @@ fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
                     "system": value_at(data, "/mem"),
                     "modules": value_at(data, "/memLayout"),
                 },
+                "battery": value_at(data, "/battery"),
                 "disks": value_at(data, "/diskLayout"),
                 "network": {
                     "primary": primary_network,
@@ -413,6 +414,7 @@ mod tests {
             "cpu": {"brand": "CPU"},
             "processorIdentity": [{"name": "CPU", "processorId": "SHARED-FAMILY-ID"}],
             "mem": {"total": 8},
+            "battery": [{"name": "Internal Battery", "healthPercent": 91}],
             "diskLayout": [{"size": 10}],
             "net": [{"default": true, "mac": "aa:bb:cc:dd:ee:ff", "ip4": "192.168.1.2"}],
             "networkHardware": [{"pnpDeviceId": "PCI\\VEN_1234", "permanentAddress": "AABBCCDDEEFF", "virtual": false}],
@@ -444,6 +446,10 @@ mod tests {
         assert_eq!(
             observation.pointer("/asset/hardware/network/identityInterfaces/0/permanentAddress"),
             Some(&json!("AABBCCDDEEFF"))
+        );
+        assert_eq!(
+            observation.pointer("/asset/hardware/battery/0/healthPercent"),
+            Some(&json!(91))
         );
     }
 }

@@ -188,11 +188,20 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (is_wp_error($input)) {
 			return $input;
 		}
+		$number_conflict = $this->asset_number_conflict(
+			isset($input['asset_number']) ? $input['asset_number'] : ''
+		);
+		if (is_wp_error($number_conflict)) {
+			return $number_conflict;
+		}
 		if (!$this->begin_transaction()) {
 			return Npcink_Device_Inventory_V3_Response::error('transaction_start_failed', 'Failed to start asset transaction.', 500);
 		}
 		$asset = $this->assets->create($input);
 		if (!$asset) {
+			if ($this->assets->last_write_was_duplicate_asset_number()) {
+				return $this->rollback_error('duplicate_number', 'Asset number already exists.', 409);
+			}
 			return $this->rollback_error('asset_create_failed', 'Failed to create asset.');
 		}
 		if (!$this->event_service->record(intval($asset['id']), 'manual', 'created', 'Asset created in admin.')) {
@@ -231,11 +240,20 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (empty($update_data)) {
 			return Npcink_Device_Inventory_V3_Response::error('empty_asset_update', 'At least one asset field is required.', 422);
 		}
+		if (array_key_exists('asset_number', $update_data)) {
+			$number_conflict = $this->asset_number_conflict($update_data['asset_number'], $asset['uuid']);
+			if (is_wp_error($number_conflict)) {
+				return $number_conflict;
+			}
+		}
 		if (!$this->begin_transaction()) {
 			return Npcink_Device_Inventory_V3_Response::error('transaction_start_failed', 'Failed to start asset transaction.', 500);
 		}
 		$updated = $this->assets->update($asset['uuid'], $update_data);
 		if (!$updated) {
+			if ($this->assets->last_write_was_duplicate_asset_number()) {
+				return $this->rollback_error('duplicate_number', 'Asset number already exists.', 409);
+			}
 			return $this->rollback_error('asset_update_failed', 'Failed to update asset.');
 		}
 		if (!$this->event_service->record(intval($asset['id']), 'manual', 'updated', 'Asset updated in admin.')) {
@@ -292,6 +310,19 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (empty($changes)) {
 			return Npcink_Device_Inventory_V3_Response::error('empty_asset_update', 'At least one asset field is required.', 422);
 		}
+		if (array_key_exists('asset_number', $changes)) {
+			if (count($uuids) > 1) {
+				return Npcink_Device_Inventory_V3_Response::error(
+					'duplicate_number',
+					'Asset number must be unique.',
+					409
+				);
+			}
+			$number_conflict = $this->asset_number_conflict($changes['asset_number'], $uuids[0]);
+			if (is_wp_error($number_conflict)) {
+				return $number_conflict;
+			}
+		}
 		$context = isset($params['context']) && is_array($params['context']) ? $params['context'] : array();
 		$context_source = isset($context['source']) ? sanitize_key((string) $context['source']) : 'asset_batch';
 		$context_message = isset($context['message']) ? sanitize_textarea_field((string) $context['message']) : '';
@@ -310,6 +341,9 @@ class Npcink_Device_Inventory_Assets_Controller
 			}
 			$updated = $this->assets->update($uuid, $changes);
 			if (!$updated) {
+				if ($this->assets->last_write_was_duplicate_asset_number()) {
+					return $this->rollback_error('duplicate_number', 'Asset number already exists.', 409);
+				}
 				return $this->rollback_error('asset_update_failed', 'Failed to update batch asset: ' . $uuid);
 			}
 			$event_type = $operation === 'archive' ? 'bulk_archived' : 'bulk_updated';
@@ -615,6 +649,29 @@ class Npcink_Device_Inventory_Assets_Controller
 	private function text_length($value)
 	{
 		return function_exists('mb_strlen') ? mb_strlen((string) $value, 'UTF-8') : strlen((string) $value);
+	}
+
+	private function asset_number_conflict($asset_number, $current_uuid = '')
+	{
+		$asset_number = sanitize_text_field((string) $asset_number);
+		if ($asset_number === '') {
+			return false;
+		}
+
+		$owner = $this->assets->find_by_asset_number($asset_number);
+		if (!$owner || (!empty($current_uuid) && (string) $owner['uuid'] === (string) $current_uuid)) {
+			return false;
+		}
+
+		return Npcink_Device_Inventory_V3_Response::error(
+			'duplicate_number',
+			'Asset number already exists.',
+			409,
+			array(
+				'assetNumber' => $asset_number,
+				'ownerStatus' => isset($owner['status']) ? (string) $owner['status'] : '',
+			)
+		);
 	}
 
 	private function begin_transaction()

@@ -1101,6 +1101,12 @@ const formatFrequency = (value: unknown) => {
   return `${number} MHz`;
 };
 
+const formatDisplayResolution = (display: JsonRecord) => {
+  const width = firstText(display.currentResX, display.resolutionX);
+  const height = firstText(display.currentResY, display.resolutionY);
+  return width && height ? `${width} x ${height}` : "";
+};
+
 const formatCount = (value: unknown) => {
   const number = toNumber(value);
   if (number <= 0 && value !== 0) {
@@ -1126,7 +1132,14 @@ const hardwareDetailSections = (
   const chassis = getRecord(hardware.chassis);
   const uuid = getRecord(hardware.uuid);
   const net = getRecord(hardware.net);
-  const network = getArray(hardware.network).length ? getArray(hardware.network) : getArray(net.adapters);
+  const networkRecord = getRecord(hardware.network);
+  const primaryNetwork = getRecord(networkRecord.primary);
+  const network = getArray(networkRecord.interfaces).length
+    ? getArray(networkRecord.interfaces)
+    : getArray(hardware.network).length
+      ? getArray(hardware.network)
+      : getArray(net.adapters);
+  const batteries = getArray(hardware.battery);
   const memory = getArray(hardware.memory).length
     ? getArray(hardware.memory)
     : getArray(hardware.mem).length
@@ -1183,6 +1196,20 @@ const hardwareDetailSections = (
       ),
     },
     {
+      key: "battery",
+      label: "电池",
+      rows: detailRows(
+        ...batteries.flatMap((item, index) => [
+          detailRow(`battery-${index}-name`, `电池 ${index + 1}`, firstText(item.name, item.deviceId)),
+          detailRow(`battery-${index}-health`, `电池 ${index + 1} 健康度`, item.healthPercent !== undefined && item.healthPercent !== null ? `${item.healthPercent}%` : ""),
+          detailRow(`battery-${index}-charge`, `电池 ${index + 1} 当前电量`, item.chargePercent !== undefined && item.chargePercent !== null ? `${item.chargePercent}%` : ""),
+          detailRow(`battery-${index}-cycles`, `电池 ${index + 1} 循环次数`, item.cycleCount),
+          detailRow(`battery-${index}-condition`, `电池 ${index + 1} 状态`, firstText(item.condition, item.status)),
+          detailRow(`battery-${index}-serial`, `电池 ${index + 1} 序列号`, item.serial),
+        ])
+      ),
+    },
+    {
       key: "graphics",
       label: "显卡",
       rows: detailRows(
@@ -1201,7 +1228,10 @@ const hardwareDetailSections = (
         detailRow("display-main", "当前显示", context.extracted.display),
         detailRow("display-model", "显示器型号", context.extracted.displayModel),
         ...displays.flatMap((item, index) => [
-          detailRow(`display-${index}-resolution`, `显示器 ${index + 1} 分辨率`, `${fieldText(item.currentResX || item.resolutionX)} x ${fieldText(item.currentResY || item.resolutionY)}`),
+          detailRow(`display-${index}-model`, `显示器 ${index + 1} 型号`, item.model),
+          detailRow(`display-${index}-vendor`, `显示器 ${index + 1} 厂商`, item.vendor),
+          detailRow(`display-${index}-serial`, `显示器 ${index + 1} 序列号`, item.serial),
+          detailRow(`display-${index}-resolution`, `显示器 ${index + 1} 分辨率`, formatDisplayResolution(item)),
           detailRow(`display-${index}-rate`, `显示器 ${index + 1} 刷新率`, item.currentRefreshRate ? `${item.currentRefreshRate} 赫兹` : ""),
         ])
       ),
@@ -1223,6 +1253,8 @@ const hardwareDetailSections = (
         ...disks.flatMap((item, index) => [
           detailRow(`disk-${index}-name`, `硬盘 ${index + 1} 名称`, firstText(item.name, item.device, item.model)),
           detailRow(`disk-${index}-size`, `硬盘 ${index + 1} 容量`, formatBytes(item.size)),
+          detailRow(`disk-${index}-type`, `硬盘 ${index + 1} 类型`, firstText(item.type, item.mediaType)),
+          detailRow(`disk-${index}-interface`, `硬盘 ${index + 1} 接口`, item.interfaceType),
           detailRow(`disk-${index}-serial`, `硬盘 ${index + 1} 序列号`, firstText(item.serialNum, item.serial, item.serialNumber)),
         ])
       ),
@@ -1232,7 +1264,9 @@ const hardwareDetailSections = (
       label: "网卡",
       rows: detailRows(
         detailRow("network-ip", "IP 地址", firstText(context.extracted.primaryIp, context.manualHardware.ip)),
-        detailRow("network-gateway", "默认网关", firstText(net.defaultGateway, net.gateway)),
+        detailRow("network-gateway", "默认网关", firstText(primaryNetwork.defaultGateway, primaryNetwork.gateway, net.defaultGateway, net.gateway)),
+        detailRow("network-dns", "DNS", Array.isArray(primaryNetwork.dnsServers) ? primaryNetwork.dnsServers.map(String).join(", ") : ""),
+        detailRow("network-dhcp", "DHCP", typeof primaryNetwork.dhcp === "boolean" ? (primaryNetwork.dhcp ? "启用" : "停用") : ""),
         ...network.flatMap((item, index) => [
           detailRow(`network-${index}-name`, `网卡 ${index + 1} 名称`, firstText(item.name, item.iface, item.adapterName)),
           detailRow(`network-${index}-mac`, `网卡 ${index + 1} MAC`, firstText(item.mac, item.macAddress)),

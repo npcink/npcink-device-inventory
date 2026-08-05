@@ -476,6 +476,7 @@ const MENU_CHECK_UPDATE_EVENT = "desktop-check-update";
 const detailItems = [
   { key: "cpu", title: "处理器", desc: "CPU 信息" },
   { key: "memory", title: "内存", desc: "内存条与容量" },
+  { key: "battery", title: "电池", desc: "电池健康与循环次数" },
   { key: "diskLayout", title: "硬盘", desc: "磁盘与分区" },
   { key: "graphics", title: "显卡/显示器", desc: "显示设备" },
   { key: "baseboard", title: "主板", desc: "主板信息" },
@@ -791,11 +792,23 @@ const renderHumanDetail = (key: string, data: Record<string, unknown>) => {
         row("序列号", item.serialNum || item.serial),
       ]);
     }
+    case "battery":
+      return listSections("电池", data.battery, (item) => [
+        row("名称", item.name),
+        row("制造商", item.manufacturer),
+        row("序列号", item.serial),
+        row("健康度", item.healthPercent, item.healthPercent ? "%" : ""),
+        row("当前电量", item.chargePercent, item.chargePercent ? "%" : ""),
+        row("循环次数", item.cycleCount),
+        row("状态", item.condition || item.status),
+      ]);
     case "diskLayout":
       return listSections("硬盘", data.diskLayout, (item) => [
-        row("名称", item.name || item.device),
+        row("名称", item.name || item.model || item.device),
         row("类型", item.type),
+        row("接口", item.interfaceType),
         row("容量", formatBytes(item.size)),
+        row("序列号", item.serialNum || item.serial),
         row("文件系统", item.fsType),
         row("挂载位置", item.mount),
       ]);
@@ -815,8 +828,12 @@ const renderHumanDetail = (key: string, data: Record<string, unknown>) => {
         row(
           "分辨率",
           item.resolution ||
+            (item.currentResX && item.currentResY ? `${item.currentResX} x ${item.currentResY}` : "") ||
             (item.resolutionX && item.resolutionY ? `${item.resolutionX} x ${item.resolutionY}` : ""),
         ),
+        row("刷新率", item.currentRefreshRate, item.currentRefreshRate ? " Hz" : ""),
+        row("厂商", item.vendor),
+        row("序列号", item.serial),
         row("Retina", item.retina),
         row("尺寸", item.sizeX && item.sizeY ? `${item.sizeX} x ${item.sizeY}` : ""),
         row("类型", item.type),

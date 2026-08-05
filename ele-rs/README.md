@@ -30,10 +30,13 @@ POST /wp-json/npcink-device-inventory/v1/device-observations
 
 客户端只上传硬件事实。服务端从快照重新计算 `system_uuid_v2`、`baseboard_serial_v2` 和符合条件的 `pci_permanent_mac_v2`；不会信任客户端声明的身份哈希。CPU `ProcessorId`、USB/当前 MAC、硬盘、内存和显卡不参与自动匹配。
 
-## 待发布 0.3.2
+## 待发布 0.3.3
 
 - 修复中文 Windows PowerShell 5.1 在输出包含“以太网”等非 ASCII 名称时可能使用本地代码页、导致客户端无法按 UTF-8 解析物理网卡 JSON 的问题。
 - 查询隐藏物理网卡失败或无结果时，自动重试可见物理网卡。这样类似 133 的设备可使用受主板与 CPU 描述约束的 PCI 永久 MAC 完成身份匹配。
+- 补齐 Windows 显示器 EDID、机箱、物理硬盘、默认路由、DNS、DHCP、CPU 静态规格和电池信息采集。
+- 补齐 macOS NVMe/SATA 物理硬盘、真实默认路由、DNS、DHCP、Apple 性能核/效率核和电池健康信息采集。
+- 将电池信息加入 v3 observation，并保持显示器、硬盘、内存等可更换硬件不参与唯一设备身份。
 
 请求必须携带后台生成的完整授权码对应的 HMAC 头。完整授权码形如：
 

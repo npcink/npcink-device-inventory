@@ -4,7 +4,7 @@ Tags: inventory, assets, device management, rest api, admin
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 3.1.1
+Stable tag: 3.1.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -70,6 +70,10 @@ Npcink Device Inventory stores device asset data in the local WordPress database
 The plugin does not transmit this data to Npcink or any third-party server during normal plugin operation. Site administrators are responsible for informing users and employees about their own device inventory policies.
 
 == Changelog ==
+
+= 3.1.2 =
+* Return an explicit 409 duplicate_number response when an active or archived asset already owns an asset number.
+* Display collected battery health, physical disk details, monitor identity, and real network route information in the admin asset detail view.
 
 = 3.1.1 =
 * Reject legacy v1-to-v2 identity migrations when the target asset's latest hardware evidence has no identity in common with the incoming observation.

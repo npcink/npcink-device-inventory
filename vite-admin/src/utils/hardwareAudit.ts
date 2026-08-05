@@ -61,20 +61,10 @@ export const firstText = (...values: unknown[]) => {
   return "";
 };
 
-const fieldText = (value: unknown) => {
-  if (value === null || value === undefined || value === "") {
-    return "-";
-  }
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? String(value) : "-";
-  }
-  if (typeof value === "boolean") {
-    return value ? "是" : "否";
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  return JSON.stringify(value);
+const displayResolution = (display: JsonRecord) => {
+  const width = firstText(display.currentResX, display.resolutionX);
+  const height = firstText(display.currentResY, display.resolutionY);
+  return width && height ? `${width} x ${height}` : "";
 };
 
 export const hardwareSummary = (summary: JsonRecord, hardware: JsonRecord) => {
@@ -108,8 +98,8 @@ export const hardwareSummary = (summary: JsonRecord, hardware: JsonRecord) => {
         item.size ? `大小: ${formatBytes(item.size)}` : "",
       ].filter(Boolean).join(" ")
     ).filter(Boolean),
-    display: displays[0]
-      ? `${fieldText(displays[0].currentResX || displays[0].resolutionX)} x ${fieldText(displays[0].currentResY || displays[0].resolutionY)}${displays[0].currentRefreshRate ? ` (${displays[0].currentRefreshRate} 赫兹)` : ""}`
+    display: displays[0] && displayResolution(displays[0])
+      ? `${displayResolution(displays[0])}${displays[0].currentRefreshRate ? ` (${displays[0].currentRefreshRate} 赫兹)` : ""}`
       : "",
     displayModel: firstText(displays[0]?.model),
     primaryDisk: firstText(disks[0]?.name, disks[0]?.device, disks[0]?.serialNum),

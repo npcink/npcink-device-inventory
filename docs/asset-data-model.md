@@ -27,7 +27,9 @@ Important fields:
 
 - `uuid`: public asset identifier.
 - `asset_type`: closed top-level family: `computer` or `custom`.
-- `asset_number`: human-facing asset number, unique across all assets.
+- `asset_number`: human-facing asset number, unique across all assets, including
+  archived rows. Creating or updating an asset with a number owned by another
+  row returns `409 duplicate_number`; archiving alone does not release it.
 - `name`, `owner_name`, `department`, `status`, `category`: normal list and
   filter fields.
 - `purchase_price`, `residual_value`: financial summary fields.
@@ -71,6 +73,14 @@ Typical sources:
 structured hardware detail, and `raw_json` preserves source payloads for
 debugging. These JSON-encoded fields are stored as `LONGTEXT` for broad
 MySQL/MariaDB compatibility.
+
+Current uploader hardware observations may contain CPU, memory modules,
+physical disks, network interfaces and route configuration, graphics
+controllers, displays, battery health, mainboard, BIOS and system information.
+Physical disks and mounted filesystems are separate concepts: physical disk
+inventory belongs in `hardware_json.disks`, while volumes and mount points stay
+in `raw_json.filesystems`. Replaceable parts and peripherals are observation
+facts only and never participate in unique device identity.
 
 ### `npcink_asset_events`
 

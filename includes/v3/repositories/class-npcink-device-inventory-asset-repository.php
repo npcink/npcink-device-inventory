@@ -8,6 +8,7 @@ class Npcink_Device_Inventory_Asset_Repository
 {
 	const CACHE_GROUP = 'npcink_device_inventory_assets';
 	const CACHE_TTL = 60;
+	private $last_write_error = '';
 
 	public function find_by_uuid($uuid)
 	{
@@ -81,6 +82,41 @@ class Npcink_Device_Inventory_Asset_Repository
 				$assets_table,
 				$observations_table,
 				$id
+			),
+			ARRAY_A
+		);
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery
+		wp_cache_set($cache_key, $row, self::CACHE_GROUP, self::CACHE_TTL);
+		return $row;
+	}
+
+	public function find_by_asset_number($asset_number)
+	{
+		global $wpdb;
+		$asset_number = sanitize_text_field($asset_number);
+		if ($asset_number === '') {
+			return null;
+		}
+
+		$cache_key = $this->build_cache_key(
+			'asset_number',
+			array(
+				'asset_number' => $asset_number,
+				'version' => $this->get_list_cache_version(),
+			)
+		);
+		$cached = wp_cache_get($cache_key, self::CACHE_GROUP);
+		if ($cached !== false) {
+			return $cached;
+		}
+
+		// Archived rows intentionally retain their asset numbers, so this lookup must not filter by status.
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned asset table query is wrapped in the object cache.
+		$row = $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT id, uuid, asset_number, status FROM %i WHERE asset_number = %s LIMIT 1',
+				Npcink_Device_Inventory_V3_Tables::assets(),
+				$asset_number
 			),
 			ARRAY_A
 		);
@@ -362,6 +398,7 @@ class Npcink_Device_Inventory_Asset_Repository
 			$row,
 			array('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%s')
 		);
+		$this->last_write_error = $result === false ? (string) $wpdb->last_error : '';
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 
 		if ($result === false) {
@@ -420,6 +457,7 @@ class Npcink_Device_Inventory_Asset_Repository
 			$formats,
 			array('%s')
 		);
+		$this->last_write_error = $result === false ? (string) $wpdb->last_error : '';
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 
 		if ($result === false) {
@@ -428,6 +466,12 @@ class Npcink_Device_Inventory_Asset_Repository
 		$version = $this->get_list_cache_version();
 		wp_cache_set('list_version', $version + 1, self::CACHE_GROUP);
 		return $this->find_by_uuid($uuid);
+	}
+
+	public function last_write_was_duplicate_asset_number()
+	{
+		return stripos($this->last_write_error, 'Duplicate entry') !== false
+			&& stripos($this->last_write_error, 'asset_number') !== false;
 	}
 
 	/**
