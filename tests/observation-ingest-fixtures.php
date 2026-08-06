@@ -283,6 +283,7 @@ function npcink_ingest_asset_row($id, $uuid)
 		'category' => 'computer',
 		'purchase_price' => 0,
 		'residual_value' => 0,
+		'financial_residual_value' => 0,
 		'metadata_json' => '{}',
 		'latest_observation_id' => null,
 		'latest_observed_at' => null,

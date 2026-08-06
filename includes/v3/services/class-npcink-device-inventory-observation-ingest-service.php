@@ -282,6 +282,7 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			'category' => 'computer',
 			'purchase_price' => 0,
 			'residual_value' => 0,
+			'financial_residual_value' => 0,
 			'metadata' => array(
 				'summary' => $summary,
 			),
@@ -343,6 +344,8 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			'status' => (string) $row['status'],
 			'category' => (string) $row['category'],
 			'purchasePrice' => floatval($row['purchase_price']),
+			'secondHandMarketValue' => floatval($row['residual_value']),
+			'financialResidualValue' => floatval(isset($row['financial_residual_value']) ? $row['financial_residual_value'] : 0),
 			'residualValue' => floatval($row['residual_value']),
 			'metadata' => $this->decode_json(isset($row['metadata_json']) ? $row['metadata_json'] : '', array()),
 			'createdAt' => (string) $row['created_at'],

@@ -175,7 +175,7 @@ class Npcink_Device_Inventory_Backup_Export_Service
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Backup reads plugin-owned tables inside one consistent snapshot.
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT id, uuid, asset_type, asset_number, name, owner_name, department, status, category, purchase_price, residual_value, metadata_json, created_at, updated_at FROM %i ORDER BY id ASC',
+				'SELECT id, uuid, asset_type, asset_number, name, owner_name, department, status, category, purchase_price, residual_value, financial_residual_value, metadata_json, created_at, updated_at FROM %i ORDER BY id ASC',
 				Npcink_Device_Inventory_V3_Tables::assets()
 			),
 			ARRAY_A
@@ -249,6 +249,8 @@ class Npcink_Device_Inventory_Backup_Export_Service
 			'status' => (string) $row['status'],
 			'category' => (string) $row['category'],
 			'purchasePrice' => floatval($row['purchase_price']),
+			'secondHandMarketValue' => floatval($row['residual_value']),
+			'financialResidualValue' => floatval(isset($row['financial_residual_value']) ? $row['financial_residual_value'] : 0),
 			'residualValue' => floatval($row['residual_value']),
 			'metadata' => $this->decode_json($row['metadata_json']),
 			'createdAt' => (string) $row['created_at'],

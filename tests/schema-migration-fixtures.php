@@ -14,11 +14,25 @@ class Npcink_Schema_Migration_Fake_Wpdb
 {
 	public $prefix = 'wp_';
 	public $queries = array();
+	public $financial_column_exists = false;
 
 	public function query($query)
 	{
 		$this->queries[] = $query;
+		if (strpos($query, 'ADD COLUMN `financial_residual_value`') !== false) {
+			$this->financial_column_exists = true;
+		}
 		return 1;
+	}
+
+	public function prepare($query, ...$args)
+	{
+		return $query;
+	}
+
+	public function get_var($query)
+	{
+		return strpos($query, 'INFORMATION_SCHEMA.COLUMNS') !== false && $this->financial_column_exists ? 1 : 0;
 	}
 }
 
@@ -60,12 +74,16 @@ npcink_schema_assert(
 	'a fresh install must run every migration in order'
 );
 npcink_schema_assert(
-	Npcink_Device_Inventory_Activator::pending_schema_revisions('20260706_latest_observed') === array('20260715_atomic_identity', '20260715_scope_reset'),
+	Npcink_Device_Inventory_Activator::pending_schema_revisions('20260706_latest_observed') === array('20260715_atomic_identity', '20260715_scope_reset', '20260806_financial_values'),
 	'an existing schema must run only newer migrations'
 );
 npcink_schema_assert(
-	Npcink_Device_Inventory_Activator::pending_schema_revisions('20260715_atomic_identity') === array('20260715_scope_reset'),
+	Npcink_Device_Inventory_Activator::pending_schema_revisions('20260715_atomic_identity') === array('20260715_scope_reset', '20260806_financial_values'),
 	'the pre-GA scope reset must run after atomic identity migration'
+);
+npcink_schema_assert(
+	Npcink_Device_Inventory_Activator::pending_schema_revisions('20260715_scope_reset') === array('20260806_financial_values'),
+	'the financial value migration must run after the scope reset'
 );
 npcink_schema_assert(
 	Npcink_Device_Inventory_Activator::pending_schema_revisions(Npcink_Device_Inventory_Activator::SCHEMA_REVISION) === array(),
@@ -79,12 +97,19 @@ npcink_schema_assert(
 $wpdb = new Npcink_Schema_Migration_Fake_Wpdb();
 $migration = new ReflectionMethod(Npcink_Device_Inventory_Activator::class, 'run_schema_migration');
 $migration->setAccessible(true);
-npcink_schema_assert($migration->invoke(null, Npcink_Device_Inventory_Activator::SCHEMA_REVISION) === true, 'scope reset migration must succeed');
+npcink_schema_assert($migration->invoke(null, '20260715_scope_reset') === true, 'scope reset migration must succeed');
 npcink_schema_assert(count($wpdb->queries) === 3, 'scope reset must normalize assets and clean identities and obsolete events');
 npcink_schema_assert(strpos($wpdb->queries[0], "asset_type IN ('pc', 'computer')") !== false, 'pc and computer values must normalize to computer');
 npcink_schema_assert(strpos($wpdb->queries[0], "ELSE 'custom'") !== false, 'other asset types must normalize to custom');
 npcink_schema_assert(strpos($wpdb->queries[1], "'system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2'") !== false, 'hardware identity v2 types must survive the scope reset');
 npcink_schema_assert(strpos($wpdb->queries[1], "'device_uuid_v1', 'fallback_device_v1'") !== false, 'v1 identities must remain available for the one-time upgrade lookup');
 npcink_schema_assert(!isset($npcink_schema_options['public_query_enabled']), 'scope reset must remove obsolete public-query options');
+
+$wpdb = new Npcink_Schema_Migration_Fake_Wpdb();
+npcink_schema_assert($migration->invoke(null, Npcink_Device_Inventory_Activator::SCHEMA_REVISION) === true, 'financial value migration must succeed');
+npcink_schema_assert(count($wpdb->queries) === 1, 'financial value migration must add exactly one column when missing');
+npcink_schema_assert(strpos($wpdb->queries[0], 'financial_residual_value') !== false, 'financial value migration must add the accounting residual column');
+npcink_schema_assert($migration->invoke(null, Npcink_Device_Inventory_Activator::SCHEMA_REVISION) === true, 'financial value migration must be idempotent');
+npcink_schema_assert(count($wpdb->queries) === 1, 'idempotent financial value migration must not alter the table again');
 
 echo "Schema migration fixture checks passed.\n";

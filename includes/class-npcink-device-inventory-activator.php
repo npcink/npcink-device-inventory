@@ -29,10 +29,11 @@ if (!defined('ABSPATH')) {
  */
 class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_Interface
 {
-	const SCHEMA_REVISION = '20260715_scope_reset';
+	const SCHEMA_REVISION = '20260806_financial_values';
 	const SCHEMA_REVISIONS = array(
 		'20260706_latest_observed',
 		'20260715_atomic_identity',
+		'20260715_scope_reset',
 		self::SCHEMA_REVISION,
 	);
 
@@ -104,8 +105,13 @@ class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_In
 			return self::identity_unique_key_ready();
 		}
 
-		if ($revision === self::SCHEMA_REVISION) {
+		if ($revision === '20260715_scope_reset') {
 			return self::reset_pre_ga_scope();
+		}
+
+		if ($revision === self::SCHEMA_REVISION) {
+			// Keep the legacy residual_value column as second-hand market value and add a distinct accounting value.
+			return self::add_financial_residual_value_column();
 		}
 
 		return false;
@@ -181,6 +187,37 @@ class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_In
 		return (string) $columns === 'identity_type,identity_value';
 	}
 
+	private static function financial_value_column_ready()
+	{
+		global $wpdb;
+		$table_name = $wpdb->prefix . self::$table_assets_name;
+		$count = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s',
+				$table_name,
+				'financial_residual_value'
+			)
+		);
+		return intval($count) === 1;
+	}
+
+	private static function add_financial_residual_value_column()
+	{
+		global $wpdb;
+		if (self::financial_value_column_ready()) {
+			return true;
+		}
+		$table_name = $wpdb->prefix . self::$table_assets_name;
+		$quoted_table = self::quote_internal_table_name($table_name);
+		if ($quoted_table === null) {
+			return false;
+		}
+		$added = $wpdb->query(
+			"ALTER TABLE $quoted_table ADD COLUMN `financial_residual_value` DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '财务残值' AFTER `residual_value`"
+		);
+		return $added !== false && self::financial_value_column_ready();
+	}
+
 	/**
 	 * 校验并转义插件内部表名。
 	 */
@@ -245,7 +282,8 @@ class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_In
 	        status VARCHAR(64) NOT NULL DEFAULT 'active' COMMENT '资产状态',
 	        category VARCHAR(191) NOT NULL DEFAULT '' COMMENT '分类',
 	        purchase_price DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '采购价',
-	        residual_value DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '残值',
+	        residual_value DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '二手市场价（legacy column name）',
+	        financial_residual_value DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '财务残值',
 	        metadata_json LONGTEXT COMMENT 'JSON encoded extended asset information',
 	        latest_observation_id BIGINT UNSIGNED DEFAULT NULL COMMENT 'Latest observation row ID',
 	        latest_observed_at DATETIME DEFAULT NULL COMMENT 'Latest observation time',

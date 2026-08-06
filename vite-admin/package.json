@@ -20,6 +20,7 @@
     "antd": "^5.26.2",
     "axios": "^1.5.0",
     "dayjs": "^1.11.13",
+    "exceljs": "^4.4.0",
     "fuse.js": "^7.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -47,5 +48,10 @@
   },
   "allowScripts": {
     "esbuild@0.28.1": true
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   }
 }

@@ -319,7 +319,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			$options['asset_number_prefix'] = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $settings['assetNumberPrefix']);
 		}
 		if (array_key_exists('depreciationPeriodMonths', $settings)) {
-			$options['depreciation_period_months'] = max(1, intval($settings['depreciationPeriodMonths']));
+			$options['depreciation_period_months'] = min(240, max(1, intval($settings['depreciationPeriodMonths'])));
 		}
 		if (array_key_exists('defaultResidualRate', $settings)) {
 			$options['default_residual_rate'] = min(100, max(0, floatval($settings['defaultResidualRate'])));
@@ -419,7 +419,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 					$result = $wpdb->insert(
 						Npcink_Device_Inventory_V3_Tables::assets(),
 						$row,
-						array('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%s', '%s', '%s')
+						array('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%f', '%s', '%s', '%s')
 					);
 					// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 					if ($result === false) {
@@ -668,7 +668,10 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			'status' => $this->backup_text($asset, array('status'), 'key', 'active'),
 			'category' => $category,
 			'purchase_price' => isset($asset['purchasePrice']) ? floatval($asset['purchasePrice']) : 0,
-			'residual_value' => isset($asset['residualValue']) ? floatval($asset['residualValue']) : 0,
+			'residual_value' => isset($asset['secondHandMarketValue'])
+				? floatval($asset['secondHandMarketValue'])
+				: (isset($asset['residualValue']) ? floatval($asset['residualValue']) : 0),
+			'financial_residual_value' => isset($asset['financialResidualValue']) ? floatval($asset['financialResidualValue']) : 0,
 			'metadata_json' => $this->safe_json_field($asset, 'metadata'),
 			'created_at' => $this->backup_datetime($asset, 'createdAt', false),
 			'updated_at' => $this->backup_datetime($asset, 'updatedAt', false),
@@ -686,10 +689,11 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			'category' => $row['category'],
 			'purchase_price' => $row['purchase_price'],
 			'residual_value' => $row['residual_value'],
+			'financial_residual_value' => $row['financial_residual_value'],
 			'metadata_json' => $row['metadata_json'],
 			'updated_at' => current_time('mysql'),
 		);
-		$formats = array('%s', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%s', '%s');
+		$formats = array('%s', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%f', '%s', '%s');
 		if ($matched_by_uuid) {
 			$update['asset_number'] = $row['asset_number'];
 			$formats[] = '%s';

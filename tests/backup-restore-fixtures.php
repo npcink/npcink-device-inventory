@@ -315,6 +315,7 @@ $wpdb->export_rows = array(
 			'category' => 'computer',
 			'purchase_price' => '1000.00',
 			'residual_value' => '100.00',
+			'financial_residual_value' => '50.00',
 			'metadata_json' => '{"fixture":true}',
 			'created_at' => '2026-07-06 00:00:00',
 			'updated_at' => '2026-07-06 00:00:00',
@@ -373,6 +374,8 @@ $export_response = npcink_export(array('settings', 'assets', 'identities', 'even
 $export_result = npcink_data($export_response)['data'];
 $exported_backup = $export_result['backup'];
 npcink_assert(count($exported_backup['assets']) === 1, 'server export must include the asset snapshot');
+npcink_assert($exported_backup['assets'][0]['secondHandMarketValue'] === 100.0, 'backup must export second-hand market value');
+npcink_assert($exported_backup['assets'][0]['financialResidualValue'] === 50.0, 'backup must export financial residual value independently');
 npcink_assert(count($exported_backup['identities'][0]['identities']) === 1, 'server export must group identities by asset');
 npcink_assert($export_result['meta']['counts']['observations'] === 1, 'server export must report restorable section counts');
 npcink_assert($exported_backup['settings']['renewalAgeYears'] === 5, 'server export must include the renewal age threshold');

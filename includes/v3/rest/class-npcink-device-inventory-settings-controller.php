@@ -85,7 +85,7 @@ class Npcink_Device_Inventory_Settings_Controller
 			$options['asset_number_prefix'] = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $params['assetNumberPrefix']);
 		}
 		if (array_key_exists('depreciationPeriodMonths', $params)) {
-			$options['depreciation_period_months'] = max(1, intval($params['depreciationPeriodMonths']));
+			$options['depreciation_period_months'] = min(240, max(1, intval($params['depreciationPeriodMonths'])));
 		}
 		if (array_key_exists('defaultResidualRate', $params)) {
 			$options['default_residual_rate'] = min(100, max(0, floatval($params['defaultResidualRate'])));

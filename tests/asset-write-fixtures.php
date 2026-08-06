@@ -276,6 +276,7 @@ function npcink_asset_row($id, $uuid, $status = 'active')
 		'category' => 'computer',
 		'purchase_price' => '0',
 		'residual_value' => '0',
+		'financial_residual_value' => '0',
 		'metadata_json' => '{}',
 		'created_at' => '2026-07-15 00:00:00',
 		'updated_at' => '2026-07-15 00:00:00',
@@ -321,6 +322,8 @@ npcink_asset_write_assert($trend_observations->daily_count_args === array('2026-
 $invalid = $controller->create_item(new Npcink_Asset_Write_Request(array('status' => 'unknown')));
 npcink_asset_write_assert(is_wp_error($invalid) && $invalid->get_error_code() === 'invalid_asset_status', 'invalid status must fail validation');
 npcink_asset_write_assert($wpdb->commands === array(), 'validation failure must not start a transaction');
+$invalid_financial_filter = $controller->get_items(new Npcink_Asset_Write_Request(array('financialDataStatus' => 'unknown')));
+npcink_asset_write_assert(is_wp_error($invalid_financial_filter) && $invalid_financial_filter->get_error_code() === 'invalid_financial_data_status', 'invalid financial data status must fail at the REST boundary');
 $legacy_type = $controller->create_item(new Npcink_Asset_Write_Request(array('assetType' => 'pc')));
 npcink_asset_write_assert(is_wp_error($legacy_type) && $legacy_type->get_error_code() === 'invalid_asset_type', 'legacy asset types must fail validation');
 npcink_asset_write_assert($wpdb->commands === array(), 'legacy asset type failure must not start a transaction');
@@ -329,6 +332,22 @@ $first_uuid = '11111111-1111-4111-8111-111111111111';
 $second_uuid = '22222222-2222-4222-8222-222222222222';
 $rows = array($first_uuid => npcink_asset_row(1, $first_uuid), $second_uuid => npcink_asset_row(2, $second_uuid));
 list($controller, $assets, $events) = npcink_asset_write_controller($rows);
+
+$financial_values = $controller->update_item(
+	new Npcink_Asset_Write_Request(
+		array(
+			'uuid' => $first_uuid,
+			'secondHandMarketValue' => 800,
+			'financialResidualValue' => 300,
+		)
+	)
+);
+npcink_asset_write_assert($financial_values instanceof WP_REST_Response, 'distinct financial values must be accepted');
+$financial_data = $financial_values->get_data()['data'];
+npcink_asset_write_assert($financial_data['secondHandMarketValue'] === 800.0, 'second-hand market value must round-trip independently');
+npcink_asset_write_assert($financial_data['financialResidualValue'] === 300.0, 'financial residual value must round-trip independently');
+npcink_asset_write_assert($financial_data['residualValue'] === 800.0, 'legacy residualValue response alias must remain compatible');
+$wpdb->commands = array();
 
 $archived_rows = $rows;
 $archived_rows[$second_uuid]['status'] = 'deleted';

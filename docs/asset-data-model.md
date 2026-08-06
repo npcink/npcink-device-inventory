@@ -32,7 +32,12 @@ Important fields:
   row returns `409 duplicate_number`; archiving alone does not release it.
 - `name`, `owner_name`, `department`, `status`, `category`: normal list and
   filter fields.
-- `purchase_price`, `residual_value`: financial summary fields.
+- `purchase_price`: original purchase cost.
+- `residual_value`: second-hand market value. The legacy column name is kept to
+  avoid a destructive database rename; new REST consumers use
+  `secondHandMarketValue`.
+- `financial_residual_value`: accounting residual value used for depreciation,
+  residual-rate thresholds, and financial summaries.
 - `metadata_json`: JSON-encoded asset-type-specific fields that do not justify
   new columns. Stored as `LONGTEXT` for broad MySQL/MariaDB compatibility.
 
@@ -104,3 +109,24 @@ Do not add a new asset category by creating another asset table or extending
 where needed.
 
 Old data should be converted into this model before import.
+
+## Financial residual calculation
+
+The admin UI provides a straight-line depreciation suggestion:
+
+`terminal residual = purchase price × residual rate`
+
+`monthly depreciation = (purchase price − terminal residual) ÷ depreciation months`
+
+`current financial residual = max(terminal residual, purchase price − monthly depreciation × elapsed full months)`
+
+The calculation uses the explicit purchase date and falls back to the asset
+creation date when needed. `metadata.finance.financial_residual_mode` controls
+which value is effective:
+
+- `auto`: use the live calculated value in detail views, analysis, and exports.
+- `manual`: use `financial_residual_value` as an explicit accounting override.
+
+Assets without a mode default to `manual` when they already contain a positive
+financial residual value, preserving historical entries; otherwise they default
+to `auto`.

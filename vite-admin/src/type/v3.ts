@@ -14,6 +14,9 @@ export interface Asset {
   status: AssetStatus;
   category: string;
   purchasePrice: number;
+  secondHandMarketValue: number;
+  financialResidualValue: number;
+  /** @deprecated Backward-compatible alias of secondHandMarketValue. */
   residualValue: number;
   metadata: JsonRecord;
   latestObservation?: {
@@ -35,6 +38,9 @@ export interface AssetInput {
   status?: AssetStatus;
   category?: string;
   purchasePrice?: number;
+  secondHandMarketValue?: number;
+  financialResidualValue?: number;
+  /** @deprecated Use secondHandMarketValue. */
   residualValue?: number;
   metadata?: JsonRecord;
 }
@@ -135,6 +141,7 @@ export interface AssetListParams {
   department?: string;
   category?: string;
   purchasePlatform?: string;
+  financialDataStatus?: "missing_purchase_price" | "missing_second_hand_market_value" | "missing_both" | "complete";
   sortBy?: "latestUpload" | "latestObserved" | "updated";
   includeDeleted?: boolean;
 }

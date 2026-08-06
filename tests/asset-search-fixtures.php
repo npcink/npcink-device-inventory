@@ -107,6 +107,7 @@ $repository->list_assets(
 		'category' => '',
 		'asset_scope' => '',
 		'purchase_platform' => '',
+		'financial_data_status' => 'missing_both',
 		'sort_by' => '',
 		'include_deleted' => false,
 	)
@@ -115,11 +116,21 @@ $repository->list_assets(
 npcink_asset_search_assert(count($wpdb->queries) === 2, 'list_assets should run count and select queries');
 $select_query = $wpdb->queries[1];
 $select_args = $wpdb->args[1];
+$count_query = $wpdb->queries[0];
+$count_args = $wpdb->args[0];
+
+preg_match_all('/%(?:i|s|d|f)/', $count_query, $count_placeholders);
+preg_match_all('/%(?:i|s|d|f)/', $select_query, $select_placeholders);
+npcink_asset_search_assert(count($count_placeholders[0]) === count($count_args), 'count query placeholders must match prepared arguments');
+npcink_asset_search_assert(count($select_placeholders[0]) === count($select_args), 'select query placeholders must match prepared arguments');
 
 npcink_asset_search_assert(strpos($select_query, "OR (%s = '1' AND a.metadata_json LIKE %s)") !== false, 'asset metadata LIKE must be guarded');
 npcink_asset_search_assert(strpos($select_query, "OR (%s = '1' AND EXISTS") !== false, 'extended EXISTS search must be guarded');
 npcink_asset_search_assert(strpos($select_query, "WHEN %s = '1' AND lo.summary_json LIKE %s THEN 5") !== false, 'summary ranking must be guarded');
 npcink_asset_search_assert(in_array('__npcink_no_extended_asset_match__', $select_args, true), 'short keyword should use extended search sentinel');
 npcink_asset_search_assert(in_array('', $select_args, true), 'short keyword should pass disabled extended search flag');
+npcink_asset_search_assert(strpos($select_query, "missing_purchase_price' AND a.purchase_price <= 0") !== false, 'purchase price completeness guard must exist');
+npcink_asset_search_assert(strpos($select_query, "missing_second_hand_market_value' AND a.residual_value <= 0") !== false, 'second-hand market value completeness guard must exist');
+npcink_asset_search_assert(in_array('missing_both', $select_args, true), 'financial data status must be passed into the prepared query');
 
 echo "Asset search fixture checks passed.\n";

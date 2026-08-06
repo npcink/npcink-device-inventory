@@ -167,6 +167,11 @@ class Npcink_Device_Inventory_Assets_Controller
 
 	public function get_items($request)
 	{
+		$financial_data_status = sanitize_key((string) $request->get_param('financialDataStatus'));
+		$allowed_financial_statuses = array('', 'missing_purchase_price', 'missing_second_hand_market_value', 'missing_both', 'complete');
+		if (!in_array($financial_data_status, $allowed_financial_statuses, true)) {
+			return Npcink_Device_Inventory_V3_Response::error('invalid_financial_data_status', 'Financial data status is not supported.', 422);
+		}
 		$result = $this->assets->list_assets(
 			array(
 				'page' => $request->get_param('page') ?: 1,
@@ -178,6 +183,7 @@ class Npcink_Device_Inventory_Assets_Controller
 				'department' => $request->get_param('department'),
 				'category' => $request->get_param('category'),
 				'purchase_platform' => $request->get_param('purchasePlatform'),
+				'financial_data_status' => $financial_data_status,
 				'sort_by' => $request->get_param('sortBy'),
 				'include_deleted' => $request->get_param('includeDeleted'),
 			)
@@ -644,7 +650,15 @@ class Npcink_Device_Inventory_Assets_Controller
 			$data[$definition[0]] = $value;
 		}
 
-		$number_fields = array('purchasePrice' => 'purchase_price', 'residualValue' => 'residual_value');
+		$number_fields = array(
+			'purchasePrice' => 'purchase_price',
+			'secondHandMarketValue' => 'residual_value',
+			'financialResidualValue' => 'financial_residual_value',
+		);
+		// residualValue remains a write-compatible alias for older admin clients.
+		if (!array_key_exists('secondHandMarketValue', $params) && array_key_exists('residualValue', $params)) {
+			$params['secondHandMarketValue'] = $params['residualValue'];
+		}
 		foreach ($number_fields as $input_key => $storage_key) {
 			if (!$creating && !array_key_exists($input_key, $params)) {
 				continue;
@@ -820,6 +834,8 @@ class Npcink_Device_Inventory_Assets_Controller
 			'status' => (string) $row['status'],
 			'category' => (string) $row['category'],
 			'purchasePrice' => floatval($row['purchase_price']),
+			'secondHandMarketValue' => floatval($row['residual_value']),
+			'financialResidualValue' => floatval(isset($row['financial_residual_value']) ? $row['financial_residual_value'] : 0),
 			'residualValue' => floatval($row['residual_value']),
 			'metadata' => $this->decode_json(isset($row['metadata_json']) ? $row['metadata_json'] : '', array()),
 			'createdAt' => (string) $row['created_at'],

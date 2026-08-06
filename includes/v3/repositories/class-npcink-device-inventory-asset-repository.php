@@ -166,6 +166,7 @@ class Npcink_Device_Inventory_Asset_Repository
 		$platform_regex = $this->build_platform_regex(isset($args['purchase_platform']) ? $args['purchase_platform'] : '');
 		$platform_filter = $platform_regex === '' ? '' : '1';
 		$platform_query_regex = $platform_regex === '' ? 'a^' : $platform_regex;
+		$financial_data_status = isset($args['financial_data_status']) ? sanitize_key($args['financial_data_status']) : '';
 		$table = Npcink_Device_Inventory_V3_Tables::assets();
 		$identities_table = Npcink_Device_Inventory_V3_Tables::identities();
 		$observations_table = Npcink_Device_Inventory_V3_Tables::observations();
@@ -200,7 +201,14 @@ class Npcink_Device_Inventory_Asset_Repository
 						AND so.summary_json LIKE %s
 					))
 				)
-				AND (%s = '' OR a.metadata_json REGEXP %s)",
+				AND (%s = '' OR a.metadata_json REGEXP %s)
+				AND (
+					%s = ''
+					OR (%s = 'missing_purchase_price' AND a.purchase_price <= 0)
+					OR (%s = 'missing_second_hand_market_value' AND a.residual_value <= 0)
+					OR (%s = 'missing_both' AND a.purchase_price <= 0 AND a.residual_value <= 0)
+					OR (%s = 'complete' AND a.purchase_price > 0 AND a.residual_value > 0)
+				)",
 				$table,
 				$asset_type,
 				$asset_type,
@@ -228,7 +236,12 @@ class Npcink_Device_Inventory_Asset_Repository
 				$observations_table,
 				$extended_like,
 				$platform_filter,
-				$platform_query_regex
+				$platform_query_regex,
+				$financial_data_status,
+				$financial_data_status,
+				$financial_data_status,
+				$financial_data_status,
+				$financial_data_status
 			)
 		);
 
@@ -269,6 +282,13 @@ class Npcink_Device_Inventory_Asset_Repository
 				))
 			)
 			AND (%s = '' OR a.metadata_json REGEXP %s)
+			AND (
+				%s = ''
+				OR (%s = 'missing_purchase_price' AND a.purchase_price <= 0)
+				OR (%s = 'missing_second_hand_market_value' AND a.residual_value <= 0)
+				OR (%s = 'missing_both' AND a.purchase_price <= 0 AND a.residual_value <= 0)
+				OR (%s = 'complete' AND a.purchase_price > 0 AND a.residual_value > 0)
+			)
 			ORDER BY
 				CASE
 					WHEN %s = '' THEN 0
@@ -333,6 +353,11 @@ class Npcink_Device_Inventory_Asset_Repository
 				$extended_like,
 				$platform_filter,
 				$platform_query_regex,
+				$financial_data_status,
+				$financial_data_status,
+				$financial_data_status,
+				$financial_data_status,
+				$financial_data_status,
 				$search,
 				$search,
 				$search,
@@ -389,6 +414,7 @@ class Npcink_Device_Inventory_Asset_Repository
 			'category' => sanitize_text_field($data['category']),
 			'purchase_price' => floatval($data['purchase_price']),
 			'residual_value' => floatval($data['residual_value']),
+			'financial_residual_value' => floatval($data['financial_residual_value']),
 			'metadata_json' => Npcink_Device_Inventory_V3_Sanitizer::json_encode($data['metadata']),
 		);
 
@@ -396,7 +422,7 @@ class Npcink_Device_Inventory_Asset_Repository
 		$result = $wpdb->insert(
 			Npcink_Device_Inventory_V3_Tables::assets(),
 			$row,
-			array('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%s')
+			array('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%f', '%s')
 		);
 		$this->last_write_error = $result === false ? (string) $wpdb->last_error : '';
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -422,6 +448,7 @@ class Npcink_Device_Inventory_Asset_Repository
 			'category' => '%s',
 			'purchase_price' => '%f',
 			'residual_value' => '%f',
+			'financial_residual_value' => '%f',
 			'metadata_json' => '%s',
 		);
 		$row = array();
@@ -519,7 +546,7 @@ class Npcink_Device_Inventory_Asset_Repository
 	private function sanitize_list_cache_args($args)
 	{
 		$result = array();
-		foreach (array('asset_type', 'status', 'department', 'category', 'asset_scope', 'search', 'purchase_platform', 'sort_by', 'include_deleted') as $field) {
+		foreach (array('asset_type', 'status', 'department', 'category', 'asset_scope', 'search', 'purchase_platform', 'financial_data_status', 'sort_by', 'include_deleted') as $field) {
 			$result[$field] = isset($args[$field]) ? sanitize_text_field((string) $args[$field]) : '';
 		}
 		return $result;
