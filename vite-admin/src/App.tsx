@@ -2,8 +2,12 @@ import Index from "@/pages/index";
 import { ConfigProvider } from "antd";
 import "./App.css";
 import zhCN from "antd/locale/zh_CN";
+import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
 import { message } from "antd";
+
+dayjs.locale("zh-cn");
+
 message.config({
   top: 50,
   duration: 2,

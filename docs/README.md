@@ -8,6 +8,7 @@ This folder keeps the current product contracts, development guardrails, release
 - `admin-read-only-analysis-development-standard.md`: implementation, data-semantics, UI, permission, and verification rules for read-only admin analytics.
 - `asset-data-model.md`: v3 asset, identity, observation, and event model contract.
 - `asset-finance-export-development-retrospective-2026-08-06.md`: consolidated finance-field, depreciation, missing-data, configurable export, UI iteration, and verification standard.
+- `asset-type-archive-admin-ui-development-retrospective-2026-08-06.md`: device subtype reuse, archive-as-business-exclusion, compact admin forms, date localization, summary hierarchy, and final PCP lessons.
 - `identity-contract.md`: current hardware identity v2 upload contract.
 - `device-upload-troubleshooting-and-operations.md`: production upload troubleshooting, evidence, and recovery runbook.
 - `decisions/ADR-003-pre-ga-scope-reset.md`: pre-GA scope reset; its analysis restriction is partially superseded by ADR-009.
@@ -18,6 +19,7 @@ This folder keeps the current product contracts, development guardrails, release
 - `decisions/ADR-009-restore-read-only-analysis.md`: current boundary for read-only trends, distributions, value summaries, and excluded writable analysis workflows.
 - `decisions/ADR-010-separate-market-and-financial-residual-values.md`: separates second-hand market value from accounting residual value while preserving legacy compatibility.
 - `decisions/ADR-011-configurable-asset-export.md`: configurable Excel/CSV export, status colors, ordered fields, and separate WordPress-aware preview.
+- `decisions/ADR-012-treat-archived-assets-as-business-excluded-records.md`: archived assets remain auditable but are excluded from operational lists, calculations, uploads, and asset-table exports.
 - `device-identity-collection-release-retrospective-2026-08-05.md`: consolidated incident, collection, operating, and release lessons from the 3.1.2/0.3.3 phase.
 - `read-only-analysis-restoration-retrospective-2026-08-06.md`: history, real-data findings, UI iterations, and reusable lessons from restoring read-only analytics and multi-factor queries.
 - `release-readiness-checklist.md`: release gate and manual smoke-test checklist.

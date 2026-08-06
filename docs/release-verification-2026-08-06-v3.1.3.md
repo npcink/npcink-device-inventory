@@ -13,7 +13,7 @@ same bytes and pass the official Plugin Check gate.
 - PHP tested in Docker: `8.3`
 - Plugin Check: `2.0.0`
 - Package entry count: `80`
-- SHA-256: `b590964483858c8cc685f41f45b95a820ccf76f0bf547b274c5700dc067023d2`
+- SHA-256: `85ca0078d169351ac3a145fce2b79bf57ca75007bed7701abd64c9637266b837`
 - Release package: `release/npcink-device-inventory.zip`
 - Submission package: `sj/npcink-device-inventory.zip`
 
@@ -29,6 +29,12 @@ same bytes and pass the official Plugin Check gate.
   queue.
 - Configurable Excel/CSV export with field presets, ordered columns, status
   colors, and a separate WordPress-aware full-width preview.
+- Computer device subtype selection backed by the existing `category` field and
+  included by default in asset-table exports.
+- Archived-asset business exclusion across operational queries, collection
+  trends, analysis, exports, and observation ingest.
+- Compact computer settings layout, accessible help, localized date selection,
+  and a reduced four-item finance summary.
 
 ## Automated verification
 

@@ -878,7 +878,7 @@
 
 .npcink-v3-detail-finance-summary {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid #e2e6ed;
   border-radius: 8px;
@@ -919,6 +919,23 @@
 
 .npcink-v3-detail-finance-summary .is-emphasis strong {
   color: #175cd3;
+}
+
+.npcink-v3-detail-finance-summary .npcink-v3-finance-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.npcink-v3-detail-finance-summary .npcink-v3-finance-label em {
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: #175cd3;
+  background: #dbeafe;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .npcink-v3-hardware-grid {
@@ -2120,6 +2137,26 @@
   font-weight: 500;
 }
 
+.npcink-v3-form-label-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.npcink-v3-form-label-with-help .anticon {
+  color: #98a2b3;
+  cursor: help;
+}
+
+.npcink-v3-form-label-with-help .anticon:hover,
+.npcink-v3-form-label-with-help .anticon:focus-visible {
+  color: #1677ff;
+}
+
+.npcink-v3-date-picker {
+  width: 100%;
+}
+
 .npcink-v3-settings-wide {
   grid-column: 1 / -1;
   max-width: calc(50% - 9px);
@@ -2472,8 +2509,7 @@
     border-right: 0;
   }
 
-  .npcink-v3-detail-finance-summary > div:last-child {
-    grid-column: 1 / -1;
+  .npcink-v3-detail-finance-summary > div:nth-last-child(-n + 2) {
     border-bottom: 0;
   }
 

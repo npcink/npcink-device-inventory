@@ -384,6 +384,25 @@ npcink_ingest_assert($result instanceof WP_Error && $result->code === 'missing_i
 npcink_ingest_assert($wpdb->commands === array(), 'missing identities must fail before starting a transaction');
 
 $wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
+$archived_asset = npcink_ingest_asset_row(11, 'archived-owner');
+$archived_asset['status'] = 'deleted';
+$assets = new Npcink_Device_Inventory_Asset_Repository(array(11 => $archived_asset));
+$identities = new Npcink_Device_Inventory_Identity_Repository();
+$identities->matched_asset_id = 11;
+$observations = new Npcink_Device_Inventory_Observation_Repository();
+$service = new Npcink_Device_Inventory_Observation_Ingest_Service(
+	$assets,
+	$identities,
+	$observations,
+	new Npcink_Device_Inventory_Event_Service(),
+	new Npcink_Device_Inventory_Device_Identity_Service()
+);
+$result = $service->ingest(npcink_ingest_payload());
+npcink_ingest_assert($result instanceof WP_Error && $result->code === 'asset_archived', 'archived assets must reject new observations');
+npcink_ingest_assert($wpdb->commands === array(), 'archived assets must reject uploads before starting a transaction');
+npcink_ingest_assert($observations->created_asset_ids === array(), 'archived assets must not store new observations');
+
+$wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
 $assets = new Npcink_Device_Inventory_Asset_Repository(
 	array(
 		11 => npcink_ingest_asset_row(11, 'system-owner'),

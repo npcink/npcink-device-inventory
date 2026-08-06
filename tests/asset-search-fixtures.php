@@ -133,4 +133,27 @@ npcink_asset_search_assert(strpos($select_query, "missing_purchase_price' AND a.
 npcink_asset_search_assert(strpos($select_query, "missing_second_hand_market_value' AND a.residual_value <= 0") !== false, 'second-hand market value completeness guard must exist');
 npcink_asset_search_assert(in_array('missing_both', $select_args, true), 'financial data status must be passed into the prepared query');
 
+require_once __DIR__ . '/../includes/v3/repositories/class-npcink-device-inventory-observation-repository.php';
+
+$wpdb->queries = array();
+$wpdb->args = array();
+$observations = new Npcink_Device_Inventory_Observation_Repository();
+$observations->list_all(
+	array(
+		'page' => 1,
+		'pageSize' => 20,
+		'source' => '',
+		'search' => '',
+	)
+);
+npcink_asset_search_assert(count($wpdb->queries) === 2, 'global observation list should run count and select queries');
+npcink_asset_search_assert(strpos($wpdb->queries[0], "a.status <> 'deleted'") !== false, 'global observation count must exclude archived assets');
+npcink_asset_search_assert(strpos($wpdb->queries[1], "a.status <> 'deleted'") !== false, 'global observation rows must exclude archived assets');
+
+$wpdb->queries = array();
+$wpdb->args = array();
+$observations->daily_counts_between('2026-07-01 00:00:00', '2026-08-01 00:00:00');
+npcink_asset_search_assert(count($wpdb->queries) === 1, 'collection trend aggregate should run one query');
+npcink_asset_search_assert(strpos($wpdb->queries[0], "a.status <> 'deleted'") !== false, 'collection trend aggregate must exclude archived assets');
+
 echo "Asset search fixture checks passed.\n";

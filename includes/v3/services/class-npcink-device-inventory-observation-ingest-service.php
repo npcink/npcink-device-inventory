@@ -60,6 +60,13 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 		}
 		$mode = 'matched';
 		$asset = $asset_id ? $this->assets->find_by_id($asset_id) : null;
+		if ($asset && isset($asset['status']) && $asset['status'] === 'deleted') {
+			return Npcink_Device_Inventory_V3_Response::error(
+				'asset_archived',
+				'Archived assets cannot receive device observations. Restore the asset before uploading again.',
+				409
+			);
+		}
 		if ($matched_by_legacy_identity && $asset && $this->legacy_migration_conflicts($asset, $identities)) {
 			return Npcink_Device_Inventory_V3_Response::error(
 				'legacy_identity_migration_conflict',
@@ -96,6 +103,13 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 				return Npcink_Device_Inventory_V3_Response::error('identity_evidence_conflict', 'Hardware identity signals belong to different assets.', 409);
 			}
 			$asset = $this->assets->find_by_id($conflict_owner_ids[0]);
+			if ($asset && isset($asset['status']) && $asset['status'] === 'deleted') {
+				return Npcink_Device_Inventory_V3_Response::error(
+					'asset_archived',
+					'Archived assets cannot receive device observations. Restore the asset before uploading again.',
+					409
+				);
+			}
 			if (!$asset || !$this->begin_transaction()) {
 				return Npcink_Device_Inventory_V3_Response::error('identity_owner_unavailable', 'Identity owner could not be loaded.', 409);
 			}

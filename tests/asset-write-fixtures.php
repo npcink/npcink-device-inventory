@@ -182,11 +182,17 @@ class Npcink_Device_Inventory_Observation_Repository
 {
 	public $daily_counts = array();
 	public $daily_count_args = array();
+	public $cache_invalidations = 0;
 
 	public function daily_counts_between($start_at, $end_at)
 	{
 		$this->daily_count_args = array($start_at, $end_at);
 		return $this->daily_counts;
+	}
+
+	public function invalidate_cache()
+	{
+		$this->cache_invalidations++;
 	}
 }
 
@@ -449,6 +455,21 @@ npcink_asset_write_assert(is_wp_error($deleted) && $deleted->get_error_code() ==
 npcink_asset_write_assert($wpdb->commands === array('START TRANSACTION', 'ROLLBACK'), 'failed archive write must roll back');
 npcink_asset_write_assert($events->records === array(), 'failed archive write must not create an audit event');
 npcink_asset_write_assert($assets->cache_invalidations === 1, 'failed archive rollback must invalidate transactional asset cache entries');
+
+$wpdb = new Npcink_Asset_Write_Wpdb();
+list($controller, $assets, $events, $observations) = npcink_asset_write_controller(array($first_uuid => npcink_asset_row(1, $first_uuid)));
+$archived = $controller->delete_item(new Npcink_Asset_Write_Request(array('uuid' => $first_uuid)));
+npcink_asset_write_assert($archived instanceof WP_REST_Response, 'successful archive must return a REST response');
+npcink_asset_write_assert($wpdb->commands === array('START TRANSACTION', 'COMMIT'), 'successful archive must commit exactly once');
+npcink_asset_write_assert($observations->cache_invalidations === 1, 'successful archive must invalidate observation-derived caches');
+
+$wpdb = new Npcink_Asset_Write_Wpdb();
+list($controller, $assets, $events, $observations) = npcink_asset_write_controller(array($first_uuid => npcink_asset_row(1, $first_uuid)));
+$batch_archived = $controller->batch_items(
+	new Npcink_Asset_Write_Request(array('operation' => 'archive', 'uuids' => array($first_uuid)))
+);
+npcink_asset_write_assert($batch_archived instanceof WP_REST_Response, 'successful batch archive must return a REST response');
+npcink_asset_write_assert($observations->cache_invalidations === 1, 'successful batch archive must invalidate observation-derived caches');
 
 $wpdb = new Npcink_Asset_Write_Wpdb();
 $wpdb->fail_command = 'COMMIT';

@@ -300,6 +300,7 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (!$this->commit_transaction()) {
 			return $this->rollback_error('transaction_commit_failed', 'Failed to commit asset transaction.');
 		}
+		$this->observations->invalidate_cache();
 		return rest_ensure_response(array('data' => $this->format_asset($updated)));
 	}
 
@@ -384,6 +385,9 @@ class Npcink_Device_Inventory_Assets_Controller
 
 		if (!$this->commit_transaction()) {
 			return $this->rollback_error('transaction_commit_failed', 'Failed to commit batch transaction.');
+		}
+		if ($operation === 'archive') {
+			$this->observations->invalidate_cache();
 		}
 		return rest_ensure_response(
 			array(

@@ -1,11 +1,13 @@
 import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AppleFilled, DesktopOutlined, PlusOutlined, QuestionCircleOutlined, SearchOutlined, WindowsFilled } from "@ant-design/icons";
+import { AppleFilled, DesktopOutlined, InfoCircleOutlined, PlusOutlined, QuestionCircleOutlined, SearchOutlined, WindowsFilled } from "@ant-design/icons";
+import dayjs from "dayjs";
 import {
   Alert,
   Button,
   Checkbox,
   Collapse,
+  DatePicker,
   Dropdown,
   Empty,
   Form,
@@ -90,6 +92,11 @@ const ASSET_TYPES: Array<{ label: string; value: AssetType }> = [
 
 const DEFAULT_CUSTOM_CATEGORIES = ["显卡", "手机", "机房设备", "网络设备", "办公设备"];
 
+const COMPUTER_DEVICE_TYPE_OPTIONS = ["笔记本", "台式机", "苹果电脑", "一体机"].map((value) => ({
+  label: value,
+  value,
+}));
+
 const CUSTOM_PURCHASE_PLATFORM_OPTIONS = [
   { label: "京东", value: "京东|JingDong" },
   { label: "淘宝", value: "淘宝|TaoBao" },
@@ -114,7 +121,7 @@ const EVENT_TYPE_OPTIONS = [
   { label: "批量修改", value: "bulk_updated" },
   { label: "字段变更", value: "field_changed" },
   { label: "采集接收", value: "observation_received" },
-  { label: "删除/归档", value: "deleted" },
+  { label: "归档", value: "deleted" },
 ];
 
 const MANUAL_RECORD_OPTIONS = [
@@ -795,7 +802,7 @@ const ASSET_EXPORT_FIELDS: Array<{
   { key: "ownerName", label: "使用人", group: "基础信息", defaultChecked: true, value: (asset) => asset.ownerName },
   { key: "department", label: "部门", group: "基础信息", defaultChecked: true, value: (asset) => asset.department },
   { key: "status", label: "状态", group: "基础信息", defaultChecked: true, value: (asset) => statusLabel(asset.status) },
-  { key: "category", label: "分类", group: "基础信息", value: (asset) => asset.category },
+  { key: "category", label: "设备类型 / 分类", group: "基础信息", defaultChecked: true, value: (asset) => asset.category },
   { key: "purchasePrice", label: "采购价", group: "财务信息", defaultChecked: true, value: (asset) => asset.purchasePrice },
   { key: "secondHandMarketValue", label: "二手市场价", group: "财务信息", defaultChecked: true, value: (asset) => asset.secondHandMarketValue },
   { key: "financialResidualValue", label: "财务残值", group: "财务信息", defaultChecked: true, value: (asset) => asset.financialResidualValue },
@@ -834,6 +841,8 @@ const DEFAULT_ASSET_EXPORT_FIELD_KEYS = ASSET_EXPORT_FIELDS
 const selectedAssetExportFields = (fieldKeys: AssetExportFieldKey[]) => fieldKeys
   .map((key) => ASSET_EXPORT_FIELDS.find((field) => field.key === key))
   .filter((field): field is (typeof ASSET_EXPORT_FIELDS)[number] => Boolean(field));
+
+const exportableAssets = (assets: Asset[]) => assets.filter((asset) => asset.status !== "deleted");
 
 const assetsToCsv = (assets: Asset[], fieldKeys: AssetExportFieldKey[] = DEFAULT_ASSET_EXPORT_FIELD_KEYS) => {
   const fields = selectedAssetExportFields(fieldKeys);
@@ -1962,8 +1971,17 @@ const AssetFormModal = ({ asset, open, departmentOptions = [], onClose, onSubmit
                 filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())}
               />
             </Form.Item>
-            <Form.Item name="category" label="分类">
-              <Input placeholder="例如：显卡、手机、机房设备" />
+            <Form.Item name="category" label={showCustomFields ? "分类" : "设备类型"}>
+              {showCustomFields ? (
+                <Input placeholder="例如：显卡、手机、机房设备" />
+              ) : (
+                <Select
+                  allowClear
+                  options={COMPUTER_DEVICE_TYPE_OPTIONS}
+                  placeholder="选择设备类型"
+                  popupMatchSelectWidth={false}
+                />
+              )}
             </Form.Item>
             <Form.Item name="status" label="状态">
               <Select options={EDITABLE_STATUS_OPTIONS} />
@@ -2298,7 +2316,8 @@ const AssetExportModal = ({
     () => getAssets({ ...previewParams, page: 1, pageSize: 30 }),
     { enabled: open && previewOpen && scope !== "selected", staleTime: 30_000 }
   );
-  const previewAssets = (scope === "selected" ? selectedAssets.slice(0, 30) : previewQuery.data?.data || []).map((asset) => ({
+  const selectedExportAssets = exportableAssets(selectedAssets);
+  const previewAssets = exportableAssets(scope === "selected" ? selectedAssets : previewQuery.data?.data || []).slice(0, 30).map((asset) => ({
     ...asset,
     financialResidualValue: effectiveFinancialResidualValue(asset, settingsQuery.data),
   }));
@@ -2328,9 +2347,13 @@ const AssetExportModal = ({
     }
     setExporting(true);
     try {
-      const assets = scope === "selected"
+      const assets = exportableAssets(scope === "selected"
         ? selectedAssets
-        : await fetchAllAssets(scope === "current-filter" ? currentQueryParams : exportParams[scope]);
+        : await fetchAllAssets(scope === "current-filter" ? currentQueryParams : exportParams[scope]));
+      if (!assets.length) {
+        message.warning("当前范围没有可导出的未归档资产");
+        return;
+      }
       const exportAssetsWithEffectiveFinancialValue = assets.map((asset) => ({
         ...asset,
         financialResidualValue: effectiveFinancialResidualValue(asset, settingsQuery.data),
@@ -2354,7 +2377,7 @@ const AssetExportModal = ({
   const previewTotalText = scope === "current-filter"
     ? currentFilterCountText
     : scope === "selected"
-      ? `${selectedAssets.length} 条`
+      ? `${selectedExportAssets.length} 条`
       : previewQuery.data
         ? `${previewQuery.data.pagination.totalItems} 条`
         : "计算中";
@@ -2399,11 +2422,11 @@ const AssetExportModal = ({
         <section>
           <Text strong>导出范围</Text>
           <Text type="secondary" className="npcink-v3-export-range-note">
-            符合当前筛选条件的数据，就是资产列表里筛选后的全部结果，不只是当前页。
+            符合当前筛选条件的数据，就是资产列表里筛选后的全部结果，不只是当前页；已归档设备始终不会导出。
           </Text>
           <Radio.Group className="npcink-v3-export-scope-grid" value={scope} onChange={(event) => setScope(event.target.value)}>
             <Radio value="current-filter"><strong>当前筛选结果</strong><small>{currentScopeLabel} · {currentFilterCountText}</small></Radio>
-            {selectedAssets.length ? <Radio value="selected"><strong>已勾选设备</strong><small>共 {selectedAssets.length} 条</small></Radio> : <div className="npcink-v3-export-scope-empty"><strong>已勾选设备</strong><small>尚未选择设备，请先在资产列表进入批量模式并勾选。</small></div>}
+            {selectedAssets.length ? <Radio value="selected"><strong>已勾选设备</strong><small>可导出 {selectedExportAssets.length} 条（自动排除已归档）</small></Radio> : <div className="npcink-v3-export-scope-empty"><strong>已勾选设备</strong><small>尚未选择设备，请先在资产列表进入批量模式并勾选。</small></div>}
             <Radio value="computer"><strong>全部电脑设备</strong><small>不受当前筛选条件影响</small></Radio>
             <Radio value="custom"><strong>全部自定义设备</strong><small>不受当前筛选条件影响</small></Radio>
             <Radio value="all"><strong>全部资产</strong><small>忽略当前筛选，包含电脑与自定义设备</small></Radio>
@@ -2878,6 +2901,7 @@ const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, onArchiv
         ownerName: values.ownerName,
         department: values.department,
         status: values.status,
+        category: values.category,
         purchasePrice: Number(values.purchasePrice || 0),
         secondHandMarketValue: Number(values.secondHandMarketValue || 0),
         financialResidualValue: Number(values.financialResidualValue || 0),
@@ -2910,6 +2934,7 @@ const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, onArchiv
       ownerName: asset.ownerName,
       department: asset.department || DEFAULT_DEPARTMENT,
       status: asset.status,
+      category: asset.category,
       purchasePrice: asset.purchasePrice,
       secondHandMarketValue: asset.secondHandMarketValue,
       financialResidualValue: asset.financialResidualValue,
@@ -2923,19 +2948,28 @@ const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, onArchiv
       <Form form={form} layout="vertical" onFinish={(values) => updateMutation.mutate(values)}>
         <div className="npcink-v3-settings-section">
           <h4>基础信息</h4>
-          <div className="npcink-v3-settings-grid">
+          <div className="npcink-v3-settings-grid npcink-v3-settings-grid-three">
             <Form.Item name="ownerName" label="使用人 / 责任人">
               <Input placeholder="姓名或工号" />
             </Form.Item>
             <Form.Item name="assetNumber" label="编号">
               <Input />
             </Form.Item>
+            <Form.Item label="IP 地址">
+              <Input value={primaryIp} readOnly placeholder="暂无采集 IP" />
+            </Form.Item>
           </div>
           <div className="npcink-v3-settings-grid npcink-v3-settings-grid-three">
             <Form.Item
               name="department"
-              label="部门"
-              extra="只能选择设置中维护的部门；未选择时会归入未分配。"
+              label={(
+                <span className="npcink-v3-form-label-with-help">
+                  部门
+                  <Tooltip title="只能选择设置中维护的部门；未选择时会归入未分配。">
+                    <InfoCircleOutlined tabIndex={0} aria-label="部门填写说明" />
+                  </Tooltip>
+                </span>
+              )}
               rules={[
                 {
                   validator: async (_, value) => {
@@ -2957,8 +2991,13 @@ const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, onArchiv
             <Form.Item name="status" label="状态">
               <Select options={EDITABLE_STATUS_OPTIONS} />
             </Form.Item>
-            <Form.Item label="IP 地址">
-              <Input value={primaryIp} readOnly placeholder="暂无采集 IP" />
+            <Form.Item name="category" label="设备类型">
+              <Select
+                allowClear
+                options={COMPUTER_DEVICE_TYPE_OPTIONS}
+                placeholder="选择设备类型"
+                popupMatchSelectWidth={false}
+              />
             </Form.Item>
           </div>
         </div>
@@ -2978,8 +3017,21 @@ const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, onArchiv
             <Form.Item name="financialResidualValue" label={watchedFinancialResidualMode === "manual" ? "手动财务残值" : "自动财务残值"}>
               <InputNumber disabled={watchedFinancialResidualMode !== "manual"} min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
             </Form.Item>
-            <Form.Item name="orderTime" label="购置日期">
-              <Input placeholder="例如：2026-06-26" />
+            <Form.Item
+              name="orderTime"
+              label="购置日期"
+              normalize={(value) => value ? value.format("YYYY-MM-DD") : ""}
+              getValueProps={(value) => {
+                const date = value ? dayjs(value) : null;
+                return { value: date?.isValid() ? date : null };
+              }}
+            >
+              <DatePicker
+                format="YYYY-MM-DD"
+                placeholder="选择购置日期"
+                allowClear
+                className="npcink-v3-date-picker"
+              />
             </Form.Item>
           </div>
           <div className="npcink-v3-finance-summary">
@@ -2996,7 +3048,7 @@ const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, onArchiv
             保存设置
           </Button>
           <Button danger type="text" onClick={() => onArchive(asset)}>
-            移除设备
+            归档设备
           </Button>
         </div>
       </Form>
@@ -3239,7 +3291,7 @@ const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetSettings
             保存信息
           </Button>
           <Button danger type="text" onClick={() => onArchive(asset)}>
-            移除设备
+            归档设备
           </Button>
         </div>
       </Form>
@@ -3487,8 +3539,6 @@ const DetailDrawer = ({
   const activeFinancialResidualMode = financialResidualMode(asset);
   const hasPurchasePrice = purchasePrice > 0;
   const hasFinancialResidualValue = financialResidualValue > 0;
-  const knownDepreciation = hasPurchasePrice && hasFinancialResidualValue ? Math.max(0, purchasePrice - financialResidualValue) : null;
-  const residualRate = hasPurchasePrice && hasFinancialResidualValue ? Math.round((financialResidualValue / purchasePrice) * 100) : null;
   const createEventMutation = useMutation(
     (input: AssetEventInput) => createAssetEvent(uuid || "", input),
     {
@@ -3623,10 +3673,13 @@ const DetailDrawer = ({
             <div><span>购置日期</span><strong>{purchaseDate ? formatDate(purchaseDate) : "未登记"}</strong></div>
             <div><span>采购价</span><strong>{hasPurchasePrice ? formatMoney(purchasePrice) : "未登记"}</strong></div>
             <div><span>二手市场价</span><strong>{secondHandMarketValue > 0 ? formatMoney(secondHandMarketValue) : "未登记"}</strong></div>
-            <div className="is-emphasis"><span>财务残值</span><strong>{hasFinancialResidualValue ? formatMoney(financialResidualValue) : "未登记"}</strong></div>
-            <div><span>财务残值方式</span><strong>{activeFinancialResidualMode === "manual" ? "手动设置" : "自动计算"}</strong></div>
-            <div><span>已知折价</span><strong>{knownDepreciation === null ? "无法计算" : formatMoney(knownDepreciation)}</strong></div>
-            <div><span>残值率</span><strong>{residualRate === null ? "无法计算" : `${residualRate}%`}</strong></div>
+            <div className="is-emphasis">
+              <span className="npcink-v3-finance-label">
+                财务残值
+                <em>{activeFinancialResidualMode === "manual" ? "手动" : "自动"}</em>
+              </span>
+              <strong>{hasFinancialResidualValue ? formatMoney(financialResidualValue) : "未登记"}</strong>
+            </div>
           </div>
           <Tabs
             defaultActiveKey="overview"
@@ -5599,8 +5652,14 @@ const AssetWorkspace = ({
   const confirmArchive = (asset: Asset) => {
     Modal.confirm({
       title: "归档这台资产？",
-      content: `${asset.assetNumber || asset.uuid} 将被标记为已归档，不会物理删除。`,
-      okText: "归档",
+      content: (
+        <div>
+          <p>{asset.assetNumber || asset.uuid} 将退出日常资产管理。</p>
+          <p>归档后不参与列表、统计、分析和资产表格导出；历史数据与资产编号仍会保留。</p>
+          <p><strong>当前不提供自行恢复，请确认设备已经永久退出管理。</strong></p>
+        </div>
+      ),
+      okText: "确认归档",
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: () => archiveMutation.mutateAsync(asset.uuid),
@@ -5615,8 +5674,14 @@ const AssetWorkspace = ({
     const targets = Array.from(selectedUuids);
     Modal.confirm({
       title: "归档所选资产？",
-      content: `已选 ${selectedCount} 条资产记录，将统一标记为已归档，不会物理删除。`,
-      okText: "归档",
+      content: (
+        <div>
+          <p>已选 {selectedCount} 条资产，将统一退出日常资产管理。</p>
+          <p>归档后不参与列表、统计、分析和资产表格导出；历史数据与资产编号仍会保留。</p>
+          <p><strong>当前不提供自行恢复，请确认这些设备已经永久退出管理。</strong></p>
+        </div>
+      ),
+      okText: "确认归档",
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: () => batchArchiveMutation.mutateAsync(targets),

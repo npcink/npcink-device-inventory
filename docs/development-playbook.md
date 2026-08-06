@@ -14,7 +14,7 @@
 - 分析中心只展示从当前事实和已有观测派生的只读结果；不新增“已处理”、工单或批量处置状态。具体边界见 ADR-009。
 - 服务端根据上传事实计算身份，不信任客户端传入的身份哈希；身份冲突必须失败关闭，绝不自动合并资产。
 - 资产编号是可变管理字段，不是硬件身份；编号复用前必须先处理旧资产并核对身份、观测和 latest 指针。
-- 已归档资产仍占用原编号；复用前必须先给旧资产重编号，编号冲突统一返回 `409 duplicate_number`。
+- 已归档资产是保留历史的非业务记录：仍占用原编号，但不参与普通列表、统计、分析、采集趋势、更新候选或资产表格导出；设备上传命中归档资产时返回 `409 asset_archived`。完整备份仍保留其资产、身份、观测和事件。具体边界见 ADR-012。
 - 磁盘、内存、显卡、USB 网卡、当前 MAC 和 CPU `ProcessorId` 是快照或辅助核对信息，不进入自动身份摘要。
 - 显示器、物理硬盘、网络路由和电池等新增字段默认进入观测层；采集失败允许部分为空，不阻断其他硬件事实上传。
 
@@ -67,7 +67,7 @@
 
 ## 当前运行与后续观察
 
-- 当前正式版本为 WordPress 插件 3.1.2 与 Device Agent 0.3.3，发布记录见 [`release-verification-2026-08-05-v3.1.2.md`](release-verification-2026-08-05-v3.1.2.md)。
+- 当前发布候选为 WordPress 插件 3.1.3 与 Device Agent 0.3.3，发布记录见 [`release-verification-2026-08-06-v3.1.3.md`](release-verification-2026-08-06-v3.1.3.md)。
 - 部署顺序必须是先升级插件，再部署 Agent；否则新 Agent 的身份事实和错误语义可能无法按当前契约处理。
 - 观察已有 v1 资产首次上传是否唯一命中并补写 v2；在实际覆盖完成前，不删除 v1 过渡查询。
 - 对 133 这类只依赖 PCI 永久 MAC 的设备，网卡更换后需要人工确认资产关系，不能自动把新身份并入旧资产。
@@ -84,8 +84,10 @@
 - [`decisions/ADR-007-keep-production-diagnostics-lightweight.md`](decisions/ADR-007-keep-production-diagnostics-lightweight.md)：正式环境保持轻量诊断的决定。
 - [`decisions/ADR-008-separate-asset-number-identity-and-observation.md`](decisions/ADR-008-separate-asset-number-identity-and-observation.md)：资产编号、设备身份和硬件观测的责任边界。
 - [`decisions/ADR-009-restore-read-only-analysis.md`](decisions/ADR-009-restore-read-only-analysis.md)：只读分析、组合查询、价值口径和被排除的可写工作流。
+- [`decisions/ADR-012-treat-archived-assets-as-business-excluded-records.md`](decisions/ADR-012-treat-archived-assets-as-business-excluded-records.md)：归档记录、业务计算、采集拒绝、编号保留和不建设回收站的统一边界。
 - [`admin-read-only-analysis-development-standard.md`](admin-read-only-analysis-development-standard.md)：只读分析的数据、查询、界面、权限和验收规范。
 - [`read-only-analysis-restoration-retrospective-2026-08-06.md`](read-only-analysis-restoration-retrospective-2026-08-06.md)：本阶段恢复分析功能的历史、真实数据证据和开发经验。
+- [`asset-type-archive-admin-ui-development-retrospective-2026-08-06.md`](asset-type-archive-admin-ui-development-retrospective-2026-08-06.md)：设备类型、归档边界、导出保护、后台表单和 PCP 收尾经验。
 - [`device-identity-collection-release-retrospective-2026-08-05.md`](device-identity-collection-release-retrospective-2026-08-05.md)：本阶段问题、根因、方法和发布闭环复盘。
 - [`device-upload-troubleshooting-and-operations.md`](device-upload-troubleshooting-and-operations.md)：Agent 与 WordPress 分层排障和生产修复规范。
 - [`windows-identity-and-asset-reconciliation-incident-2026-08-05.md`](windows-identity-and-asset-reconciliation-incident-2026-08-05.md)：133 采集故障与 32/35 串号的完整复盘和修复规范。

@@ -199,7 +199,7 @@ class Npcink_Device_Inventory_Observation_Repository
 			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned observation table queries are wrapped in the object cache.
 			$total = $wpdb->get_var(
 				$wpdb->prepare(
-					'SELECT COUNT(*) FROM %i o LEFT JOIN %i a ON a.id = o.asset_id WHERE o.source = %s AND (a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s)',
+					'SELECT COUNT(*) FROM %i o INNER JOIN %i a ON a.id = o.asset_id WHERE a.status <> \'deleted\' AND o.source = %s AND (a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s)',
 					$observations_table,
 					$assets_table,
 					$source,
@@ -211,12 +211,12 @@ class Npcink_Device_Inventory_Observation_Repository
 			);
 			$items = $wpdb->get_results(
 				$wpdb->prepare(
-					'SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
+					"SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
 					FROM %i o
-					LEFT JOIN %i a ON a.id = o.asset_id
-					WHERE o.source = %s AND (a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s)
+					INNER JOIN %i a ON a.id = o.asset_id
+					WHERE a.status <> 'deleted' AND o.source = %s AND (a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s)
 					ORDER BY o.observed_at DESC, o.id DESC
-					LIMIT %d OFFSET %d',
+					LIMIT %d OFFSET %d",
 					$observations_table,
 					$assets_table,
 					$source,
@@ -234,7 +234,7 @@ class Npcink_Device_Inventory_Observation_Repository
 			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned observation table queries are wrapped in the object cache.
 			$total = $wpdb->get_var(
 				$wpdb->prepare(
-					'SELECT COUNT(*) FROM %i o LEFT JOIN %i a ON a.id = o.asset_id WHERE o.source = %s',
+					'SELECT COUNT(*) FROM %i o INNER JOIN %i a ON a.id = o.asset_id WHERE a.status <> \'deleted\' AND o.source = %s',
 					$observations_table,
 					$assets_table,
 					$source
@@ -242,12 +242,12 @@ class Npcink_Device_Inventory_Observation_Repository
 			);
 			$items = $wpdb->get_results(
 				$wpdb->prepare(
-					'SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
+					"SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
 					FROM %i o
-					LEFT JOIN %i a ON a.id = o.asset_id
-					WHERE o.source = %s
+					INNER JOIN %i a ON a.id = o.asset_id
+					WHERE a.status <> 'deleted' AND o.source = %s
 					ORDER BY o.observed_at DESC, o.id DESC
-					LIMIT %d OFFSET %d',
+					LIMIT %d OFFSET %d",
 					$observations_table,
 					$assets_table,
 					$source,
@@ -261,7 +261,7 @@ class Npcink_Device_Inventory_Observation_Repository
 			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned observation table queries are wrapped in the object cache.
 			$total = $wpdb->get_var(
 				$wpdb->prepare(
-					'SELECT COUNT(*) FROM %i o LEFT JOIN %i a ON a.id = o.asset_id WHERE a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s',
+					'SELECT COUNT(*) FROM %i o INNER JOIN %i a ON a.id = o.asset_id WHERE a.status <> \'deleted\' AND (a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s)',
 					$observations_table,
 					$assets_table,
 					$like,
@@ -272,12 +272,12 @@ class Npcink_Device_Inventory_Observation_Repository
 			);
 			$items = $wpdb->get_results(
 				$wpdb->prepare(
-					'SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
+					"SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
 					FROM %i o
-					LEFT JOIN %i a ON a.id = o.asset_id
-					WHERE a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s
+					INNER JOIN %i a ON a.id = o.asset_id
+					WHERE a.status <> 'deleted' AND (a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s)
 					ORDER BY o.observed_at DESC, o.id DESC
-					LIMIT %d OFFSET %d',
+					LIMIT %d OFFSET %d",
 					$observations_table,
 					$assets_table,
 					$like,
@@ -294,18 +294,19 @@ class Npcink_Device_Inventory_Observation_Repository
 			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned observation table queries are wrapped in the object cache.
 			$total = $wpdb->get_var(
 				$wpdb->prepare(
-					'SELECT COUNT(*) FROM %i o LEFT JOIN %i a ON a.id = o.asset_id',
+					'SELECT COUNT(*) FROM %i o INNER JOIN %i a ON a.id = o.asset_id WHERE a.status <> \'deleted\'',
 					$observations_table,
 					$assets_table
 				)
 			);
 			$items = $wpdb->get_results(
 				$wpdb->prepare(
-					'SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
+					"SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
 					FROM %i o
-					LEFT JOIN %i a ON a.id = o.asset_id
+					INNER JOIN %i a ON a.id = o.asset_id
+					WHERE a.status <> 'deleted'
 					ORDER BY o.observed_at DESC, o.id DESC
-					LIMIT %d OFFSET %d',
+					LIMIT %d OFFSET %d",
 					$observations_table,
 					$assets_table,
 					$page_size,
@@ -339,12 +340,19 @@ class Npcink_Device_Inventory_Observation_Repository
 			return $cached;
 		}
 
-		$table = Npcink_Device_Inventory_V3_Tables::observations();
+		$observations_table = Npcink_Device_Inventory_V3_Tables::observations();
+		$assets_table = Npcink_Device_Inventory_V3_Tables::assets();
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned aggregate is bounded to the requested date range and cached.
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT DATE(observed_at) AS day, COUNT(*) AS count FROM %i WHERE observed_at >= %s AND observed_at < %s GROUP BY DATE(observed_at) ORDER BY day ASC',
-				$table,
+				"SELECT DATE(o.observed_at) AS day, COUNT(*) AS count
+				FROM %i o
+				INNER JOIN %i a ON a.id = o.asset_id
+				WHERE a.status <> 'deleted' AND o.observed_at >= %s AND o.observed_at < %s
+				GROUP BY DATE(o.observed_at)
+				ORDER BY day ASC",
+				$observations_table,
+				$assets_table,
 				$start_at,
 				$end_at
 			),
