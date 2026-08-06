@@ -26,6 +26,7 @@ This folder keeps the current product contracts, development guardrails, release
 ## Release Records
 
 - `release-verification-2026-08-05-v3.1.2.md`: current release verification record for plugin 3.1.2 and Device Agent 0.3.3.
+- `release-verification-2026-08-06-v3.1.3.md`: release verification record for plugin 3.1.3, including the official Plugin Check 2.0.0 result and package hash.
 - `release-verification-2026-08-05-v3.1.1.md`: previous release verification record for plugin 3.1.1 and Device Agent 0.3.2.
 - `release-verification-2026-08-03-v3.1.0.md`: previous release verification record for plugin 3.1.0 and Device Agent 0.3.0.
 - `release-verification-2026-07-10-v2.8.0.md`: v2.8.0 release verification record.

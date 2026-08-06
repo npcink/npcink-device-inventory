@@ -4,7 +4,7 @@ Tags: inventory, assets, device management, rest api, admin
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 3.1.2
+Stable tag: 3.1.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -70,6 +70,12 @@ Npcink Device Inventory stores device asset data in the local WordPress database
 The plugin does not transmit this data to Npcink or any third-party server during normal plugin operation. Site administrators are responsible for informing users and employees about their own device inventory policies.
 
 == Changelog ==
+
+= 3.1.3 =
+* Separate second-hand market value from accounting residual value while preserving legacy API and backup compatibility.
+* Add automatic straight-line financial residual calculation with manual exceptions and configurable depreciation settings.
+* Add financial-data completeness filters and a read-only completion list for missing purchase or second-hand prices.
+* Add configurable Excel and CSV asset exports with ordered fields, presets, status colors, and a WordPress-aware preview.
 
 = 3.1.2 =
 * Return an explicit 409 duplicate_number response when an active or archived asset already owns an asset number.
