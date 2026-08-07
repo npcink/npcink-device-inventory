@@ -14,11 +14,11 @@
     "upload_file": "sj/npcink-device-inventory.zip",
     "source_file": "release/npcink-device-inventory.zip",
     "zip_root": "npcink-device-inventory/",
-    "sha256": "85ca0078d169351ac3a145fce2b79bf57ca75007bed7701abd64c9637266b837",
+    "sha256": "f6eb510d6db33be66132c98a91a0da9b62cbc02409ec911bb653aa03bc2b35c4",
     "entry_count": 80,
     "file_count": 62,
-    "uncompressed_bytes": 3222638,
-    "compressed_bytes": 915417
+    "uncompressed_bytes": 3225624,
+    "compressed_bytes": 916020
   },
   "verification": {
     "plugin_check": "passed_official_2.0.0_wordpress_7.0.2_php_8.3",
