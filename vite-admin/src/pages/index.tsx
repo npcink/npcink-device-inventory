@@ -167,7 +167,7 @@ const ASSET_IMPORT_FIELDS = [
   { label: "使用人", value: "ownerName" },
   { label: "部门", value: "department" },
   { label: "状态", value: "status" },
-  { label: "分类", value: "category" },
+  { label: "设备类型 / 分类", value: "category" },
   { label: "购置价格", value: "purchasePrice" },
   { label: "二手市场价", value: "secondHandMarketValue" },
   { label: "财务残值", value: "financialResidualValue" },
@@ -545,6 +545,7 @@ const pickRowValue = (row: JsonRecord, keys: readonly string[]) => {
 const importFieldValue = (row: JsonRecord, field: AssetImportFieldKey) => {
   const fieldConfig = ASSET_IMPORT_FIELDS.find((item) => item.value === field);
   const compatibilityAliases: Partial<Record<AssetImportFieldKey, string[]>> = {
+    category: ["分类", "设备类型"],
     secondHandMarketValue: ["residualValue", "残值", "二手价"],
   };
   return pickRowValue(row, [field, fieldConfig?.label || "", ...(compatibilityAliases[field] || [])]);
@@ -1137,7 +1138,7 @@ const bulkUpdateChanges = (asset: Asset, input: AssetInput) =>
       const newValue = displayBulkValue(key, input[key]);
       return {
         field: key,
-        label,
+        label: key === "category" && isComputerAsset(asset) ? "设备类型" : label,
         oldValue,
         newValue,
       };
@@ -1372,7 +1373,7 @@ const hardwareDetailSections = (
         detailRow("owner", "使用人", asset.ownerName),
         detailRow("department", "部门", asset.department),
         detailRow("status", "状态", statusLabel(asset.status)),
-        detailRow("category", "分类", asset.category),
+        detailRow("category", "设备类型", asset.category),
         detailRow("purchase", "购置价值", formatMoney(asset.purchasePrice)),
         detailRow("secondHandMarketValue", "二手市场价", formatMoney(asset.secondHandMarketValue)),
         detailRow("financialResidualValue", "财务残值", formatMoney(effectiveFinancialResidualValue(asset, settings))),
@@ -2500,12 +2501,13 @@ interface BulkEditModalProps {
   open: boolean;
   count: number;
   loading: boolean;
+  categoryMode: "computer" | "custom" | "mixed";
   departmentOptions?: string[];
   onClose: () => void;
   onSubmit: (values: AssetInput) => Promise<void>;
 }
 
-const BulkEditModal = ({ open, count, loading, departmentOptions = [], onClose, onSubmit }: BulkEditModalProps) => {
+const BulkEditModal = ({ open, count, loading, categoryMode, departmentOptions = [], onClose, onSubmit }: BulkEditModalProps) => {
   const [form] = Form.useForm<AssetInput>();
   const normalizedDepartmentOptions = useMemo(() => normalizeDepartmentList(departmentOptions), [departmentOptions]);
 
@@ -2573,9 +2575,24 @@ const BulkEditModal = ({ open, count, loading, departmentOptions = [], onClose, 
         <Form.Item name="status" label="状态">
           <Select allowClear options={EDITABLE_STATUS_OPTIONS} placeholder="统一修改状态" />
         </Form.Item>
-        <Form.Item name="category" label="分类">
-          <Input placeholder="统一修改分类" />
-        </Form.Item>
+        {categoryMode === "computer" ? (
+          <Form.Item name="category" label="设备类型" extra="留空表示不修改。">
+            <Select
+              allowClear
+              options={COMPUTER_DEVICE_TYPE_OPTIONS}
+              placeholder="统一修改设备类型"
+              popupMatchSelectWidth={false}
+            />
+          </Form.Item>
+        ) : categoryMode === "custom" ? (
+          <Form.Item name="category" label="分类" extra="留空表示不修改。">
+            <Input placeholder="统一修改分类" />
+          </Form.Item>
+        ) : (
+          <Form.Item label="设备类型 / 分类" extra="电脑与自定义资产含义不同，请按同一资产类型分批修改。">
+            <Input disabled placeholder="混合选择时不可修改" />
+          </Form.Item>
+        )}
       </Form>
     </Modal>
   );
@@ -5307,6 +5324,10 @@ const AssetCard = ({
                 <dd>{statusLabel(asset.status)}</dd>
               </div>
               <div>
+                <dt>设备类型：</dt>
+                <dd>{fieldText(asset.category)}</dd>
+              </div>
+              <div>
                 <dt>部门：</dt>
                 <dd>{highlightText(asset.department, searchKeyword)}</dd>
               </div>
@@ -5362,7 +5383,7 @@ const AssetWorkspace = ({
       assetScope,
       assetType: assetScope === "computer" ? undefined : assetType,
       status,
-      category: assetScope === "other" ? category : undefined,
+      category: assetScope !== "all" ? category : undefined,
       purchasePlatform: assetScope === "other" ? purchasePlatform : undefined,
       financialDataStatus: assetScope === "other" ? undefined : financialDataStatus,
       sortBy: "latestObserved" as const,
@@ -5518,6 +5539,11 @@ const AssetWorkspace = ({
   };
 
   const selectedAssets = assets.filter((asset) => selectedUuids.has(asset.uuid));
+  const bulkCategoryMode = selectedAssets.length > 0 && selectedAssets.every(isComputerAsset)
+    ? "computer"
+    : selectedAssets.length > 0 && selectedAssets.every((asset) => !isComputerAsset(asset))
+      ? "custom"
+      : "mixed";
   const selectedAsset = selectedUuid ? assets.find((asset) => asset.uuid === selectedUuid) || null : null;
 
   const applySavedFilter = (id: string) => {
@@ -5598,6 +5624,12 @@ const AssetWorkspace = ({
       render: (value: string) => (
         <Tag color={statusColor[value] || "default"}>{statusLabel(value)}</Tag>
       ),
+    },
+    {
+      title: assetScope === "computer" ? "设备类型" : assetScope === "other" ? "分类" : "设备类型 / 分类",
+      dataIndex: "category",
+      width: 130,
+      render: (value: string) => fieldText(value),
     },
     {
       title: "更新时间",
@@ -5747,7 +5779,19 @@ const AssetWorkspace = ({
                 className="npcink-v3-filter"
               />
             </>
-          ) : assetScope !== "computer" ? (
+          ) : assetScope === "computer" ? (
+            <Select
+              allowClear
+              placeholder="设备类型"
+              options={COMPUTER_DEVICE_TYPE_OPTIONS}
+              value={category}
+              onChange={(value) => {
+                setPage(1);
+                setCategory(value);
+              }}
+              className="npcink-v3-filter"
+            />
+          ) : (
             <Select
               allowClear
               placeholder="资产类型"
@@ -5759,7 +5803,7 @@ const AssetWorkspace = ({
               }}
               className="npcink-v3-filter"
             />
-          ) : null}
+          )}
           {assetScope !== "other" ? (
             <Select
               allowClear
@@ -5934,7 +5978,7 @@ const AssetWorkspace = ({
               setSelectedUuid(asset.uuid);
             },
           })}
-          scroll={{ x: 980 }}
+          scroll={{ x: 1110 }}
           pagination={{
             current: page,
             pageSize,
@@ -5965,6 +6009,7 @@ const AssetWorkspace = ({
         open={bulkModalOpen}
         count={selectedCount}
         loading={batchUpdateMutation.isLoading}
+        categoryMode={bulkCategoryMode}
         departmentOptions={departmentOptions}
         onClose={() => setBulkModalOpen(false)}
         onSubmit={async (input) => {
