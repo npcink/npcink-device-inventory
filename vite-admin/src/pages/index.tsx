@@ -4185,7 +4185,12 @@ const ISSUE_LEVEL_META: Record<HardwareIssue["level"], { label: string; color: s
   info: { label: "低", color: "blue" },
 };
 
-type AnalysisTabKey = "summary" | "query" | "collection" | "quality" | "changes" | "renewal" | "value";
+type AnalysisTabKey = "summary" | "hardware" | "health" | "planning";
+type HardwareAnalysisView = "inventory" | "query";
+type DataHealthView = "collection" | "quality" | "changes";
+type AssetPlanningView = "value" | "renewal";
+type AnalysisViewKey = "summary" | HardwareAnalysisView | DataHealthView | AssetPlanningView;
+type HardwareInventoryKey = "cpu" | "disk" | "memory" | "baseboard";
 
 const COLLECTION_BAND_META = {
   fresh: { label: "7 天内", color: "green" },
@@ -4238,6 +4243,93 @@ interface HardwareQueryItem {
   memoryGb: number;
   diskGb: number;
 }
+
+interface HardwareInventoryRow {
+  key: string;
+  label: string;
+  detail: string;
+  componentCount: number;
+  assetCount: number;
+  percent: number;
+  assets: Asset[];
+}
+
+const HARDWARE_INVENTORY_OPTIONS: Array<{ key: HardwareInventoryKey; label: string }> = [
+  { key: "cpu", label: "CPU" },
+  { key: "disk", label: "硬盘" },
+  { key: "memory", label: "内存" },
+  { key: "baseboard", label: "主板" },
+];
+
+const hardwareInventoryGroupKey = (value: string) => value
+  .toLowerCase()
+  .replace(/[®™]/g, "")
+  .replace(/\s+/g, " ")
+  .trim();
+
+const assetPhysicalDisks = (asset: Asset) => {
+  const { hardware } = assetHardwareContext(asset);
+  return getArray(hardware.disks).length
+    ? getArray(hardware.disks)
+    : getArray(hardware.disk).length
+      ? getArray(hardware.disk)
+      : getArray(hardware.diskLayout);
+};
+
+const buildHardwareInventoryRows = (assets: Asset[], kind: HardwareInventoryKey): HardwareInventoryRow[] => {
+  const groups = new Map<string, { label: string; detail: string; componentCount: number; assets: Map<string, Asset> }>();
+  const add = (asset: Asset, label: string, detail = "") => {
+    const displayLabel = label.trim();
+    if (!displayLabel) return;
+    const key = hardwareInventoryGroupKey(displayLabel);
+    const current = groups.get(key) || { label: displayLabel, detail, componentCount: 0, assets: new Map<string, Asset>() };
+    current.componentCount += 1;
+    current.assets.set(asset.uuid, asset);
+    if (!current.detail && detail) current.detail = detail;
+    groups.set(key, current);
+  };
+
+  assets.forEach((asset) => {
+    const context = assetHardwareContext(asset);
+    if (kind === "cpu") {
+      add(asset, context.extracted.cpu);
+      return;
+    }
+    if (kind === "memory") {
+      const bytes = hardwareMemoryBytes(asset);
+      if (bytes > 0) add(asset, formatBytes(bytes), "整机总容量");
+      return;
+    }
+    if (kind === "baseboard") {
+      const board = getRecord(context.hardware.baseboard);
+      const model = firstText(board.model, board.product, context.extracted.baseboard);
+      const manufacturer = firstText(board.manufacturer);
+      const includesManufacturer = manufacturer && model.toLowerCase().includes(manufacturer.toLowerCase());
+      add(asset, includesManufacturer ? model : [manufacturer, model].filter(Boolean).join(" ") || context.extracted.baseboard);
+      return;
+    }
+    assetPhysicalDisks(asset).forEach((disk) => {
+      const model = firstText(disk.name, disk.model, disk.device);
+      const media = firstText(disk.type, disk.mediaType);
+      const capacity = toNumber(disk.size) > 0 ? formatBytes(disk.size) : "";
+      const connection = firstText(disk.interfaceType, disk.interface);
+      add(asset, model, [media, capacity, connection].filter(Boolean).join(" · "));
+    });
+  });
+
+  return Array.from(groups, ([key, group]) => {
+    const groupedAssets = Array.from(group.assets.values());
+    return {
+      key,
+      label: group.label,
+      detail: group.detail,
+      componentCount: group.componentCount,
+      assetCount: groupedAssets.length,
+      percent: assets.length ? (groupedAssets.length / assets.length) * 100 : 0,
+      assets: groupedAssets,
+    };
+  }).sort((a, b) => b.assetCount - a.assetCount || b.componentCount - a.componentCount || a.label.localeCompare(b.label, "zh-CN"));
+};
 
 const EMPTY_HARDWARE_QUERY: HardwareQueryState = {
   departments: [],
@@ -4359,14 +4451,26 @@ const observationComparableFields = (observation: AssetObservation) => {
 const AnalysisWorkspace = () => {
   const [analysisNow] = useState(() => Date.now());
   const [activeTab, setActiveTab] = useState<AnalysisTabKey>("summary");
+  const [hardwareAnalysisView, setHardwareAnalysisView] = useState<HardwareAnalysisView>("inventory");
+  const [dataHealthView, setDataHealthView] = useState<DataHealthView>("collection");
+  const [assetPlanningView, setAssetPlanningView] = useState<AssetPlanningView>("value");
   const [selectedGroup, setSelectedGroup] = useState<string>();
   const [selectedType, setSelectedType] = useState<string>();
   const [selectedChangeType, setSelectedChangeType] = useState<string>();
   const [selectedRenewalUuids, setSelectedRenewalUuids] = useState<Set<string>>(new Set());
+  const [hardwareInventoryKey, setHardwareInventoryKey] = useState<HardwareInventoryKey>("cpu");
+  const [hardwareInventorySearch, setHardwareInventorySearch] = useState("");
   const [hardwareQuery, setHardwareQuery] = useState<HardwareQueryState>(createEmptyHardwareQuery);
   const [drillDown, setDrillDown] = useState<{ title: string; assets: Asset[] } | null>(null);
   const [detailAsset, setDetailAsset] = useState<Asset | null>(null);
   const [detailAssets, setDetailAssets] = useState<Asset[]>([]);
+  const analysisViewKey: AnalysisViewKey = activeTab === "hardware"
+    ? hardwareAnalysisView
+    : activeTab === "health"
+      ? dataHealthView
+      : activeTab === "planning"
+        ? assetPlanningView
+        : "summary";
   const assetsQuery = useQuery(
     ["v3-analysis-assets"],
     () => fetchAllAssets({ assetScope: "all" }),
@@ -4375,7 +4479,7 @@ const AnalysisWorkspace = () => {
   const trendsQuery = useQuery(["v3-analysis-collection-trends"], getCollectionTrends, { staleTime: 60_000 });
   const settingsQuery = useQuery(["v3-settings"], getSettings, { staleTime: 60_000 });
   const observationsQuery = useQuery(["v3-analysis-observations"], fetchAllObservations, {
-    enabled: activeTab === "changes",
+    enabled: analysisViewKey === "changes",
     staleTime: 60_000,
   });
   const allAssets = useMemo(
@@ -4383,6 +4487,20 @@ const AnalysisWorkspace = () => {
     [assetsQuery.data]
   );
   const assets = useMemo(() => allAssets.filter((asset) => asset.assetType === "computer"), [allAssets]);
+  const hardwareInventoryRows = useMemo(
+    () => buildHardwareInventoryRows(assets, hardwareInventoryKey),
+    [assets, hardwareInventoryKey]
+  );
+  const visibleHardwareInventoryRows = useMemo(() => {
+    const keyword = hardwareInventorySearch.trim().toLowerCase();
+    if (!keyword) return hardwareInventoryRows;
+    return hardwareInventoryRows.filter((row) => `${row.label} ${row.detail}`.toLowerCase().includes(keyword));
+  }, [hardwareInventoryRows, hardwareInventorySearch]);
+  const hardwareInventoryCollectedAssets = useMemo(
+    () => new Set(hardwareInventoryRows.flatMap((row) => row.assets.map((asset) => asset.uuid))).size,
+    [hardwareInventoryRows]
+  );
+  const hardwareInventoryComponents = hardwareInventoryRows.reduce((total, row) => total + row.componentCount, 0);
   const hardwareQueryItems = useMemo<HardwareQueryItem[]>(() => assets.map((asset) => {
     const context = assetHardwareContext(asset);
     return {
@@ -4664,19 +4782,23 @@ const AnalysisWorkspace = () => {
     downloadCsvFile(`设备更新计划草案-${formatDateInput(new Date().toISOString())}.csv`, rows.map((row) => row.map(csvCell).join(",")).join("\n"));
   };
   const exportAnalysisCsv = () => {
-    let filename = `设备分析-${activeTab}-${formatDateInput(new Date().toISOString())}.csv`;
+    let filename = `设备分析-${analysisViewKey}-${formatDateInput(new Date().toISOString())}.csv`;
     let rows: string[][];
-    if (activeTab === "query") {
+    if (analysisViewKey === "query") {
       rows = [["使用人", "部门", "资产编号", "资产名称", "显卡", "CPU", "内存GB", "硬盘GB", "状态", "最后采集"], ...matchedHardwareQueryItems.map((item) => [item.asset.ownerName, item.asset.department, item.asset.assetNumber, item.asset.name, item.graphics, item.cpu, item.memoryGb ? String(Number(item.memoryGb.toFixed(1))) : "", item.diskGb ? String(Number(item.diskGb.toFixed(1))) : "", statusLabel(item.asset.status), item.asset.latestObservation?.observedAt || ""])];
-    } else if (activeTab === "collection") {
+    } else if (analysisViewKey === "inventory") {
+      const category = HARDWARE_INVENTORY_OPTIONS.find((item) => item.key === hardwareInventoryKey)?.label || "硬件";
+      rows = [["分类", "型号或容量", "补充信息", "部件数量", "设备数量", "设备占比"], ...visibleHardwareInventoryRows.map((row) => [category, row.label, row.detail, String(row.componentCount), String(row.assetCount), `${row.percent.toFixed(1)}%`])];
+      filename = `设备分析-硬件盘点-${category}-${formatDateInput(new Date().toISOString())}.csv`;
+    } else if (analysisViewKey === "collection") {
       rows = [["资产编号", "资产名称", "部门", "采集状态", "距今天数", "最后采集"], ...collectionRows.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, COLLECTION_BAND_META[row.band].label, row.days === null ? "" : String(row.days), row.asset.latestObservation?.observedAt || ""])];
-    } else if (activeTab === "quality") {
+    } else if (analysisViewKey === "quality") {
       rows = [["资产编号", "资产名称", "部门", "完整度", "缺失项目"], ...completenessRows.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, `${row.score}%`, row.missing.join("、")])];
-    } else if (activeTab === "changes") {
+    } else if (analysisViewKey === "changes") {
       rows = [["资产编号", "资产名称", "部门", "变化字段", "变化前", "变化后", "采集时间"], ...visibleHardwareChanges.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, row.field, row.before, row.after, row.observedAt])];
-    } else if (activeTab === "renewal") {
+    } else if (analysisViewKey === "renewal") {
       rows = [["资产编号", "资产名称", "部门", "状态", "候选依据", "采购价", "账面净值（估算）"], ...renewalRows.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, statusLabel(row.asset.status), row.reasons.join("、"), String(row.asset.purchasePrice || 0), String(effectiveFinancialResidualValue(row.asset, settingsQuery.data))])];
-    } else if (activeTab === "value") {
+    } else if (analysisViewKey === "value") {
       rows = [["资产编号", "资产名称", "类型", "部门", "采购价", "二手市场价", "账面净值（估算）"], ...allAssets.map((asset) => [asset.assetNumber, asset.name, assetTypeLabel(asset.assetType), asset.department, String(asset.purchasePrice || 0), String(asset.secondHandMarketValue || 0), String(effectiveFinancialResidualValue(asset, settingsQuery.data))])];
     } else {
       rows = [["资产编号", "资产名称", "类型", "部门", "状态", "最后采集"], ...allAssets.map((asset) => [asset.assetNumber, asset.name, assetTypeLabel(asset.assetType), asset.department, statusLabel(asset.status), asset.latestObservation?.observedAt || ""])];
@@ -4716,17 +4838,45 @@ const AnalysisWorkspace = () => {
         activeKey={activeTab}
         onChange={(key) => setActiveTab(key as AnalysisTabKey)}
         items={[
-          { key: "summary", label: "管理摘要" },
-          { key: "query", label: "组合查询" },
-          { key: "collection", label: "采集健康" },
-          { key: "quality", label: "数据完整度" },
-          { key: "changes", label: "硬件变化" },
-          { key: "renewal", label: "更新候选" },
-          { key: "value", label: "资产价值" },
+          { key: "summary", label: "概览" },
+          { key: "hardware", label: "硬件分析" },
+          { key: "health", label: "数据健康" },
+          { key: "planning", label: "资产规划" },
         ]}
         className="npcink-v3-analysis-tabs"
       />
-      {activeTab === "summary" ? (
+      {activeTab !== "summary" ? (
+        <div className="npcink-v3-analysis-subnav">
+          {activeTab === "hardware" ? (
+            <Radio.Group
+              optionType="button"
+              buttonStyle="solid"
+              value={hardwareAnalysisView}
+              onChange={(event) => setHardwareAnalysisView(event.target.value)}
+              options={[{ label: "型号盘点", value: "inventory" }, { label: "组合筛选", value: "query" }]}
+            />
+          ) : null}
+          {activeTab === "health" ? (
+            <Radio.Group
+              optionType="button"
+              buttonStyle="solid"
+              value={dataHealthView}
+              onChange={(event) => setDataHealthView(event.target.value)}
+              options={[{ label: "采集状态", value: "collection" }, { label: "资料完整度", value: "quality" }, { label: "硬件变化", value: "changes" }]}
+            />
+          ) : null}
+          {activeTab === "planning" ? (
+            <Radio.Group
+              optionType="button"
+              buttonStyle="solid"
+              value={assetPlanningView}
+              onChange={(event) => setAssetPlanningView(event.target.value)}
+              options={[{ label: "价值概览", value: "value" }, { label: "更新候选", value: "renewal" }]}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      {analysisViewKey === "summary" ? (
         <div className="npcink-v3-analysis-grid">
           <section className="npcink-v3-analysis-panel is-wide">
             <div className="npcink-v3-analysis-panel-head">
@@ -4748,7 +4898,67 @@ const AnalysisWorkspace = () => {
           <section className="npcink-v3-analysis-panel"><Title level={4}>全部资产状态</Title><Text type="secondary">与左侧部门分布使用相同口径。</Text><AnalysisDistribution rows={statusRows} onSelect={(row) => openDrillDown(`${row.label}资产`, allAssets.filter((asset) => (STATUS_OPTIONS.find((item) => item.value === asset.status)?.label || asset.status) === row.label))} /></section>
         </div>
       ) : null}
-      {activeTab === "query" ? (
+      {analysisViewKey === "inventory" ? (
+        <div className="npcink-v3-analysis-grid">
+          <section className="npcink-v3-analysis-panel is-wide">
+            <div className="npcink-v3-analysis-panel-head">
+              <div>
+                <Title level={4}>硬件型号盘点</Title>
+                <Text type="secondary">按未归档电脑的当前有效硬件事实统计（优先最新观测，兼容已有导入数据）；CPU、内存和主板按设备计数，硬盘同时统计物理块数与涉及设备数。</Text>
+              </div>
+              <Input
+                allowClear
+                prefix={<SearchOutlined />}
+                className="npcink-v3-hardware-inventory-search"
+                placeholder="搜索型号或容量"
+                value={hardwareInventorySearch}
+                onChange={(event) => setHardwareInventorySearch(event.target.value)}
+              />
+            </div>
+            <Radio.Group
+              className="npcink-v3-hardware-inventory-tabs"
+              optionType="button"
+              buttonStyle="solid"
+              value={hardwareInventoryKey}
+              onChange={(event) => {
+                setHardwareInventoryKey(event.target.value);
+                setHardwareInventorySearch("");
+              }}
+              options={HARDWARE_INVENTORY_OPTIONS.map((item) => ({ label: item.label, value: item.key }))}
+            />
+            <div className="npcink-v3-query-kpis npcink-v3-hardware-inventory-kpis">
+              <div><span>电脑范围</span><strong>{assets.length} 台</strong></div>
+              <div><span>已采集设备</span><strong>{hardwareInventoryCollectedAssets} 台</strong></div>
+              <div><span>{hardwareInventoryKey === "disk" ? "物理硬盘" : "统计部件"}</span><strong>{hardwareInventoryComponents} {hardwareInventoryKey === "disk" ? "块" : "个"}</strong></div>
+              <div><span>型号或容量分类</span><strong>{hardwareInventoryRows.length} 项</strong></div>
+            </div>
+          </section>
+          <section className="npcink-v3-analysis-panel is-wide">
+            <div className="npcink-v3-analysis-panel-head">
+              <div><Title level={4}>{HARDWARE_INVENTORY_OPTIONS.find((item) => item.key === hardwareInventoryKey)?.label}统计明细</Title><Text type="secondary">点击型号或“查看设备”可下钻到对应电脑的只读列表。</Text></div>
+              <Text type="secondary">显示 {visibleHardwareInventoryRows.length} 项</Text>
+            </div>
+            <Table<HardwareInventoryRow>
+              rowKey="key"
+              size="middle"
+              loading={assetsQuery.isLoading || assetsQuery.isFetching}
+              dataSource={visibleHardwareInventoryRows}
+              pagination={{ pageSize: 20, showTotal: (total) => `共 ${total} 项` }}
+              columns={[
+                { title: hardwareInventoryKey === "memory" ? "整机容量" : "型号", dataIndex: "label", render: (value, row) => <Button type="link" className="npcink-v3-link npcink-v3-inventory-model-link" onClick={() => openDrillDown(`${value} 设备`, row.assets)}>{value}</Button> },
+                { title: "补充信息", dataIndex: "detail", width: 220, render: (value) => value || <Text type="secondary">-</Text> },
+                ...(hardwareInventoryKey === "disk" ? [{ title: "硬盘数", dataIndex: "componentCount", width: 100, sorter: (a: HardwareInventoryRow, b: HardwareInventoryRow) => a.componentCount - b.componentCount }] : []),
+                { title: "设备数", dataIndex: "assetCount", width: 100, sorter: (a, b) => a.assetCount - b.assetCount },
+                { title: "设备占比", dataIndex: "percent", width: 120, render: (value) => `${value.toFixed(1)}%`, sorter: (a, b) => a.percent - b.percent },
+                { title: "操作", width: 100, render: (_, row) => <Button type="link" className="npcink-v3-link" onClick={() => openDrillDown(`${row.label} 设备`, row.assets)}>查看设备</Button> },
+              ]}
+              scroll={{ x: 760 }}
+              locale={{ emptyText: <Empty description={hardwareInventorySearch ? "没有匹配的硬件型号" : "暂无已采集硬件"} /> }}
+            />
+          </section>
+        </div>
+      ) : null}
+      {analysisViewKey === "query" ? (
         <div className="npcink-v3-analysis-grid">
           <section className="npcink-v3-analysis-panel is-wide">
             <div className="npcink-v3-analysis-panel-head">
@@ -4799,7 +5009,7 @@ const AnalysisWorkspace = () => {
           </section>
         </div>
       ) : null}
-      {activeTab === "collection" ? (
+      {analysisViewKey === "collection" ? (
         <div className="npcink-v3-analysis-grid">
           <section className="npcink-v3-analysis-panel"><Title level={4}>采集新鲜度</Title><AnalysisDistribution rows={collectionBandRows} onSelect={(row) => openDrillDown(row.label, collectionRows.filter((item) => COLLECTION_BAND_META[item.band].label === row.label).map((item) => item.asset))} /></section>
           <section className="npcink-v3-analysis-panel"><Title level={4}>部门 30 天采集覆盖率</Title><Text type="secondary">仅把最近 30 天内有采集的电脑计为新鲜覆盖。</Text><AnalysisDistribution rows={departmentCoverageRows} onSelect={(row) => openDrillDown(`${row.label}电脑`, assets.filter((asset) => (asset.department.trim() || "未填写") === row.label))} /></section>
@@ -4822,7 +5032,7 @@ const AnalysisWorkspace = () => {
           </section>
         </div>
       ) : null}
-      {activeTab === "quality" ? (
+      {analysisViewKey === "quality" ? (
         <div className="npcink-v3-analysis-grid">
           <section className="npcink-v3-analysis-panel"><Title level={4}>平均完整度</Title><div className="npcink-v3-analysis-score">{averageCompleteness}%</div><Text type="secondary">按基础资料、采集硬件和金额字段计算。</Text></section>
           <section className="npcink-v3-analysis-panel"><Title level={4}>字段覆盖率</Title><AnalysisDistribution rows={completenessFieldRows} onSelect={(row) => openDrillDown(`缺少${row.label}`, completenessRows.filter((item) => item.missing.includes(row.label)).map((item) => item.asset))} /></section>
@@ -4853,7 +5063,7 @@ const AnalysisWorkspace = () => {
           </section>
         </div>
       ) : null}
-      {activeTab === "changes" ? (
+      {analysisViewKey === "changes" ? (
         <div className="npcink-v3-analysis-grid">
           <section className="npcink-v3-analysis-panel is-wide">
             <div className="npcink-v3-analysis-panel-head">
@@ -4883,7 +5093,7 @@ const AnalysisWorkspace = () => {
           </section>
         </div>
       ) : null}
-      {activeTab === "renewal" ? (
+      {analysisViewKey === "renewal" ? (
         <div className="npcink-v3-analysis-grid">
           <section className="npcink-v3-analysis-panel is-wide"><div className="npcink-v3-analysis-panel-head"><div><Title level={4}>设备更新候选</Title><Text type="secondary">仅依据设置阈值列出候选，不代表必须淘汰。</Text></div><strong>{renewalRows.length} 台</strong></div><div className="npcink-v3-threshold-summary"><span>年限 ≥ {renewalSettings.renewalAgeYears} 年</span><span>内存 &lt; {renewalSettings.renewalMinMemoryGb} GB</span><span>硬盘 &lt; {renewalSettings.renewalMinDiskGb} GB</span><span>账面净值率 ≤ {renewalSettings.renewalMaxResidualRate}%</span></div></section>
           <section className="npcink-v3-analysis-panel is-wide"><Table rowKey={(row) => row.asset.uuid} size="middle" loading={settingsQuery.isLoading} dataSource={renewalRows} rowSelection={{ selectedRowKeys: Array.from(selectedRenewalUuids), onChange: (keys) => setSelectedRenewalUuids(new Set(keys.map(String))) }} pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 台候选` }} columns={[
@@ -4907,7 +5117,7 @@ const AnalysisWorkspace = () => {
           </section>
         </div>
       ) : null}
-      {activeTab === "value" ? (
+      {analysisViewKey === "value" ? (
         <div className="npcink-v3-analysis-grid">
           <section className="npcink-v3-analysis-panel is-wide">
             <div className="npcink-v3-value-kpis">
@@ -4920,11 +5130,11 @@ const AnalysisWorkspace = () => {
           <section className="npcink-v3-analysis-panel is-wide"><Title level={4}>全部资产部门账面净值分布</Title><Text type="secondary">汇总 {allAssets.length} 条未归档电脑和自定义资产的当前有效账面净值；自动模式使用实时估算值，手动模式使用已登记值。</Text><AnalysisDistribution rows={departmentValueRows} emptyText="暂无账面净值数据" /></section>
         </div>
       ) : null}
-      {activeTab === "quality" ? <div className="npcink-v3-analysis-grid">
+      {analysisViewKey === "quality" ? <div className="npcink-v3-analysis-grid">
         <section className="npcink-v3-analysis-panel"><Title level={4}>操作系统分布</Title><AnalysisDistribution rows={platformRows} /></section>
         <section className="npcink-v3-analysis-panel"><Title level={4}>问题分组</Title><AnalysisDistribution rows={issueGroupRows} emptyText="暂无硬件问题" /></section>
       </div> : null}
-      {activeTab === "quality" ? <div className="npcink-v3-analysis-issues">
+      {analysisViewKey === "quality" ? <div className="npcink-v3-analysis-issues">
         <div className="npcink-v3-analysis-issues-head">
           <div>
             <Title level={4}>问题清单</Title>

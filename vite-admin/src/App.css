@@ -93,6 +93,23 @@
   margin: 0;
 }
 
+.npcink-v3-analysis-subnav {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px solid #e4e7ec;
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  background: #f8fafc;
+}
+
+.npcink-v3-analysis-subnav .ant-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+}
+
 .npcink-v3-analysis-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -344,6 +361,28 @@
 
 .npcink-v3-query-distribution .npcink-v3-analysis-distribution {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.npcink-v3-hardware-inventory-search {
+  width: 260px;
+}
+
+.npcink-v3-hardware-inventory-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.npcink-v3-hardware-inventory-kpis {
+  margin-top: 18px;
+}
+
+.npcink-v3-inventory-model-link {
+  height: auto;
+  max-width: 100%;
+  padding: 0;
+  text-align: left;
+  white-space: normal;
 }
 
 .npcink-v3-detail-navigation {
@@ -2366,6 +2405,10 @@
 
   .npcink-v3-hardware-query-controls {
     grid-template-columns: 1fr;
+  }
+
+  .npcink-v3-hardware-inventory-search {
+    width: 100%;
   }
 
   .npcink-v3-query-kpis {
