@@ -36,9 +36,18 @@ rename would make downgrade and mixed-version operation unsafe.
 - Store `metadata.finance.financial_residual_mode` as `auto` or `manual`.
   Automatic mode uses the live calculation for detail views, analysis, and
   exports; manual mode uses the explicitly entered accounting value.
+- Present the current automatic/manual result as `账面净值（估算）` in the
+  admin UI and exports. Reserve `预计残值` and `预计残值率` for the terminal
+  amount retained after the depreciation period.
+- Keep the internal `financialResidualValue` and `financial_residual_value`
+  identifiers unchanged for REST, backup, database, and downgrade compatibility.
 - Export and import the two values as separate columns. Legacy imports named
   `residualValue`, `残值`, or `二手价` are interpreted as second-hand market
   value; they never populate the new accounting value automatically.
+- Treat `retired` as a financial lifecycle override: preserve historical
+  purchase cost while forcing both second-hand market value and current carrying
+  amount to zero. Enforce this on create, update, batch, import, backup restore,
+  and historical upgrade paths.
 
 ## Alternatives Considered
 
@@ -60,10 +69,13 @@ Rejected because labels cannot resolve the underlying semantic conflict.
 ## Consequences
 
 - Existing second-hand price data remains intact.
-- Finance must enter the accounting residual value separately after upgrade.
+- Finance may enter a manual carrying amount separately after upgrade.
 - The system calculates the current value by default, while finance can switch
   exceptional assets to manual mode for impairment, early retirement, or other
   accounting adjustments.
 - Old REST clients continue to operate through the deprecated alias.
 - The database keeps a legacy column name whose precise meaning is documented
   here and in `docs/asset-data-model.md`.
+- Retired assets remain auditable without contributing a current realizable or
+  carrying value; archiving remains a separate lifecycle action and does not
+  change financial fields.

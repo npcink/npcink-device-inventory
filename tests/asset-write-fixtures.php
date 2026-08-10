@@ -355,6 +355,41 @@ npcink_asset_write_assert($financial_data['financialResidualValue'] === 300.0, '
 npcink_asset_write_assert($financial_data['residualValue'] === 800.0, 'legacy residualValue response alias must remain compatible');
 $wpdb->commands = array();
 
+$retirement_row = npcink_asset_row(1, $first_uuid);
+$retirement_row['purchase_price'] = '5000';
+$retirement_row['residual_value'] = '800';
+$retirement_row['financial_residual_value'] = '300';
+list($retirement_controller, $retirement_assets) = npcink_asset_write_controller(array($first_uuid => $retirement_row));
+$retired = $retirement_controller->update_item(
+	new Npcink_Asset_Write_Request(array('uuid' => $first_uuid, 'status' => 'retired'))
+);
+npcink_asset_write_assert($retired instanceof WP_REST_Response, 'retiring an asset must succeed');
+$retirement_changes = $retirement_assets->updates[0][1];
+npcink_asset_write_assert($retirement_changes['status'] === 'retired', 'retirement must persist the retired status');
+npcink_asset_write_assert($retirement_changes['residual_value'] === 0.0, 'retirement must zero second-hand market value');
+npcink_asset_write_assert($retirement_changes['financial_residual_value'] === 0.0, 'retirement must zero carrying value');
+npcink_asset_write_assert(!array_key_exists('purchase_price', $retirement_changes), 'retirement must preserve purchase price');
+
+$wpdb = new Npcink_Asset_Write_Wpdb();
+$already_retired_row = npcink_asset_row(1, $first_uuid, 'retired');
+list($retirement_controller, $retirement_assets) = npcink_asset_write_controller(array($first_uuid => $already_retired_row));
+$retired_revalue = $retirement_controller->update_item(
+	new Npcink_Asset_Write_Request(
+		array(
+			'uuid' => $first_uuid,
+			'purchasePrice' => 6000,
+			'secondHandMarketValue' => 900,
+			'financialResidualValue' => 400,
+		)
+	)
+);
+npcink_asset_write_assert($retired_revalue instanceof WP_REST_Response, 'editing a retired asset must succeed');
+$retired_revalue_changes = $retirement_assets->updates[0][1];
+npcink_asset_write_assert($retired_revalue_changes['purchase_price'] === 6000.0, 'retired assets may update historical purchase price');
+npcink_asset_write_assert($retired_revalue_changes['residual_value'] === 0.0, 'retired assets must reject a non-zero market value');
+npcink_asset_write_assert($retired_revalue_changes['financial_residual_value'] === 0.0, 'retired assets must reject a non-zero carrying value');
+$wpdb->commands = array();
+
 $archived_rows = $rows;
 $archived_rows[$second_uuid]['status'] = 'deleted';
 list($duplicate_controller, $duplicate_assets, $duplicate_events) = npcink_asset_write_controller($archived_rows);
@@ -432,6 +467,27 @@ npcink_asset_write_assert(count($events->records) === 2, 'successful batch must 
 npcink_asset_write_assert($events->records[0]['payload']['batchSize'] === 2, 'event must use de-duplicated batch size');
 npcink_asset_write_assert($events->records[0]['payload']['changedFields'][0]['oldValue'] === 'IT', 'event must preserve old value');
 npcink_asset_write_assert($events->records[0]['payload']['changedFields'][0]['newValue'] === '财务', 'event must preserve new value');
+
+$wpdb = new Npcink_Asset_Write_Wpdb();
+$batch_retirement_rows = array($first_uuid => $retirement_row, $second_uuid => npcink_asset_row(2, $second_uuid));
+list($batch_retirement_controller, $batch_retirement_assets, $batch_retirement_events) = npcink_asset_write_controller($batch_retirement_rows);
+$batch_retired = $batch_retirement_controller->batch_items(
+	new Npcink_Asset_Write_Request(
+		array(
+			'operation' => 'update',
+			'uuids' => array($first_uuid, $second_uuid),
+			'changes' => array('status' => 'retired'),
+		)
+	)
+);
+npcink_asset_write_assert($batch_retired instanceof WP_REST_Response, 'batch retirement must succeed');
+foreach ($batch_retirement_assets->updates as $batch_update) {
+	npcink_asset_write_assert($batch_update[1]['residual_value'] === 0.0, 'batch retirement must zero market value');
+	npcink_asset_write_assert($batch_update[1]['financial_residual_value'] === 0.0, 'batch retirement must zero carrying value');
+	npcink_asset_write_assert(!array_key_exists('purchase_price', $batch_update[1]), 'batch retirement must preserve purchase price');
+}
+npcink_asset_write_assert(count($batch_retirement_events->records[0]['payload']['changedFields']) === 3, 'batch audit must record status and the two values that actually changed');
+npcink_asset_write_assert(count($batch_retirement_events->records[1]['payload']['changedFields']) === 1, 'batch audit must omit unchanged zero-value fields');
 
 $wpdb = new Npcink_Asset_Write_Wpdb();
 list($controller, $assets) = npcink_asset_write_controller(array($first_uuid => npcink_asset_row(1, $first_uuid)));

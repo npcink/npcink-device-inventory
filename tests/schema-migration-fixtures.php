@@ -74,15 +74,15 @@ npcink_schema_assert(
 	'a fresh install must run every migration in order'
 );
 npcink_schema_assert(
-	Npcink_Device_Inventory_Activator::pending_schema_revisions('20260706_latest_observed') === array('20260715_atomic_identity', '20260715_scope_reset', '20260806_financial_values'),
+	Npcink_Device_Inventory_Activator::pending_schema_revisions('20260706_latest_observed') === array('20260715_atomic_identity', '20260715_scope_reset', '20260806_financial_values', '20260807_computer_device_type_default', '20260807_retired_values_zero'),
 	'an existing schema must run only newer migrations'
 );
 npcink_schema_assert(
-	Npcink_Device_Inventory_Activator::pending_schema_revisions('20260715_atomic_identity') === array('20260715_scope_reset', '20260806_financial_values'),
+	Npcink_Device_Inventory_Activator::pending_schema_revisions('20260715_atomic_identity') === array('20260715_scope_reset', '20260806_financial_values', '20260807_computer_device_type_default', '20260807_retired_values_zero'),
 	'the pre-GA scope reset must run after atomic identity migration'
 );
 npcink_schema_assert(
-	Npcink_Device_Inventory_Activator::pending_schema_revisions('20260715_scope_reset') === array('20260806_financial_values'),
+	Npcink_Device_Inventory_Activator::pending_schema_revisions('20260715_scope_reset') === array('20260806_financial_values', '20260807_computer_device_type_default', '20260807_retired_values_zero'),
 	'the financial value migration must run after the scope reset'
 );
 npcink_schema_assert(
@@ -106,10 +106,23 @@ npcink_schema_assert(strpos($wpdb->queries[1], "'device_uuid_v1', 'fallback_devi
 npcink_schema_assert(!isset($npcink_schema_options['public_query_enabled']), 'scope reset must remove obsolete public-query options');
 
 $wpdb = new Npcink_Schema_Migration_Fake_Wpdb();
-npcink_schema_assert($migration->invoke(null, Npcink_Device_Inventory_Activator::SCHEMA_REVISION) === true, 'financial value migration must succeed');
+npcink_schema_assert($migration->invoke(null, '20260806_financial_values') === true, 'financial value migration must succeed');
 npcink_schema_assert(count($wpdb->queries) === 1, 'financial value migration must add exactly one column when missing');
 npcink_schema_assert(strpos($wpdb->queries[0], 'financial_residual_value') !== false, 'financial value migration must add the accounting residual column');
-npcink_schema_assert($migration->invoke(null, Npcink_Device_Inventory_Activator::SCHEMA_REVISION) === true, 'financial value migration must be idempotent');
+npcink_schema_assert($migration->invoke(null, '20260806_financial_values') === true, 'financial value migration must be idempotent');
 npcink_schema_assert(count($wpdb->queries) === 1, 'idempotent financial value migration must not alter the table again');
+
+$wpdb = new Npcink_Schema_Migration_Fake_Wpdb();
+npcink_schema_assert($migration->invoke(null, '20260807_computer_device_type_default') === true, 'computer device type migration must succeed');
+npcink_schema_assert(count($wpdb->queries) === 1, 'computer device type migration must run one bounded update');
+npcink_schema_assert(strpos($wpdb->queries[0], "asset_type = 'computer'") !== false, 'device type migration must only update computer assets');
+npcink_schema_assert(strpos($wpdb->queries[0], "category IN ('computer', '台式机')") !== false, 'legacy computer categories must normalize to the new default');
+npcink_schema_assert(strpos($wpdb->queries[0], "SET category = '台式电脑'") !== false, 'computer assets must use the new default type');
+
+$wpdb = new Npcink_Schema_Migration_Fake_Wpdb();
+npcink_schema_assert($migration->invoke(null, Npcink_Device_Inventory_Activator::SCHEMA_REVISION) === true, 'retired value migration must succeed');
+npcink_schema_assert(count($wpdb->queries) === 1, 'retired value migration must run one bounded update');
+npcink_schema_assert(strpos($wpdb->queries[0], "WHERE status = 'retired'") !== false, 'retired value migration must only update retired assets');
+npcink_schema_assert(strpos($wpdb->queries[0], 'SET residual_value = 0.00, financial_residual_value = 0.00') !== false, 'retired value migration must zero both current value fields');
 
 echo "Schema migration fixture checks passed.\n";

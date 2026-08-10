@@ -658,7 +658,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			$category = $legacy_asset_type;
 		}
 
-		return array(
+		$row = array(
 			'uuid' => $this->backup_text($asset, array('uuid'), 'text'),
 			'asset_type' => $asset_type,
 			'asset_number' => $this->backup_text($asset, array('assetNumber'), 'text'),
@@ -676,6 +676,11 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			'created_at' => $this->backup_datetime($asset, 'createdAt', false),
 			'updated_at' => $this->backup_datetime($asset, 'updatedAt', false),
 		);
+		if ($row['status'] === 'retired') {
+			$row['residual_value'] = 0.0;
+			$row['financial_residual_value'] = 0.0;
+		}
+		return $row;
 	}
 
 	private function asset_update_row($row, $matched_by_uuid)

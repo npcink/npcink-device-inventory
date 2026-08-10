@@ -29,11 +29,13 @@ if (!defined('ABSPATH')) {
  */
 class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_Interface
 {
-	const SCHEMA_REVISION = '20260806_financial_values';
+	const SCHEMA_REVISION = '20260807_retired_values_zero';
 	const SCHEMA_REVISIONS = array(
 		'20260706_latest_observed',
 		'20260715_atomic_identity',
 		'20260715_scope_reset',
+		'20260806_financial_values',
+		'20260807_computer_device_type_default',
 		self::SCHEMA_REVISION,
 	);
 
@@ -109,12 +111,58 @@ class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_In
 			return self::reset_pre_ga_scope();
 		}
 
-		if ($revision === self::SCHEMA_REVISION) {
+		if ($revision === '20260806_financial_values') {
 			// Keep the legacy residual_value column as second-hand market value and add a distinct accounting value.
 			return self::add_financial_residual_value_column();
 		}
 
+		if ($revision === '20260807_computer_device_type_default') {
+			return self::normalize_computer_device_type();
+		}
+
+		if ($revision === self::SCHEMA_REVISION) {
+			return self::normalize_retired_values();
+		}
+
 		return false;
+	}
+
+	/**
+	 * Give computer assets a user-facing default subtype and normalize the former labels.
+	 */
+	private static function normalize_computer_device_type()
+	{
+		global $wpdb;
+		$assets = self::quote_internal_table_name($wpdb->prefix . self::$table_assets_name);
+		if (!$assets) {
+			return false;
+		}
+
+		return $wpdb->query(
+			"UPDATE $assets
+			SET category = '台式电脑'
+			WHERE asset_type = 'computer'
+			AND (TRIM(category) = '' OR category IN ('computer', '台式机'))"
+		) !== false;
+	}
+
+	/**
+	 * Retired assets retain historical purchase cost but no current market or carrying value.
+	 */
+	private static function normalize_retired_values()
+	{
+		global $wpdb;
+		$assets = self::quote_internal_table_name($wpdb->prefix . self::$table_assets_name);
+		if (!$assets) {
+			return false;
+		}
+
+		return $wpdb->query(
+			"UPDATE $assets
+			SET residual_value = 0.00, financial_residual_value = 0.00
+			WHERE status = 'retired'
+			AND (residual_value <> 0.00 OR financial_residual_value <> 0.00)"
+		) !== false;
 	}
 
 	/**

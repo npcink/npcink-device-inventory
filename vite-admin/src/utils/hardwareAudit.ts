@@ -67,6 +67,31 @@ export const firstText = (...values: unknown[]) => {
   return "";
 };
 
+const VIRTUAL_GRAPHICS_PATTERN = /(?:orayidd|virtual\s+(?:display|graphics|monitor)|remote\s+display|iddsample|parsec.*display|microsoft\s+remote\s+display)/i;
+
+export const isVirtualGraphicsController = (controller: JsonRecord) =>
+  VIRTUAL_GRAPHICS_PATTERN.test(firstText(controller.model, controller.name, controller.vendor, controller.videoProcessor));
+
+export const physicalGraphicsControllers = (graphics: JsonRecord) =>
+  getArray(graphics.controllers).filter((controller) => !isVirtualGraphicsController(controller));
+
+export const inferredGraphicsForFallbackDriver = (cpu: unknown) => {
+  const text = firstText(cpu);
+  const intelModel = text.match(/\bi[3579]-(\d{4,5})([A-Z]*)\b/i);
+  if (intelModel) {
+    const model = intelModel[1];
+    const suffix = intelModel[2].toUpperCase();
+    if (suffix.includes("F")) {
+      return "显卡驱动未识别";
+    }
+    if (/^[89]\d{3}$/.test(model)) {
+      return "UHD 630（驱动未识别）";
+    }
+    return "Intel 核显（驱动未识别）";
+  }
+  return "显卡驱动未识别";
+};
+
 const displayResolution = (display: JsonRecord) => {
   const width = firstText(display.currentResX, display.resolutionX);
   const height = firstText(display.currentResY, display.resolutionY);
@@ -76,7 +101,7 @@ const displayResolution = (display: JsonRecord) => {
 export const hardwareSummary = (summary: JsonRecord, hardware: JsonRecord) => {
   const cpu = getRecord(hardware.cpu);
   const graphics = getRecord(hardware.graphics);
-  const controllers = getArray(graphics.controllers);
+  const controllers = physicalGraphicsControllers(graphics);
   const system = getRecord(hardware.system);
   const baseboard = getRecord(hardware.baseboard);
   const displays = getArray(graphics.displays);
@@ -95,7 +120,10 @@ export const hardwareSummary = (summary: JsonRecord, hardware: JsonRecord) => {
   return {
     platform: firstText(summary.platform, getRecord(hardware.os).platform, "Windows"),
     cpu: firstText(summary.cpu, cpu.brand, cpu.model, cpu.manufacturer),
-    graphics: firstText(summary.graphics, controllers[0]?.model),
+    graphics: firstText(
+      VIRTUAL_GRAPHICS_PATTERN.test(firstText(summary.graphics)) ? "" : summary.graphics,
+      controllers[0]?.model
+    ),
     deviceModel: firstText(summary.device_model, system.model),
     baseboard: firstText(baseboard.model, baseboard.serial, system.model),
     memoryLines: memory.map((item) =>

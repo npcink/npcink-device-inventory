@@ -5,6 +5,7 @@ This folder keeps the current product contracts, development guardrails, release
 ## Start Here
 
 - `development-playbook.md`: the working agreement for new changes: scope, evidence, contracts, testing, and release gates.
+- `v3.1.4-asset-lifecycle-admin-quality-retrospective-2026-08-10.md`: consolidated 3.1.4 lifecycle, device-type, finance, hardware-summary, admin-UI, full-chain, and release standards.
 - `admin-read-only-analysis-development-standard.md`: implementation, data-semantics, UI, permission, and verification rules for read-only admin analytics.
 - `asset-data-model.md`: v3 asset, identity, observation, and event model contract.
 - `asset-finance-export-development-retrospective-2026-08-06.md`: consolidated finance-field, depreciation, missing-data, configurable export, UI iteration, and verification standard.
@@ -27,6 +28,7 @@ This folder keeps the current product contracts, development guardrails, release
 
 ## Release Records
 
+- `release-verification-2026-08-10-v3.1.4.md`: release verification record for plugin 3.1.4, including lifecycle invariants, official Plugin Check, and isolated backup/restore validation.
 - `release-verification-2026-08-05-v3.1.2.md`: current release verification record for plugin 3.1.2 and Device Agent 0.3.3.
 - `release-verification-2026-08-06-v3.1.3.md`: release verification record for plugin 3.1.3, including the official Plugin Check 2.0.0 result and package hash.
 - `release-verification-2026-08-05-v3.1.1.md`: previous release verification record for plugin 3.1.1 and Device Agent 0.3.2.

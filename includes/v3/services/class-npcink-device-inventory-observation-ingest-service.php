@@ -293,7 +293,7 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			'owner_name' => $owner,
 			'department' => '',
 			'status' => 'active',
-			'category' => 'computer',
+			'category' => '台式电脑',
 			'purchase_price' => 0,
 			'residual_value' => 0,
 			'financial_residual_value' => 0,

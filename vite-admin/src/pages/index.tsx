@@ -77,7 +77,9 @@ import {
   hardwareSummary,
   hardwareDiskBytes,
   hardwareMemoryBytes,
+  inferredGraphicsForFallbackDriver,
   issueGroup,
+  physicalGraphicsControllers,
   toNumber,
   type HardwareIssue,
 } from "@/utils/hardwareAudit";
@@ -92,7 +94,8 @@ const ASSET_TYPES: Array<{ label: string; value: AssetType }> = [
 
 const DEFAULT_CUSTOM_CATEGORIES = ["显卡", "手机", "机房设备", "网络设备", "办公设备"];
 
-const COMPUTER_DEVICE_TYPE_OPTIONS = ["笔记本", "台式机", "苹果电脑", "一体机"].map((value) => ({
+const DEFAULT_COMPUTER_DEVICE_TYPE = "台式电脑";
+const COMPUTER_DEVICE_TYPE_OPTIONS = ["笔记本", DEFAULT_COMPUTER_DEVICE_TYPE, "苹果电脑", "一体机"].map((value) => ({
   label: value,
   value,
 }));
@@ -170,7 +173,7 @@ const ASSET_IMPORT_FIELDS = [
   { label: "设备类型 / 分类", value: "category" },
   { label: "购置价格", value: "purchasePrice" },
   { label: "二手市场价", value: "secondHandMarketValue" },
-  { label: "财务残值", value: "financialResidualValue" },
+  { label: "账面净值（估算）", value: "financialResidualValue" },
   { label: "购置日期", value: "purchaseDate" },
   { label: "CPU", value: "cpu" },
   { label: "内存", value: "memory" },
@@ -269,6 +272,24 @@ const formatDate = (value?: string) => {
     return value;
   }
   return date.toLocaleString("zh-CN", { hour12: false });
+};
+
+const formatDateOnly = (value?: string) => {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value.replace(" ", "T"));
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString("zh-CN");
+};
+
+const computerDeviceType = (value?: string) => {
+  const normalized = String(value || "").trim();
+  return !normalized || normalized === "computer" || normalized === "台式机"
+    ? DEFAULT_COMPUTER_DEVICE_TYPE
+    : normalized;
 };
 
 const parseDateValue = (value?: string) => {
@@ -435,7 +456,7 @@ const cardCpuLabel = (value: unknown) => {
   return matched ? matched[0] : text;
 };
 
-const cardGraphicsLabel = (value: unknown) => {
+const cardGraphicsLabel = (value: unknown, cpu?: unknown) => {
   const text = hardwareModelLabel(value, "-")
     .replace(/\bNVIDIA\s+(?:GeForce\s+)?/gi, "")
     .replace(/\bIntel(?:\(R\)|®)?\s*/gi, "")
@@ -443,6 +464,9 @@ const cardGraphicsLabel = (value: unknown) => {
     .replace(/\(R\)/gi, "")
     .replace(/\s+/g, " ")
     .trim();
+  if (/Microsoft\s+(?:Basic Display Adapter|基本显示适配器)|Microsoft\s*基本显示适配器/i.test(text)) {
+    return inferredGraphicsForFallbackDriver(cpu);
+  }
   if (!text || text === "-") {
     return "-";
   }
@@ -546,6 +570,7 @@ const importFieldValue = (row: JsonRecord, field: AssetImportFieldKey) => {
   const fieldConfig = ASSET_IMPORT_FIELDS.find((item) => item.value === field);
   const compatibilityAliases: Partial<Record<AssetImportFieldKey, string[]>> = {
     category: ["分类", "设备类型"],
+    financialResidualValue: ["财务残值", "账面净值"],
     secondHandMarketValue: ["residualValue", "残值", "二手价"],
   };
   return pickRowValue(row, [field, fieldConfig?.label || "", ...(compatibilityAliases[field] || [])]);
@@ -611,6 +636,9 @@ const calculatedFinancialResidualForAsset = (asset: Asset, settings?: InventoryS
 };
 
 const effectiveFinancialResidualValue = (asset: Asset, settings?: InventorySettings) => {
+  if (asset.status === "retired") {
+    return 0;
+  }
   if (financialResidualMode(asset) === "manual") {
     return Number(asset.financialResidualValue || 0);
   }
@@ -619,6 +647,9 @@ const effectiveFinancialResidualValue = (asset: Asset, settings?: InventorySetti
 
 const assetUpdateTimeText = (asset: Asset) =>
   formatDate(asset.latestObservation?.observedAt || asset.updatedAt);
+
+const assetUpdateDateText = (asset: Asset) =>
+  formatDateOnly(asset.latestObservation?.observedAt || asset.updatedAt);
 
 const searchHighlightKeyword = (keyword?: string) => (keyword || "").trim();
 
@@ -803,10 +834,10 @@ const ASSET_EXPORT_FIELDS: Array<{
   { key: "ownerName", label: "使用人", group: "基础信息", defaultChecked: true, value: (asset) => asset.ownerName },
   { key: "department", label: "部门", group: "基础信息", defaultChecked: true, value: (asset) => asset.department },
   { key: "status", label: "状态", group: "基础信息", defaultChecked: true, value: (asset) => statusLabel(asset.status) },
-  { key: "category", label: "设备类型 / 分类", group: "基础信息", defaultChecked: true, value: (asset) => asset.category },
+  { key: "category", label: "设备类型 / 分类", group: "基础信息", defaultChecked: true, value: (asset) => isComputerAsset(asset) ? computerDeviceType(asset.category) : asset.category },
   { key: "purchasePrice", label: "采购价", group: "财务信息", defaultChecked: true, value: (asset) => asset.purchasePrice },
   { key: "secondHandMarketValue", label: "二手市场价", group: "财务信息", defaultChecked: true, value: (asset) => asset.secondHandMarketValue },
-  { key: "financialResidualValue", label: "财务残值", group: "财务信息", defaultChecked: true, value: (asset) => asset.financialResidualValue },
+  { key: "financialResidualValue", label: "账面净值（估算）", group: "财务信息", defaultChecked: true, value: (asset) => asset.financialResidualValue },
   { key: "purchaseDate", label: "购置日期", group: "财务信息", value: assetPurchaseDateText },
   { key: "cpu", label: "CPU", group: "硬件信息", defaultChecked: true, value: (asset) => assetHardwareContext(asset).extracted.cpu },
   {
@@ -1335,7 +1366,7 @@ const hardwareDetailSections = (
   const summary = context.summary;
   const cpu = getRecord(hardware.cpu);
   const graphics = getRecord(hardware.graphics);
-  const controllers = getArray(graphics.controllers);
+  const controllers = physicalGraphicsControllers(graphics);
   const displays = getArray(graphics.displays);
   const baseboard = getRecord(hardware.baseboard);
   const bios = getRecord(hardware.bios);
@@ -1373,10 +1404,10 @@ const hardwareDetailSections = (
         detailRow("owner", "使用人", asset.ownerName),
         detailRow("department", "部门", asset.department),
         detailRow("status", "状态", statusLabel(asset.status)),
-        detailRow("category", "设备类型", asset.category),
+        detailRow("category", "类型", computerDeviceType(asset.category)),
         detailRow("purchase", "购置价值", formatMoney(asset.purchasePrice)),
         detailRow("secondHandMarketValue", "二手市场价", formatMoney(asset.secondHandMarketValue)),
-        detailRow("financialResidualValue", "财务残值", formatMoney(effectiveFinancialResidualValue(asset, settings))),
+        detailRow("financialResidualValue", "账面净值（估算）", formatMoney(effectiveFinancialResidualValue(asset, settings))),
         detailRow("updated", "更新时间", assetUpdateTimeText(asset))
       ),
     },
@@ -1661,9 +1692,9 @@ const AUTO_RECORD_FIELDS: Record<string, string> = {
   depreciation: "二手市场价",
   residualValue: "二手市场价（兼容字段）",
   secondHandMarketValue: "二手市场价",
-  financialResidualValue: "财务残值",
+  financialResidualValue: "账面净值（估算）",
   residual_value: "二手市场价",
-  financial_residual_value: "财务残值",
+  financial_residual_value: "账面净值（估算）",
 };
 
 const normalizeAutoRecordField = (fieldName: string) => {
@@ -1889,7 +1920,7 @@ const AssetFormModal = ({ asset, open, departmentOptions = [], onClose, onSubmit
       name: asset?.name || "",
       ownerName: asset?.ownerName || "",
       department: asset?.department || DEFAULT_DEPARTMENT,
-      category: asset?.category || "",
+      category: asset && isComputerAsset(asset) ? computerDeviceType(asset.category) : asset?.category || "",
       status: asset?.status || "active",
       purchasePrice: asset?.purchasePrice || 0,
       secondHandMarketValue: asset?.secondHandMarketValue || 0,
@@ -1913,6 +1944,8 @@ const AssetFormModal = ({ asset, open, departmentOptions = [], onClose, onSubmit
       open={open}
       onCancel={onClose}
       onOk={() => form.submit()}
+      okText={asset ? "保存" : "确认录入"}
+      cancelText="取消"
       destroyOnClose
       width={760}
     >
@@ -1984,7 +2017,7 @@ const AssetFormModal = ({ asset, open, departmentOptions = [], onClose, onSubmit
                 />
               )}
             </Form.Item>
-            <Form.Item name="status" label="状态">
+            <Form.Item name="status" label="状态" extra="选择报废后，将保留采购价，并把二手市场价和账面净值调整为 0。">
               <Select options={EDITABLE_STATUS_OPTIONS} />
             </Form.Item>
           </div>
@@ -2007,10 +2040,10 @@ const AssetFormModal = ({ asset, open, departmentOptions = [], onClose, onSubmit
                 <Form.Item name="secondHandMarketValue" label="二手市场价">
                   <InputNumber min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
                 </Form.Item>
-                <Form.Item name="financialResidualMode" label="财务残值方式">
+                <Form.Item name="financialResidualMode" label="账面净值方式">
                   <Radio.Group options={[{ label: "自动计算", value: "auto" }, { label: "手动设置", value: "manual" }]} />
                 </Form.Item>
-                <Form.Item name="financialResidualValue" label={watchedFinancialResidualMode === "manual" ? "手动财务残值" : "自动财务残值"}>
+                <Form.Item name="financialResidualValue" label={watchedFinancialResidualMode === "manual" ? "手动账面净值" : "自动账面净值"}>
                   <InputNumber disabled={watchedFinancialResidualMode !== "manual"} min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
                 </Form.Item>
               </div>
@@ -2048,17 +2081,17 @@ const AssetFormModal = ({ asset, open, departmentOptions = [], onClose, onSubmit
             <Form.Item name="secondHandMarketValue" label="二手市场价">
               <InputNumber min={0} precision={2} className="npcink-v3-number" />
             </Form.Item>
-            <Form.Item name="financialResidualMode" label="财务残值方式">
+            <Form.Item name="financialResidualMode" label="账面净值方式">
               <Radio.Group options={[{ label: "自动计算", value: "auto" }, { label: "手动设置", value: "manual" }]} />
             </Form.Item>
-            <Form.Item name="financialResidualValue" label={watchedFinancialResidualMode === "manual" ? "手动财务残值" : "自动财务残值"}>
+            <Form.Item name="financialResidualValue" label={watchedFinancialResidualMode === "manual" ? "手动账面净值" : "自动账面净值"}>
               <InputNumber disabled={watchedFinancialResidualMode !== "manual"} min={0} precision={2} className="npcink-v3-number" />
             </Form.Item>
           </div>
         )}
         <div className="npcink-v3-finance-summary">
           <span>
-            系统估算财务残值：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}
+            系统估算账面净值：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}
           </span>
           <span>当前方式：{watchedFinancialResidualMode === "manual" ? "手动设置" : "自动计算"}</span>
         </div>
@@ -2523,6 +2556,8 @@ const BulkEditModal = ({ open, count, loading, categoryMode, departmentOptions =
       open={open}
       onCancel={onClose}
       onOk={() => form.submit()}
+      okText="确认修改"
+      cancelText="取消"
       confirmLoading={loading}
       destroyOnClose
       width={560}
@@ -2572,7 +2607,7 @@ const BulkEditModal = ({ open, count, loading, categoryMode, departmentOptions =
         <Form.Item name="ownerName" label="使用人 / 责任人">
           <Input placeholder="统一修改使用人 / 责任人" />
         </Form.Item>
-        <Form.Item name="status" label="状态">
+        <Form.Item name="status" label="状态" extra="选择报废后，将保留采购价，并把二手市场价和账面净值调整为 0。">
           <Select allowClear options={EDITABLE_STATUS_OPTIONS} placeholder="统一修改状态" />
         </Form.Item>
         {categoryMode === "computer" ? (
@@ -2951,7 +2986,7 @@ const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, onArchiv
       ownerName: asset.ownerName,
       department: asset.department || DEFAULT_DEPARTMENT,
       status: asset.status,
-      category: asset.category,
+      category: computerDeviceType(asset.category),
       purchasePrice: asset.purchasePrice,
       secondHandMarketValue: asset.secondHandMarketValue,
       financialResidualValue: asset.financialResidualValue,
@@ -3005,7 +3040,7 @@ const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, onArchiv
                 filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())}
               />
             </Form.Item>
-            <Form.Item name="status" label="状态">
+            <Form.Item name="status" label="状态" extra="选择报废后，将保留采购价，并把二手市场价和账面净值调整为 0。">
               <Select options={EDITABLE_STATUS_OPTIONS} />
             </Form.Item>
             <Form.Item name="category" label="设备类型">
@@ -3028,10 +3063,10 @@ const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, onArchiv
             <Form.Item name="secondHandMarketValue" label="二手市场价">
               <InputNumber min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
             </Form.Item>
-            <Form.Item name="financialResidualMode" label="财务残值方式">
+            <Form.Item name="financialResidualMode" label="账面净值方式">
               <Radio.Group options={[{ label: "自动计算", value: "auto" }, { label: "手动设置", value: "manual" }]} />
             </Form.Item>
-            <Form.Item name="financialResidualValue" label={watchedFinancialResidualMode === "manual" ? "手动财务残值" : "自动财务残值"}>
+            <Form.Item name="financialResidualValue" label={watchedFinancialResidualMode === "manual" ? "手动账面净值" : "自动账面净值"}>
               <InputNumber disabled={watchedFinancialResidualMode !== "manual"} min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
             </Form.Item>
             <Form.Item
@@ -3053,8 +3088,8 @@ const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, onArchiv
           </div>
           <div className="npcink-v3-finance-summary">
             <span>折旧率：{depreciationRate}%</span>
-            <span>财务残值：{formatMoney(financialResidualValue)}</span>
-            <span>残值率：{residualRate}%</span>
+            <span>账面净值：{formatMoney(financialResidualValue)}</span>
+            <span>账面净值率：{residualRate}%</span>
             <span>系统估算：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}</span>
             <span>当前采用：{watchedFinancialResidualMode === "manual" ? "手动值" : "系统估算值"}</span>
           </div>
@@ -3227,7 +3262,7 @@ const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetSettings
                 }}
               />
             </Form.Item>
-            <Form.Item name="status" label="当前状态">
+            <Form.Item name="status" label="当前状态" extra="选择报废后，将保留采购价，并把二手市场价和账面净值调整为 0。">
               <Select options={EDITABLE_STATUS_OPTIONS} />
             </Form.Item>
             <Form.Item name="ownerName" label="使用人 / 责任人">
@@ -3248,10 +3283,10 @@ const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetSettings
             <Form.Item name="secondHandMarketValue" label="二手市场价">
               <InputNumber min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
             </Form.Item>
-            <Form.Item name="financialResidualMode" label="财务残值方式">
+            <Form.Item name="financialResidualMode" label="账面净值方式">
               <Radio.Group options={[{ label: "自动计算", value: "auto" }, { label: "手动设置", value: "manual" }]} />
             </Form.Item>
-            <Form.Item name="financialResidualValue" label={watchedFinancialResidualMode === "manual" ? "手动财务残值" : "自动财务残值"}>
+            <Form.Item name="financialResidualValue" label={watchedFinancialResidualMode === "manual" ? "手动账面净值" : "自动账面净值"}>
               <InputNumber disabled={watchedFinancialResidualMode !== "manual"} min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
             </Form.Item>
             <Form.Item name="numbers" label="采购数量">
@@ -3263,8 +3298,8 @@ const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetSettings
           </div>
           <div className="npcink-v3-finance-summary">
             <span>折旧率：{depreciationRate}%</span>
-            <span>财务残值：{formatMoney(financialResidualValue)}</span>
-            <span>残值率：{residualRate}%</span>
+            <span>账面净值：{formatMoney(financialResidualValue)}</span>
+            <span>账面净值率：{residualRate}%</span>
             <span>系统估算：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}</span>
             <span>当前采用：{watchedFinancialResidualMode === "manual" ? "手动值" : "系统估算值"}</span>
           </div>
@@ -3692,7 +3727,7 @@ const DetailDrawer = ({
             <div><span>二手市场价</span><strong>{secondHandMarketValue > 0 ? formatMoney(secondHandMarketValue) : "未登记"}</strong></div>
             <div className="is-emphasis">
               <span className="npcink-v3-finance-label">
-                财务残值
+                账面净值（估算）
                 <em>{activeFinancialResidualMode === "manual" ? "手动" : "自动"}</em>
               </span>
               <strong>{hasFinancialResidualValue ? formatMoney(financialResidualValue) : "未登记"}</strong>
@@ -3800,7 +3835,7 @@ const DetailDrawer = ({
               children: (
                 <Space direction="vertical" size={12} className="npcink-v3-detail-stack">
                   <Text type="secondary">
-                    自动记录字段：姓名、状态、编号、部门、IP、采购价、二手市场价、财务残值
+                    自动记录字段：姓名、状态、编号、部门、IP、采购价、二手市场价、账面净值
                   </Text>
                   <div className="npcink-v3-auto-search">
                     <Input
@@ -4527,7 +4562,7 @@ const AnalysisWorkspace = () => {
       { label: "内存", complete: hardwareMemoryBytes(asset) > 0 },
       { label: "硬盘", complete: hardwareDiskBytes(asset) > 0 },
       { label: "采购价", complete: Number(asset.purchasePrice || 0) > 0 },
-      { label: "财务残值", complete: effectiveFinancialResidualValue(asset, settingsQuery.data) > 0 },
+      { label: "账面净值", complete: effectiveFinancialResidualValue(asset, settingsQuery.data) > 0 },
     ];
     const missing = checks.filter((check) => !check.complete).map((check) => check.label);
     return { asset, missing, score: Math.round(((checks.length - missing.length) / checks.length) * 100) };
@@ -4565,7 +4600,7 @@ const AnalysisWorkspace = () => {
     const effectiveResidual = effectiveFinancialResidualValue(asset, settingsQuery.data);
     if (asset.purchasePrice > 0 && effectiveResidual > 0) {
       const residualRate = (effectiveResidual / asset.purchasePrice) * 100;
-      if (residualRate <= renewalSettings.renewalMaxResidualRate) reasons.push(`残值率 ${Math.round(residualRate)}%`);
+      if (residualRate <= renewalSettings.renewalMaxResidualRate) reasons.push(`账面净值率 ${Math.round(residualRate)}%`);
     }
     return { asset, reasons };
   }).filter((row) => row.reasons.length > 0).sort((a, b) => b.reasons.length - a.reasons.length), [analysisNow, assets, renewalSettings.renewalAgeYears, renewalSettings.renewalMaxResidualRate, renewalSettings.renewalMinDiskGb, renewalSettings.renewalMinMemoryGb]);
@@ -4618,11 +4653,11 @@ const AnalysisWorkspace = () => {
     return Array.from(groups, ([label, value]) => ({
       label,
       value: value.purchase,
-      meta: `${value.count} 台 · 历史采购 ${formatMoney(value.purchase)} · 财务残值 ${formatMoney(value.residual)}`,
+      meta: `${value.count} 台 · 历史采购 ${formatMoney(value.purchase)} · 账面净值 ${formatMoney(value.residual)}`,
     })).sort((a, b) => b.value - a.value);
   }, [selectedRenewalRows]);
   const exportRenewalPlan = () => {
-    const rows = [["资产编号", "资产名称", "部门", "状态", "候选依据", "历史采购价", "财务残值", "参考净额"], ...selectedRenewalRows.map((row) => {
+    const rows = [["资产编号", "资产名称", "部门", "状态", "候选依据", "历史采购价", "账面净值（估算）", "累计折旧（估算）"], ...selectedRenewalRows.map((row) => {
       const residual = effectiveFinancialResidualValue(row.asset, settingsQuery.data);
       return [row.asset.assetNumber, row.asset.name, row.asset.department, statusLabel(row.asset.status), row.reasons.join("、"), String(row.asset.purchasePrice || 0), String(residual), String(Math.max(0, (row.asset.purchasePrice || 0) - residual))];
     })];
@@ -4640,9 +4675,9 @@ const AnalysisWorkspace = () => {
     } else if (activeTab === "changes") {
       rows = [["资产编号", "资产名称", "部门", "变化字段", "变化前", "变化后", "采集时间"], ...visibleHardwareChanges.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, row.field, row.before, row.after, row.observedAt])];
     } else if (activeTab === "renewal") {
-      rows = [["资产编号", "资产名称", "部门", "状态", "候选依据", "采购价", "财务残值"], ...renewalRows.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, statusLabel(row.asset.status), row.reasons.join("、"), String(row.asset.purchasePrice || 0), String(effectiveFinancialResidualValue(row.asset, settingsQuery.data))])];
+      rows = [["资产编号", "资产名称", "部门", "状态", "候选依据", "采购价", "账面净值（估算）"], ...renewalRows.map((row) => [row.asset.assetNumber, row.asset.name, row.asset.department, statusLabel(row.asset.status), row.reasons.join("、"), String(row.asset.purchasePrice || 0), String(effectiveFinancialResidualValue(row.asset, settingsQuery.data))])];
     } else if (activeTab === "value") {
-      rows = [["资产编号", "资产名称", "类型", "部门", "采购价", "二手市场价", "财务残值"], ...allAssets.map((asset) => [asset.assetNumber, asset.name, assetTypeLabel(asset.assetType), asset.department, String(asset.purchasePrice || 0), String(asset.secondHandMarketValue || 0), String(effectiveFinancialResidualValue(asset, settingsQuery.data))])];
+      rows = [["资产编号", "资产名称", "类型", "部门", "采购价", "二手市场价", "账面净值（估算）"], ...allAssets.map((asset) => [asset.assetNumber, asset.name, assetTypeLabel(asset.assetType), asset.department, String(asset.purchasePrice || 0), String(asset.secondHandMarketValue || 0), String(effectiveFinancialResidualValue(asset, settingsQuery.data))])];
     } else {
       rows = [["资产编号", "资产名称", "类型", "部门", "状态", "最后采集"], ...allAssets.map((asset) => [asset.assetNumber, asset.name, assetTypeLabel(asset.assetType), asset.department, statusLabel(asset.status), asset.latestObservation?.observedAt || ""])];
       filename = `设备分析-管理摘要-${formatDateInput(new Date().toISOString())}.csv`;
@@ -4850,7 +4885,7 @@ const AnalysisWorkspace = () => {
       ) : null}
       {activeTab === "renewal" ? (
         <div className="npcink-v3-analysis-grid">
-          <section className="npcink-v3-analysis-panel is-wide"><div className="npcink-v3-analysis-panel-head"><div><Title level={4}>设备更新候选</Title><Text type="secondary">仅依据设置阈值列出候选，不代表必须淘汰。</Text></div><strong>{renewalRows.length} 台</strong></div><div className="npcink-v3-threshold-summary"><span>年限 ≥ {renewalSettings.renewalAgeYears} 年</span><span>内存 &lt; {renewalSettings.renewalMinMemoryGb} GB</span><span>硬盘 &lt; {renewalSettings.renewalMinDiskGb} GB</span><span>残值率 ≤ {renewalSettings.renewalMaxResidualRate}%</span></div></section>
+          <section className="npcink-v3-analysis-panel is-wide"><div className="npcink-v3-analysis-panel-head"><div><Title level={4}>设备更新候选</Title><Text type="secondary">仅依据设置阈值列出候选，不代表必须淘汰。</Text></div><strong>{renewalRows.length} 台</strong></div><div className="npcink-v3-threshold-summary"><span>年限 ≥ {renewalSettings.renewalAgeYears} 年</span><span>内存 &lt; {renewalSettings.renewalMinMemoryGb} GB</span><span>硬盘 &lt; {renewalSettings.renewalMinDiskGb} GB</span><span>账面净值率 ≤ {renewalSettings.renewalMaxResidualRate}%</span></div></section>
           <section className="npcink-v3-analysis-panel is-wide"><Table rowKey={(row) => row.asset.uuid} size="middle" loading={settingsQuery.isLoading} dataSource={renewalRows} rowSelection={{ selectedRowKeys: Array.from(selectedRenewalUuids), onChange: (keys) => setSelectedRenewalUuids(new Set(keys.map(String))) }} pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 台候选` }} columns={[
             { title: "资产", render: (_, row) => analysisAssetLink(row.asset) },
             { title: "部门", render: (_, row) => row.asset.department || "-", width: 150 },
@@ -4865,8 +4900,8 @@ const AnalysisWorkspace = () => {
             <div className="npcink-v3-value-kpis npcink-v3-renewal-plan-kpis">
               <div><span>已选设备</span><strong>{selectedRenewalRows.length} 台</strong></div>
               <div><span>历史采购价</span><strong>{formatMoney(selectedRenewalPurchase)}</strong></div>
-              <div><span>财务残值</span><strong>{formatMoney(selectedRenewalResidual)}</strong></div>
-              <div><span>参考净额</span><strong>{formatMoney(Math.max(0, selectedRenewalPurchase - selectedRenewalResidual))}</strong><small>历史采购价 - 财务残值</small></div>
+              <div><span>账面净值（估算）</span><strong>{formatMoney(selectedRenewalResidual)}</strong></div>
+              <div><span>累计折旧（估算）</span><strong>{formatMoney(Math.max(0, selectedRenewalPurchase - selectedRenewalResidual))}</strong><small>历史采购价 - 账面净值</small></div>
             </div>
             <AnalysisDistribution rows={renewalDepartmentPlanRows} emptyText="请先勾选更新候选设备" />
           </section>
@@ -4877,12 +4912,12 @@ const AnalysisWorkspace = () => {
           <section className="npcink-v3-analysis-panel is-wide">
             <div className="npcink-v3-value-kpis">
               <div><span>采购价合计</span><strong>{formatMoney(totalPurchase)}</strong></div>
-              <div><span>已登记财务残值</span><strong>{formatMoney(totalResidual)}</strong></div>
+              <div><span>账面净值合计</span><strong>{formatMoney(totalResidual)}</strong></div>
               <div><span>已知折价</span><strong>{formatMoney(knownDepreciation)}</strong></div>
               <div><span>估值覆盖</span><strong>{allAssets.length ? `${Math.round((valuedAssets.length / allAssets.length) * 100)}%` : "-"}</strong><small>{valuedAssets.length}/{allAssets.length} 条有金额</small></div>
             </div>
           </section>
-          <section className="npcink-v3-analysis-panel is-wide"><Title level={4}>全部资产部门财务残值分布</Title><Text type="secondary">汇总 {allAssets.length} 条未归档电脑和自定义资产中已登记的财务残值，不对缺失金额做推算。</Text><AnalysisDistribution rows={departmentValueRows} emptyText="暂无财务残值数据" /></section>
+          <section className="npcink-v3-analysis-panel is-wide"><Title level={4}>全部资产部门账面净值分布</Title><Text type="secondary">汇总 {allAssets.length} 条未归档电脑和自定义资产的当前有效账面净值；自动模式使用实时估算值，手动模式使用已登记值。</Text><AnalysisDistribution rows={departmentValueRows} emptyText="暂无账面净值数据" /></section>
         </div>
       ) : null}
       {activeTab === "quality" ? <div className="npcink-v3-analysis-grid">
@@ -5116,9 +5151,9 @@ const SettingsWorkspace = () => {
             </div>
           </div>
           <div className="npcink-v3-settings-section">
-            <Title level={4}>财务残值计算</Title>
+            <Title level={4}>账面净值估算</Title>
             <Text type="secondary">
-              使用直线折旧法：采购价减去预计最终残值后，按月平均折旧。默认直接使用系统自动计算值；特殊设备可在编辑页切换为手动财务残值。
+              使用直线折旧法：采购价减去预计最终残值后，按月平均折旧。默认使用系统实时估算的账面净值；特殊设备可在编辑页切换为手动账面净值。
             </Text>
             <div className="npcink-v3-settings-grid">
               <Form.Item
@@ -5131,7 +5166,7 @@ const SettingsWorkspace = () => {
               <Form.Item
                 name="defaultResidualRate"
                 label="预计残值率"
-                extra="折旧期满后的最低财务残值比例，常见为 3%–5%。"
+                extra="折旧期满后的预计残值占采购价的比例，常见为 3%–5%。"
               >
                 <InputNumber min={0} max={100} precision={1} addonAfter="%" />
               </Form.Item>
@@ -5158,7 +5193,7 @@ const SettingsWorkspace = () => {
               <Form.Item name="renewalMinDiskGb" label="最低硬盘（GB）" extra="已采集硬盘容量低于该值时进入候选。">
                 <InputNumber min={1} max={8192} precision={0} addonAfter="GB" />
               </Form.Item>
-              <Form.Item name="renewalMaxResidualRate" label="低残值率阈值（%）" extra="采购价和财务残值均存在时参与判断。">
+              <Form.Item name="renewalMaxResidualRate" label="低账面净值率阈值（%）" extra="采购价和当前有效账面净值均存在时参与判断。">
                 <InputNumber min={0} max={100} precision={0} addonAfter="%" />
               </Form.Item>
             </div>
@@ -5235,7 +5270,7 @@ const AssetCard = ({
   const customInfo = !isPc ? customAssetInfo(asset) : null;
   const baseboardLabel = cardBaseboardLabel(extracted.baseboard || extracted.deviceModel);
   const cpuLabel = cardCpuLabel(extracted.cpu);
-  const graphicsLabel = cardGraphicsLabel(extracted.graphics);
+  const graphicsLabel = cardGraphicsLabel(extracted.graphics, extracted.cpu);
   const platformVisual = resolvePlatformVisual(extracted.platform, extracted.cpu, extracted.deviceModel);
   const handleOpen = () => {
     if (selectable) {
@@ -5293,7 +5328,7 @@ const AssetCard = ({
             </div>
             <div>
               <dt>更新：</dt>
-              <dd>{assetUpdateTimeText(asset)}</dd>
+              <dd>{assetUpdateDateText(asset)}</dd>
             </div>
           </dl>
         </div>
@@ -5324,8 +5359,8 @@ const AssetCard = ({
                 <dd>{statusLabel(asset.status)}</dd>
               </div>
               <div>
-                <dt>设备类型：</dt>
-                <dd>{fieldText(asset.category)}</dd>
+                <dt>类型：</dt>
+                <dd>{computerDeviceType(asset.category)}</dd>
               </div>
               <div>
                 <dt>部门：</dt>
@@ -5333,7 +5368,7 @@ const AssetCard = ({
               </div>
               <div>
                 <dt>更新：</dt>
-                <dd>{assetUpdateTimeText(asset)}</dd>
+                <dd>{assetUpdateDateText(asset)}</dd>
               </div>
             </dl>
           </div>
@@ -5610,7 +5645,7 @@ const AssetWorkspace = ({
       ),
     },
     {
-      title: "类型",
+      title: "资产类型",
       dataIndex: "assetType",
       width: 120,
       render: assetTypeLabel,
@@ -5626,16 +5661,16 @@ const AssetWorkspace = ({
       ),
     },
     {
-      title: assetScope === "computer" ? "设备类型" : assetScope === "other" ? "分类" : "设备类型 / 分类",
+      title: assetScope === "computer" ? "类型" : assetScope === "other" ? "分类" : "类型 / 分类",
       dataIndex: "category",
       width: 130,
-      render: (value: string) => fieldText(value),
+      render: (value: string, asset) => fieldText(isComputerAsset(asset) ? computerDeviceType(value) : value),
     },
     {
       title: "更新时间",
       dataIndex: "updatedAt",
       width: 180,
-      render: (_value, asset) => assetUpdateTimeText(asset),
+      render: (_value, asset) => assetUpdateDateText(asset),
     },
     {
       title: "操作",
@@ -5782,7 +5817,7 @@ const AssetWorkspace = ({
           ) : assetScope === "computer" ? (
             <Select
               allowClear
-              placeholder="设备类型"
+              placeholder="类型"
               options={COMPUTER_DEVICE_TYPE_OPTIONS}
               value={category}
               onChange={(value) => {

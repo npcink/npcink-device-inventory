@@ -30,7 +30,7 @@ try {
     logLevel: "silent",
   });
 
-  const { collectionAgeBand, collectionFreshness, collectionOverdueLevel, detectHardwareIssues, issueGroup } = await import(pathToFileURL(outFile).href);
+  const { collectionAgeBand, collectionFreshness, collectionOverdueLevel, detectHardwareIssues, hardwareSummary, inferredGraphicsForFallbackDriver, issueGroup } = await import(pathToFileURL(outFile).href);
   const assets = JSON.parse(await readFile(fixturePath, "utf8"));
   const issues = detectHardwareIssues(assets);
   const whitespaceOwnerIssues = detectHardwareIssues([
@@ -193,8 +193,23 @@ try {
     !strongIdentityDuplicateIssue.relatedAssets?.some((asset) => asset.uuid === "fixture-strong-identity-two") ||
     !strongIdentityDuplicateIssue.message.includes("主 MAC 地址") ||
     !strongIdentityDuplicateIssue.message.includes("主板序列号 BOARD-SHARED 也相同");
+  const virtualGraphicsSummary = hardwareSummary(
+    { graphics: "OrayIddDriver Device" },
+    {
+      graphics: {
+        controllers: [
+          { model: "OrayIddDriver Device" },
+          { model: "NVIDIA GeForce RTX 4060" },
+        ],
+      },
+    }
+  );
+  const virtualGraphicsFilteringFailed = virtualGraphicsSummary.graphics !== "NVIDIA GeForce RTX 4060";
+  const fallbackGraphicsInferenceFailed =
+    inferredGraphicsForFallbackDriver("Intel Core i7-9700K") !== "UHD 630（驱动未识别）" ||
+    inferredGraphicsForFallbackDriver("Intel Core i7-9700KF") !== "显卡驱动未识别";
 
-  if (missingTypes.length || missingGroups.length || !activeMissingOwner || inactiveMissingOwner || maintenanceIssueCreated || !whitespaceMissingOwner || placeholderDuplicateIssues.length || freshnessClassificationFailed || ageBandClassificationFailed || collectionThresholdFailed || duplicateRelationFailed) {
+  if (missingTypes.length || missingGroups.length || !activeMissingOwner || inactiveMissingOwner || maintenanceIssueCreated || !whitespaceMissingOwner || placeholderDuplicateIssues.length || freshnessClassificationFailed || ageBandClassificationFailed || collectionThresholdFailed || duplicateRelationFailed || virtualGraphicsFilteringFailed || fallbackGraphicsInferenceFailed) {
     console.error("Hardware audit fixture check failed.");
     if (missingTypes.length) {
       console.error(`Missing issue types: ${missingTypes.join(", ")}`);
@@ -228,6 +243,12 @@ try {
     }
     if (duplicateRelationFailed) {
       console.error("Board serial alone must not create a duplicate issue; strong identity matches must retain related assets and a stable group key.");
+    }
+    if (virtualGraphicsFilteringFailed) {
+      console.error("Known remote-display adapters must not replace the physical graphics controller.");
+    }
+    if (fallbackGraphicsInferenceFailed) {
+      console.error("Microsoft's fallback display driver must infer UHD 630 for i7-9700K without inferring graphics for KF models.");
     }
     console.error(`Detected types: ${Array.from(issueTypes).join(", ")}`);
     process.exit(1);

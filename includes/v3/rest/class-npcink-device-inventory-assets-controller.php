@@ -204,6 +204,7 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (is_wp_error($input)) {
 			return $input;
 		}
+		$input = $this->apply_retired_value_policy(null, $input);
 		$number_conflict = $this->asset_number_conflict(
 			isset($input['asset_number']) ? $input['asset_number'] : ''
 		);
@@ -253,6 +254,7 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (is_wp_error($update_data)) {
 			return $update_data;
 		}
+		$update_data = $this->apply_retired_value_policy($asset, $update_data);
 		if (empty($update_data)) {
 			return Npcink_Device_Inventory_V3_Response::error('empty_asset_update', 'At least one asset field is required.', 422);
 		}
@@ -356,7 +358,8 @@ class Npcink_Device_Inventory_Assets_Controller
 			if (!$asset) {
 				return $this->rollback_error('asset_not_found', 'Batch asset not found: ' . $uuid, 404);
 			}
-			$updated = $this->assets->update($uuid, $changes);
+			$asset_changes = $this->apply_retired_value_policy($asset, $changes);
+			$updated = $this->assets->update($uuid, $asset_changes);
 			if (!$updated) {
 				if ($this->assets->last_write_was_duplicate_asset_number()) {
 					return $this->rollback_error('duplicate_number', 'Asset number already exists.', 409);
@@ -374,7 +377,7 @@ class Npcink_Device_Inventory_Assets_Controller
 				$message,
 				array(
 					'source' => $context_source,
-					'changedFields' => $this->batch_changed_fields($asset, $changes),
+					'changedFields' => $this->batch_changed_fields($asset, $asset_changes),
 					'batchSize' => count($uuids),
 				)
 			)) {
@@ -699,6 +702,23 @@ class Npcink_Device_Inventory_Assets_Controller
 		return array_keys($uuids);
 	}
 
+	/**
+	 * Retired assets have no current market or carrying value, while their
+	 * original purchase price remains available as historical cost.
+	 */
+	private function apply_retired_value_policy($asset, $changes)
+	{
+		$current_status = is_array($asset) && isset($asset['status']) ? (string) $asset['status'] : 'active';
+		$target_status = array_key_exists('status', $changes) ? (string) $changes['status'] : $current_status;
+		if ($target_status !== 'retired') {
+			return $changes;
+		}
+
+		$changes['residual_value'] = 0.0;
+		$changes['financial_residual_value'] = 0.0;
+		return $changes;
+	}
+
 	private function batch_changed_fields($asset, $changes)
 	{
 		$fields = array();
@@ -706,6 +726,9 @@ class Npcink_Device_Inventory_Assets_Controller
 			$old_value = array_key_exists($field, $asset) ? $asset[$field] : null;
 			if ($field === 'metadata_json') {
 				$old_value = $this->decode_json(isset($asset['metadata_json']) ? $asset['metadata_json'] : '', array());
+			}
+			if ($old_value == $new_value) {
+				continue;
 			}
 			$fields[] = array(
 				'field' => $field,

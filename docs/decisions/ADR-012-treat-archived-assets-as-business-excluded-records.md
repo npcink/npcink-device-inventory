@@ -42,6 +42,10 @@ for audit history, backup/restore, and asset-number uniqueness.
   merely because the previous record was archived.
 - Do not provide a recycle-bin page, self-service restore, or permanent-delete
   action at this stage.
+- Keep archive separate from `retired`: archiving changes business visibility
+  but does not rewrite purchase, market, or carrying values. Retirement remains
+  visible in the retained business ledger and follows the zero-current-value
+  rule defined by ADR-010.
 - Require an explicit destructive-style confirmation before archiving. The
   confirmation states that the asset leaves daily management, remains in
   history, retains its number, and cannot currently be restored by the user.

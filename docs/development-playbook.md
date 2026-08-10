@@ -15,6 +15,7 @@
 - 服务端根据上传事实计算身份，不信任客户端传入的身份哈希；身份冲突必须失败关闭，绝不自动合并资产。
 - 资产编号是可变管理字段，不是硬件身份；编号复用前必须先处理旧资产并核对身份、观测和 latest 指针。
 - 已归档资产是保留历史的非业务记录：仍占用原编号，但不参与普通列表、统计、分析、采集趋势、更新候选或资产表格导出；设备上传命中归档资产时返回 `409 asset_archived`。完整备份仍保留其资产、身份、观测和事件。具体边界见 ADR-012。
+- 已报废资产仍参与历史台账与审计并保留采购价，但二手市场价和当前账面净值必须为零；该不变量由服务端覆盖单台、批量、导入和恢复写入，历史数据通过幂等迁移修正。归档不会触发这项清零规则。
 - 磁盘、内存、显卡、USB 网卡、当前 MAC 和 CPU `ProcessorId` 是快照或辅助核对信息，不进入自动身份摘要。
 - 显示器、物理硬盘、网络路由和电池等新增字段默认进入观测层；采集失败允许部分为空，不阻断其他硬件事实上传。
 
@@ -67,7 +68,7 @@
 
 ## 当前运行与后续观察
 
-- 当前发布候选为 WordPress 插件 3.1.3 与 Device Agent 0.3.3，发布记录见 [`release-verification-2026-08-06-v3.1.3.md`](release-verification-2026-08-06-v3.1.3.md)。
+- 当前发布候选为 WordPress 插件 3.1.4 与 Device Agent 0.3.3，发布记录见 [`release-verification-2026-08-10-v3.1.4.md`](release-verification-2026-08-10-v3.1.4.md)。
 - 部署顺序必须是先升级插件，再部署 Agent；否则新 Agent 的身份事实和错误语义可能无法按当前契约处理。
 - 观察已有 v1 资产首次上传是否唯一命中并补写 v2；在实际覆盖完成前，不删除 v1 过渡查询。
 - 对 133 这类只依赖 PCI 永久 MAC 的设备，网卡更换后需要人工确认资产关系，不能自动把新身份并入旧资产。
@@ -88,6 +89,7 @@
 - [`admin-read-only-analysis-development-standard.md`](admin-read-only-analysis-development-standard.md)：只读分析的数据、查询、界面、权限和验收规范。
 - [`read-only-analysis-restoration-retrospective-2026-08-06.md`](read-only-analysis-restoration-retrospective-2026-08-06.md)：本阶段恢复分析功能的历史、真实数据证据和开发经验。
 - [`asset-type-archive-admin-ui-development-retrospective-2026-08-06.md`](asset-type-archive-admin-ui-development-retrospective-2026-08-06.md)：设备类型、归档边界、导出保护、后台表单和 PCP 收尾经验。
+- [`v3.1.4-asset-lifecycle-admin-quality-retrospective-2026-08-10.md`](v3.1.4-asset-lifecycle-admin-quality-retrospective-2026-08-10.md)：3.1.4 设备类型、归档/报废、财务口径、硬件摘要、界面精简和全链路发布规范。
 - [`device-identity-collection-release-retrospective-2026-08-05.md`](device-identity-collection-release-retrospective-2026-08-05.md)：本阶段问题、根因、方法和发布闭环复盘。
 - [`device-upload-troubleshooting-and-operations.md`](device-upload-troubleshooting-and-operations.md)：Agent 与 WordPress 分层排障和生产修复规范。
 - [`windows-identity-and-asset-reconciliation-incident-2026-08-05.md`](windows-identity-and-asset-reconciliation-incident-2026-08-05.md)：133 采集故障与 32/35 串号的完整复盘和修复规范。

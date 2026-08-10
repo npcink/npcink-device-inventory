@@ -4,7 +4,7 @@ Tags: inventory, assets, device management, rest api, admin
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 3.1.3
+Stable tag: 3.1.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -70,6 +70,14 @@ Npcink Device Inventory stores device asset data in the local WordPress database
 The plugin does not transmit this data to Npcink or any third-party server during normal plugin operation. Site administrators are responsible for informing users and employees about their own device inventory policies.
 
 == Changelog ==
+
+= 3.1.4 =
+* Complete computer device-type editing, filtering, importing, exporting, and batch-update workflows.
+* Default legacy and newly collected computer assets to the desktop-computer type.
+* Simplify asset cards with date-only update labels while retaining full timestamps in asset details.
+* Ignore known virtual remote-display adapters when choosing the displayed primary graphics controller.
+* Present straight-line depreciation results as estimated carrying amounts while retaining terminal residual-rate settings.
+* Preserve purchase cost while setting second-hand market value and estimated carrying amount to zero for retired assets.
 
 = 3.1.3 =
 * Separate second-hand market value from accounting residual value while preserving legacy API and backup compatibility.

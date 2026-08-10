@@ -110,23 +110,34 @@ where needed.
 
 Old data should be converted into this model before import.
 
-## Financial residual calculation
+## Estimated carrying amount calculation
 
-The admin UI provides a straight-line depreciation suggestion:
+The admin UI labels the current calculated value as `账面净值（估算）` and
+provides a straight-line depreciation suggestion:
 
 `terminal residual = purchase price × residual rate`
 
 `monthly depreciation = (purchase price − terminal residual) ÷ depreciation months`
 
-`current financial residual = max(terminal residual, purchase price − monthly depreciation × elapsed full months)`
+`estimated carrying amount = max(terminal residual, purchase price − monthly depreciation × elapsed full months)`
 
 The calculation uses the explicit purchase date and falls back to the asset
 creation date when needed. `metadata.finance.financial_residual_mode` controls
 which value is effective:
 
-- `auto`: use the live calculated value in detail views, analysis, and exports.
-- `manual`: use `financial_residual_value` as an explicit accounting override.
+- `auto`: use the live estimated carrying amount in detail views, analysis, and exports.
+- `manual`: use `financial_residual_value` as an explicit carrying-amount override.
+
+The internal `financial_residual_value` name remains for database, REST, and
+backup compatibility. It must not cause the current carrying amount to be
+presented as the terminal residual value in user-facing copy.
 
 Assets without a mode default to `manual` when they already contain a positive
 financial residual value, preserving historical entries; otherwise they default
 to `auto`.
+
+When an asset has the `retired` status, its historical `purchase_price` remains
+unchanged while `residual_value` and `financial_residual_value` are both forced
+to zero. This invariant applies to individual edits, batch edits, spreadsheet
+imports, backup restores, and existing records normalized during upgrade.
+Archiving an asset with the `deleted` status does not change any of these values.
