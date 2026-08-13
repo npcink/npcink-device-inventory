@@ -11,11 +11,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 type HmacSha256 = Hmac<Sha256>;
 
 pub fn submit_v3(site: &str, name: &str, token_value: &str, data: &Value) -> Result<Value> {
+    let endpoint = resolve_observation_endpoint(site);
+    validate_upload_endpoint(&endpoint)?;
     if let Some(token) = parse_client_token(token_value)? {
         let body = json!({
             "observation": build_observation_v3(name, data)?,
         });
-        return submit_json_hmac(&resolve_observation_endpoint(site), &body, &token);
+        return submit_json_hmac(&endpoint, &body, &token);
     }
 
     bail!("新版上传接口必须使用后台生成的上传授权码");
@@ -177,6 +179,18 @@ fn resolve_observation_endpoint(site: &str) -> String {
         return format!("{site}/npcink-device-inventory/v1/device-observations");
     }
     format!("{site}/?rest_route=/npcink-device-inventory/v1/device-observations")
+}
+
+fn validate_upload_endpoint(endpoint: &str) -> Result<()> {
+    let parsed = url::Url::parse(endpoint.trim()).context("上传地址格式无效")?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        bail!("设备上传必须使用 HTTPS 地址");
+    }
+    Ok(())
 }
 
 fn value_at(data: &Value, pointer: &str) -> Value {
@@ -387,6 +401,22 @@ mod tests {
             ),
             "https://example.com/index.php?rest_route=/npcink-device-inventory/v1/device-observations"
         );
+    }
+
+    #[test]
+    fn rejects_non_https_upload_endpoints() {
+        assert!(validate_upload_endpoint(
+            "http://example.com/?rest_route=/npcink-device-inventory/v1/device-observations"
+        )
+        .is_err());
+        assert!(
+            validate_upload_endpoint("https://user:secret@example.com/device-observations")
+                .is_err()
+        );
+        assert!(validate_upload_endpoint(
+            "https://example.com/wp-json/npcink-device-inventory/v1/device-observations"
+        )
+        .is_ok());
     }
 
     #[test]

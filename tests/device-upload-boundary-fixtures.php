@@ -126,6 +126,11 @@ function set_transient($key, $value, $expiration = 0)
 	return true;
 }
 
+function wp_rand($min = 0, $max = 0)
+{
+	return $max > 0 ? $max : $min;
+}
+
 function current_user_can($capability)
 {
 	return false;
@@ -181,6 +186,25 @@ Npcink_Device_Inventory_V3_Tables::$options = array(
 );
 $timestamp = (string) time();
 $body = '{"summary":{"hostname":"demo"}}';
+$replay_token_id = 'replay-agent';
+$replay_secret = 'replay-secret';
+Npcink_Device_Inventory_V3_Tables::$options['client_tokens'][] = array('id' => $replay_token_id, 'secret' => $replay_secret, 'enabled' => true);
+$replay_nonce = 'replay-nonce';
+$replay_payload = $timestamp . "\n" . $replay_nonce . "\n" . hash('sha256', $body);
+$replay_signature = 'sha256=' . hash_hmac('sha256', $replay_payload, $replay_secret);
+$replay_request = new WP_REST_Request(
+	$body,
+	array(),
+	array(
+		'x-npcink-device-token-id' => $replay_token_id,
+		'x-npcink-device-timestamp' => $timestamp,
+		'x-npcink-device-nonce' => $replay_nonce,
+		'x-npcink-device-signature' => $replay_signature,
+	)
+);
+npcink_upload_assert($auth->verify_request($replay_request) === true, 'first use of a nonce must pass');
+npcink_upload_assert(npcink_upload_error_code($auth->verify_request($replay_request)) === 'replayed_nonce', 'nonce replay must be rejected');
+
 for ($index = 0; $index < Npcink_Device_Inventory_Token_Auth_Service::RATE_LIMIT; $index++) {
 	$nonce = 'nonce-' . $index;
 	$payload = $timestamp . "\n" . $nonce . "\n" . hash('sha256', $body);

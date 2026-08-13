@@ -41,7 +41,7 @@ v3 使用统一资产模型，详细契约见 `docs/asset-data-model.md`。插�
 
 - `POST /wp-json/npcink-device-inventory/v1/device-observations`：软件端上传采集事实。
 - `GET|POST /wp-json/npcink-device-inventory/v1/assets`：管理资产列表与新增资产。
-- `POST /wp-json/npcink-device-inventory/v1/assets/batch`：在一个事务中批量新增、更新或归档资产。
+- `POST /wp-json/npcink-device-inventory/v1/assets/batch`：在一个事务中批量更新或归档资产；批量新增请使用资产新增接口逐条提交，或使用后续事务性导入接口。
 - `GET|PATCH|DELETE /wp-json/npcink-device-inventory/v1/assets/{uuid}`：资产详情、更新、软删除。
 - `GET|POST /wp-json/npcink-device-inventory/v1/assets/{uuid}/identities`：资产身份。
 - `GET /wp-json/npcink-device-inventory/v1/assets/{uuid}/observations`：资产采集快照。
@@ -176,5 +176,9 @@ npm run check:submission
 ```
 
 插件包只包含 WordPress 运行文件、语言文件、许可证/README 和 `vite-admin/dist` 构建产物；不会包含 `ele-rs/`、`node_modules`、Rust `target` 或本地发布缓存。
+
+## 组件与许可证
+
+本仓库包含两个独立发布边界：WordPress 插件（GPL-2.0-or-later）和 Rust/Tauri 桌面端（GPL-3.0-or-later）。插件发布 ZIP 只包含 WordPress 插件运行所需文件；桌面端源码与构建制品位于 `ele-rs/`，不随 WordPress.org 插件包发布。根目录的 `LICENSE` 与 `LICENSE.txt` 分别保留 GPLv3 和 GPLv2 文本，用于对应组件及历史发布约定；具体文件的版权和许可证声明以其源码头部、`composer.json` 或 Cargo manifest 为准。
 
 GitHub Actions 的 `Build preview packages` 可生成预览包；推送 `v*` tag 会触发正式 release workflow。

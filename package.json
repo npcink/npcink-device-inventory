@@ -18,6 +18,7 @@
     "check:release-scope": "node scripts/check-release-scope.mjs",
     "check:desktop-manifests": "node scripts/check-desktop-update-manifests.mjs",
     "check:desktop-update-transition": "node scripts/check-desktop-update-transition.mjs",
+    "check:bundle-budget": "node scripts/check-bundle-budget.mjs",
     "check:wporg-review": "node scripts/check-wordpress-org-review-rules.mjs release/npcink-device-inventory.zip",
     "check:package": "node scripts/check-release-package.mjs release/npcink-device-inventory.zip && npm run check:wporg-review",
     "check:docker": "bash scripts/check-docker.sh",

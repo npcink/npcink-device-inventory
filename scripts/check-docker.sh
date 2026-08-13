@@ -117,6 +117,55 @@ if ! grep -Fq "Checks complete. No errors found." <<<"${plugin_check_output}"; t
   exit 1
 fi
 
+echo "Verifying real MariaDB nonce replay and rate-limit boundaries..."
+run_wp eval '
+  $options = get_option("npcink_device_inventory_v3_options");
+  $options["client_tokens"] = array(array(
+    "id" => "docker-agent",
+    "secret" => "docker-secret",
+    "enabled" => true,
+  ));
+  update_option("npcink_device_inventory_v3_options", $options);
+  $auth = new Npcink_Device_Inventory_Token_Auth_Service();
+  $body = "{\"summary\":{\"hostname\":\"docker\"}}";
+  $timestamp = (string) time();
+  $verify = static function ($nonce) use ($auth, $body, $timestamp) {
+    $payload = $timestamp . "\n" . $nonce . "\n" . hash("sha256", $body);
+    $request = new WP_REST_Request("POST", "/");
+    $request->set_body($body);
+    $request->set_header("x-npcink-device-token-id", "docker-agent");
+    $request->set_header("x-npcink-device-timestamp", $timestamp);
+    $request->set_header("x-npcink-device-nonce", $nonce);
+    $request->set_header("x-npcink-device-signature", "sha256=" . hash_hmac("sha256", $payload, "docker-secret"));
+    return $auth->verify_request($request);
+  };
+  $first = $verify("replay");
+  if ($first !== true) {
+	$detail = is_wp_error($first) ? $first->get_error_code() . ": " . $first->get_error_message() : gettype($first);
+	throw new RuntimeException("First nonce claim failed: " . $detail);
+  }
+  $replay = $verify("replay");
+  if (!is_wp_error($replay) || $replay->get_error_code() !== "replayed_nonce") {
+    throw new RuntimeException("Nonce replay was not rejected.");
+  }
+  for ($index = 0; $index < Npcink_Device_Inventory_Token_Auth_Service::RATE_LIMIT - 1; $index++) {
+    if ($verify("rate-" . $index) !== true) {
+      throw new RuntimeException("Rate-limit boundary rejected too early at " . $index . ".");
+    }
+  }
+  $limited = $verify("rate-over");
+  if (!is_wp_error($limited) || $limited->get_error_code() !== "upload_rate_limited") {
+    throw new RuntimeException("Rate limit did not reject request 121.");
+  }
+  global $wpdb;
+  $nonce_rows = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE '\''npcink_v3_upload_nonce_%'\''");
+  $rate_rows = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE '\''npcink_v3_upload_rate_%'\''");
+  if ($nonce_rows < 121 || $rate_rows !== 1) {
+    throw new RuntimeException("Unexpected atomic option rows: nonce={$nonce_rows}, rate={$rate_rows}.");
+  }
+  echo "MariaDB upload security boundary verified.\n";
+'
+
 echo "Running the real backup restore rehearsal..."
 run_wp eval '
   global $wpdb;
@@ -153,6 +202,48 @@ run_wp eval '
     fwrite(STDERR, "Failed to remove the cleanup scope sentinel.\n");
     exit(1);
   }
+'
+
+echo "Verifying multisite upgrade migration across all sites..."
+run_wp plugin deactivate npcink-device-inventory
+run_wp core multisite-convert --title="Npcink Device Inventory Network"
+run_wp site create --slug=branch-one --title="Branch One" --email=e2e@example.invalid
+run_wp site create --slug=branch-two --title="Branch Two" --email=e2e@example.invalid
+run_wp plugin activate npcink-device-inventory --network
+run_wp eval '
+  $origin = get_current_blog_id();
+  foreach (get_sites(array("fields" => "ids", "number" => 0)) as $site_id) {
+    switch_to_blog((int) $site_id);
+    delete_option("npcink_device_inventory_schema_revision");
+    delete_option("npcink_device_inventory_plugin_version");
+    restore_current_blog();
+  }
+  npcink_device_inventory_upgrade_after_update(null, array(
+    "action" => "update",
+    "type" => "plugin",
+    "plugins" => array(plugin_basename(WP_PLUGIN_DIR . "/npcink-device-inventory/npcink-device-inventory.php")),
+  ));
+  if (get_current_blog_id() !== $origin) {
+    throw new RuntimeException("Multisite upgrade did not restore the original blog.");
+  }
+  global $wpdb;
+  foreach (get_sites(array("fields" => "ids", "number" => 0)) as $site_id) {
+    switch_to_blog((int) $site_id);
+    $revision = get_option("npcink_device_inventory_schema_revision");
+    $version = get_option("npcink_device_inventory_plugin_version");
+    $missing = array();
+    foreach (array("npcink_assets", "npcink_asset_identities", "npcink_asset_observations", "npcink_asset_events") as $suffix) {
+      $table = $wpdb->prefix . $suffix;
+      if ($wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $table)) !== $table) {
+        $missing[] = $table;
+      }
+    }
+    restore_current_blog();
+    if ($revision !== Npcink_Device_Inventory_Activator::SCHEMA_REVISION || $version !== NPCINK_DEVICE_INVENTORY_VERSION || $missing) {
+      throw new RuntimeException("Multisite migration failed for site {$site_id}: revision={$revision}, version={$version}, missing=" . implode(",", $missing));
+    }
+  }
+  echo "Multisite upgrade migration verified.\n";
 '
 
 echo "Isolated Docker verification passed."

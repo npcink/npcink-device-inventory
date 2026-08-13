@@ -24,6 +24,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 {
 	const IDENTITY_TYPES = array('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1');
 	const REMOVED_EVENT_TYPES = array('issue_handled', 'issue_reopened', 'identity_reconciled');
+	const ASSET_STATUSES = array('active', 'inactive', 'maintenance', 'retired', 'deleted');
 
 	private $exporter;
 
@@ -501,7 +502,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 							'asset_id' => $current_asset_id,
 							'identity_type' => $type,
 							'identity_value' => $value,
-							'confidence' => isset($identity['confidence']) ? floatval($identity['confidence']) : 100,
+							'confidence' => $this->backup_confidence($identity, 'confidence'),
 							'is_primary' => !empty($identity['isPrimary']) ? 1 : 0,
 							'source' => $this->backup_text($identity, array('source'), 'key', 'import'),
 							'created_at' => $this->backup_datetime($identity, 'createdAt', false),
@@ -665,7 +666,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			'name' => $this->backup_text($asset, array('name'), 'text'),
 			'owner_name' => $this->backup_text($asset, array('ownerName'), 'text'),
 			'department' => Npcink_Device_Inventory_V3_Tables::normalize_department($this->backup_text($asset, array('department'), 'text')),
-			'status' => $this->backup_text($asset, array('status'), 'key', 'active'),
+			'status' => $this->backup_status($asset),
 			'category' => $category,
 			'purchase_price' => isset($asset['purchasePrice']) ? floatval($asset['purchasePrice']) : 0,
 			'residual_value' => isset($asset['secondHandMarketValue'])
@@ -931,6 +932,21 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			return $required ? '' : current_time('mysql');
 		}
 		return gmdate('Y-m-d H:i:s', $timestamp);
+	}
+
+	private function backup_status($asset)
+	{
+		$status = $this->backup_text($asset, array('status'), 'key', 'active');
+		return in_array($status, self::ASSET_STATUSES, true) ? $status : 'active';
+	}
+
+	private function backup_confidence($item, $key)
+	{
+		$value = isset($item[$key]) && is_scalar($item[$key]) ? floatval($item[$key]) : 100.0;
+		if (!is_finite($value)) {
+			return 100.0;
+		}
+		return max(0.0, min(100.0, $value));
 	}
 
 	private function count_backup_identities($groups)
