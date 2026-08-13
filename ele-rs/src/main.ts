@@ -470,7 +470,7 @@ let pendingAutoUpdate: Update | null = null;
 let downloadUpdateUrl = "";
 
 const DESKTOP_UPDATE_MANIFEST_URL =
-  "https://github.com/muze-page/npcink-device-inventory/releases/latest/download/latest-desktop.json";
+  "https://github.com/npcink/npcink-device-inventory/releases/latest/download/latest-desktop.json";
 const MENU_CHECK_UPDATE_EVENT = "desktop-check-update";
 
 const detailItems = [
