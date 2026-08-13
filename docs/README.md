@@ -5,6 +5,7 @@ This folder keeps the current product contracts, development guardrails, release
 ## Start Here
 
 - `development-playbook.md`: the working agreement for new changes: scope, evidence, contracts, testing, and release gates.
+- `development-and-release-governance-2026-08-13.md`: consolidated development lessons, failure modes, release gates, and agent working rules from the v3.1.4 hardening cycle.
 - `v3.1.4-asset-lifecycle-admin-quality-retrospective-2026-08-10.md`: consolidated 3.1.4 lifecycle, device-type, finance, hardware-summary, admin-UI, full-chain, and release standards.
 - `admin-read-only-analysis-development-standard.md`: implementation, data-semantics, UI, permission, and verification rules for read-only admin analytics.
 - `analysis-hardware-inventory-and-navigation-retrospective-2026-08-10.md`: legacy hardware-inventory history, restored v3 counting semantics, consolidated analysis navigation, review findings, and future development rules.
@@ -23,6 +24,7 @@ This folder keeps the current product contracts, development guardrails, release
 - `decisions/ADR-011-configurable-asset-export.md`: configurable Excel/CSV export, status colors, ordered fields, and separate WordPress-aware preview.
 - `decisions/ADR-012-treat-archived-assets-as-business-excluded-records.md`: archived assets remain auditable but are excluded from operational lists, calculations, uploads, and asset-table exports.
 - `decisions/ADR-013-consolidate-analysis-navigation-and-restore-hardware-inventory.md`: restores CPU/disk/memory/baseboard inventory on current facts and groups analysis into four stable management domains.
+- `decisions/ADR-014-release-integrity-and-runtime-governance.md`: makes updater signature, post-upload asset, hash, and Node.js 24 runtime checks mandatory release gates.
 - `device-identity-collection-release-retrospective-2026-08-05.md`: consolidated incident, collection, operating, and release lessons from the 3.1.2/0.3.3 phase.
 - `read-only-analysis-restoration-retrospective-2026-08-06.md`: history, real-data findings, UI iterations, and reusable lessons from restoring read-only analytics and multi-factor queries.
 - `release-readiness-checklist.md`: release gate and manual smoke-test checklist.
