@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AppleFilled, DesktopOutlined, InfoCircleOutlined, PlusOutlined, QuestionCircleOutlined, SearchOutlined, WindowsFilled } from "@ant-design/icons";
+import { AppleFilled, DesktopOutlined, InfoCircleOutlined, PlusOutlined, SearchOutlined, WindowsFilled } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
   Alert,
@@ -83,9 +83,37 @@ import {
   issueGroup,
   physicalGraphicsControllers,
   toNumber,
-  type HardwareIssue,
 } from "@/utils/hardwareAudit";
 import { BackupManagementPanels, BackupRestoreModal } from "@/components/backup-management";
+import { AnalysisDistribution, analysisDistribution } from "@/components/analysis/AnalysisDistribution";
+import {
+  buildHardwareInventoryRows,
+  buildHardwareQueryItems,
+  filterHardwareQueryItems,
+  observationComparableFields,
+} from "@/components/analysis/analysisData";
+import {
+  COLLECTION_BAND_META,
+  HARDWARE_INVENTORY_OPTIONS,
+  createEmptyHardwareQuery,
+  type AnalysisTabKey,
+  type AnalysisViewKey,
+  type AssetPlanningView,
+  type DataHealthView,
+  type HardwareAnalysisView,
+  type HardwareChangeRow,
+  type HardwareInventoryKey,
+  type HardwareQueryItem,
+  type HardwareQueryState,
+  type AssetCompletenessRow,
+  type RenewalCandidateRow,
+} from "@/components/analysis/analysisTypes";
+import { HardwareInventoryView } from "@/components/analysis/HardwareInventoryView";
+import { HardwareQueryView } from "@/components/analysis/HardwareQueryView";
+import { CollectionHealthView } from "@/components/analysis/CollectionHealthView";
+import { DataQualityView } from "@/components/analysis/DataQualityView";
+import { HardwareChangesView } from "@/components/analysis/HardwareChangesView";
+import { RenewalView, ValueOverviewView } from "@/components/analysis/AssetPlanningViews";
 
 const { Text, Title } = Typography;
 
@@ -4210,275 +4238,6 @@ const ChangeWorkspace = () => {
   );
 };
 
-const ISSUE_LEVEL_META: Record<HardwareIssue["level"], { label: string; color: string }> = {
-  error: { label: "高", color: "red" },
-  warning: { label: "中", color: "orange" },
-  info: { label: "低", color: "blue" },
-};
-
-type AnalysisTabKey = "summary" | "hardware" | "health" | "planning";
-type HardwareAnalysisView = "inventory" | "query";
-type DataHealthView = "collection" | "quality" | "changes";
-type AssetPlanningView = "value" | "renewal";
-type AnalysisViewKey = "summary" | HardwareAnalysisView | DataHealthView | AssetPlanningView;
-type HardwareInventoryKey = "cpu" | "disk" | "memory" | "baseboard";
-
-const COLLECTION_BAND_META = {
-  fresh: { label: "7 天内", color: "green" },
-  aging: { label: "8–30 天", color: "blue" },
-  stale_31_60: { label: "31–60 天", color: "gold" },
-  stale_61_90: { label: "61–90 天", color: "orange" },
-  stale_90_plus: { label: "90 天以上", color: "red" },
-  missing: { label: "从未采集", color: "default" },
-} as const;
-
-interface AssetCompletenessRow {
-  asset: Asset;
-  score: number;
-  missing: string[];
-}
-
-interface RenewalCandidateRow {
-  asset: Asset;
-  reasons: string[];
-}
-
-interface HardwareChangeRow {
-  key: string;
-  asset: Asset;
-  field: string;
-  before: string;
-  after: string;
-  observedAt: string;
-}
-
-type HardwareTextMatchMode = "contains" | "exact";
-
-interface HardwareQueryState {
-  departments: string[];
-  statuses: string[];
-  ownerMode?: "assigned" | "unassigned";
-  ownerKeyword: string;
-  graphicsTerms: string[];
-  graphicsMode: HardwareTextMatchMode;
-  cpuTerms: string[];
-  cpuMode: HardwareTextMatchMode;
-  minMemoryGb?: number;
-  minDiskGb?: number;
-}
-
-interface HardwareQueryItem {
-  asset: Asset;
-  cpu: string;
-  graphics: string;
-  memoryGb: number;
-  diskGb: number;
-}
-
-interface HardwareInventoryRow {
-  key: string;
-  label: string;
-  detail: string;
-  componentCount: number;
-  assetCount: number;
-  percent: number;
-  assets: Asset[];
-}
-
-const HARDWARE_INVENTORY_OPTIONS: Array<{ key: HardwareInventoryKey; label: string }> = [
-  { key: "cpu", label: "CPU" },
-  { key: "disk", label: "硬盘" },
-  { key: "memory", label: "内存" },
-  { key: "baseboard", label: "主板" },
-];
-
-const hardwareInventoryGroupKey = (value: string) => value
-  .toLowerCase()
-  .replace(/[®™]/g, "")
-  .replace(/\s+/g, " ")
-  .trim();
-
-const assetPhysicalDisks = (asset: Asset) => {
-  const { hardware } = assetHardwareContext(asset);
-  return getArray(hardware.disks).length
-    ? getArray(hardware.disks)
-    : getArray(hardware.disk).length
-      ? getArray(hardware.disk)
-      : getArray(hardware.diskLayout);
-};
-
-const buildHardwareInventoryRows = (assets: Asset[], kind: HardwareInventoryKey): HardwareInventoryRow[] => {
-  const groups = new Map<string, { label: string; detail: string; componentCount: number; assets: Map<string, Asset> }>();
-  const add = (asset: Asset, label: string, detail = "") => {
-    const displayLabel = label.trim();
-    if (!displayLabel) return;
-    const key = hardwareInventoryGroupKey(displayLabel);
-    const current = groups.get(key) || { label: displayLabel, detail, componentCount: 0, assets: new Map<string, Asset>() };
-    current.componentCount += 1;
-    current.assets.set(asset.uuid, asset);
-    if (!current.detail && detail) current.detail = detail;
-    groups.set(key, current);
-  };
-
-  assets.forEach((asset) => {
-    const context = assetHardwareContext(asset);
-    if (kind === "cpu") {
-      add(asset, context.extracted.cpu);
-      return;
-    }
-    if (kind === "memory") {
-      const bytes = hardwareMemoryBytes(asset);
-      if (bytes > 0) add(asset, formatBytes(bytes), "整机总容量");
-      return;
-    }
-    if (kind === "baseboard") {
-      const board = getRecord(context.hardware.baseboard);
-      const model = firstText(board.model, board.product, context.extracted.baseboard);
-      const manufacturer = firstText(board.manufacturer);
-      const includesManufacturer = manufacturer && model.toLowerCase().includes(manufacturer.toLowerCase());
-      add(asset, includesManufacturer ? model : [manufacturer, model].filter(Boolean).join(" ") || context.extracted.baseboard);
-      return;
-    }
-    assetPhysicalDisks(asset).forEach((disk) => {
-      const model = firstText(disk.name, disk.model, disk.device);
-      const media = firstText(disk.type, disk.mediaType);
-      const capacity = toNumber(disk.size) > 0 ? formatBytes(disk.size) : "";
-      const connection = firstText(disk.interfaceType, disk.interface);
-      add(asset, model, [media, capacity, connection].filter(Boolean).join(" · "));
-    });
-  });
-
-  return Array.from(groups, ([key, group]) => {
-    const groupedAssets = Array.from(group.assets.values());
-    return {
-      key,
-      label: group.label,
-      detail: group.detail,
-      componentCount: group.componentCount,
-      assetCount: groupedAssets.length,
-      percent: assets.length ? (groupedAssets.length / assets.length) * 100 : 0,
-      assets: groupedAssets,
-    };
-  }).sort((a, b) => b.assetCount - a.assetCount || b.componentCount - a.componentCount || a.label.localeCompare(b.label, "zh-CN"));
-};
-
-const EMPTY_HARDWARE_QUERY: HardwareQueryState = {
-  departments: [],
-  statuses: [],
-  ownerKeyword: "",
-  graphicsTerms: [],
-  graphicsMode: "contains",
-  cpuTerms: [],
-  cpuMode: "contains",
-};
-
-const createEmptyHardwareQuery = (): HardwareQueryState => ({
-  ...EMPTY_HARDWARE_QUERY,
-  departments: [],
-  statuses: [],
-  graphicsTerms: [],
-  cpuTerms: [],
-});
-
-const normalizeHardwareSearchText = (value: string) => value
-  .toLowerCase()
-  .replace(/[®™()]/g, " ")
-  .replace(/\bnvidia\b|\bgeforce\b|\bintel\b|\bcore\b/g, " ")
-  .replace(/\s+/g, " ")
-  .trim();
-
-const hardwareTextMatches = (value: string, terms: string[], mode: HardwareTextMatchMode) => {
-  if (!terms.length) return true;
-  const normalizedValue = normalizeHardwareSearchText(value);
-  return terms.some((term) => {
-    const normalizedTerm = normalizeHardwareSearchText(term);
-    return normalizedTerm && (mode === "exact" ? normalizedValue === normalizedTerm : normalizedValue.includes(normalizedTerm));
-  });
-};
-
-interface AnalysisDistributionRow {
-  label: string;
-  value: number;
-  meta?: string;
-}
-
-const analysisDistribution = (values: string[], fallback = "未填写"): AnalysisDistributionRow[] => {
-  const counts = new Map<string, number>();
-  values.forEach((value) => {
-    const label = value.trim() || fallback;
-    counts.set(label, (counts.get(label) || 0) + 1);
-  });
-  return Array.from(counts, ([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label, "zh-CN"));
-};
-
-const AnalysisDistribution = ({
-  rows,
-  emptyText = "暂无数据",
-  onSelect,
-}: {
-  rows: AnalysisDistributionRow[];
-  emptyText?: string;
-  onSelect?: (row: AnalysisDistributionRow) => void;
-}) => {
-  const max = Math.max(...rows.map((row) => row.value), 1);
-  if (!rows.length) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} />;
-  }
-  return (
-    <div className="npcink-v3-analysis-distribution">
-      {rows.map((row) => (
-        <div
-          key={row.label}
-          className={`npcink-v3-analysis-distribution-row${onSelect ? " is-clickable" : ""}`}
-          role={onSelect ? "button" : undefined}
-          tabIndex={onSelect ? 0 : undefined}
-          onClick={() => onSelect?.(row)}
-          onKeyDown={(event) => {
-            if (onSelect && (event.key === "Enter" || event.key === " ")) {
-              event.preventDefault();
-              onSelect(row);
-            }
-          }}
-        >
-          <div>
-            <span>{row.label}</span>
-            <strong>{row.meta || row.value}</strong>
-          </div>
-          <div className="npcink-v3-analysis-meter" aria-hidden="true">
-            <i style={{ width: `${Math.max((row.value / max) * 100, 2)}%` }} />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-const observationCapacityBytes = (observation: AssetObservation, kind: "memory" | "disk") => {
-  const summaryKey = kind === "memory" ? "memory_bytes" : "disk_bytes";
-  const summaryBytes = toNumber(observation.summary[summaryKey]);
-  if (summaryBytes > 0) return summaryBytes;
-  const candidates = kind === "memory"
-    ? [observation.hardware.memory, observation.hardware.mem, observation.hardware.memLayout]
-    : [observation.hardware.disks, observation.hardware.disk, observation.hardware.diskLayout];
-  const items = candidates.map(getArray).find((value) => value.length) || [];
-  return items.reduce((total, item) => total + toNumber(item.size), 0);
-};
-
-const observationComparableFields = (observation: AssetObservation) => {
-  const extracted = hardwareSummary(getRecord(observation.summary), getRecord(observation.hardware));
-  const memoryBytes = observationCapacityBytes(observation, "memory");
-  const diskBytes = observationCapacityBytes(observation, "disk");
-  return {
-    "操作系统": extracted.platform,
-    "CPU": extracted.cpu,
-    "内存": memoryBytes > 0 ? formatBytes(memoryBytes) : "",
-    "硬盘": diskBytes > 0 ? formatBytes(diskBytes) : "",
-    "主板/机型": firstText(extracted.baseboard, extracted.deviceModel),
-    "显卡": extracted.graphics,
-  };
-};
-
 const AnalysisWorkspace = () => {
   const [analysisNow] = useState(() => Date.now());
   const [activeTab, setActiveTab] = useState<AnalysisTabKey>("summary");
@@ -4532,33 +4291,11 @@ const AnalysisWorkspace = () => {
     [hardwareInventoryRows]
   );
   const hardwareInventoryComponents = hardwareInventoryRows.reduce((total, row) => total + row.componentCount, 0);
-  const hardwareQueryItems = useMemo<HardwareQueryItem[]>(() => assets.map((asset) => {
-    const context = assetHardwareContext(asset);
-    return {
-      asset,
-      cpu: context.extracted.cpu || "",
-      graphics: context.extracted.graphics || "",
-      memoryGb: hardwareMemoryBytes(asset) / (1024 ** 3),
-      diskGb: hardwareDiskBytes(asset) / (1024 ** 3),
-    };
-  }), [assets]);
-  const matchedHardwareQueryItems = useMemo(() => hardwareQueryItems.filter((item) => {
-    if (hardwareQuery.departments.length && !hardwareQuery.departments.includes(item.asset.department || "未填写")) return false;
-    if (hardwareQuery.statuses.length && !hardwareQuery.statuses.includes(item.asset.status)) return false;
-    if (hardwareQuery.ownerMode === "assigned" && !item.asset.ownerName.trim()) return false;
-    if (hardwareQuery.ownerMode === "unassigned" && item.asset.ownerName.trim()) return false;
-    if (hardwareQuery.ownerKeyword.trim() && !item.asset.ownerName.toLowerCase().includes(hardwareQuery.ownerKeyword.trim().toLowerCase())) return false;
-    if (!hardwareTextMatches(item.graphics, hardwareQuery.graphicsTerms, hardwareQuery.graphicsMode)) return false;
-    if (!hardwareTextMatches(item.cpu, hardwareQuery.cpuTerms, hardwareQuery.cpuMode)) return false;
-    if (hardwareQuery.minMemoryGb && item.memoryGb < hardwareQuery.minMemoryGb * 0.92) return false;
-    if (hardwareQuery.minDiskGb && item.diskGb < hardwareQuery.minDiskGb * 0.92) return false;
-    return true;
-  }), [hardwareQuery, hardwareQueryItems]);
-  const matchedHardwareQueryAssets = useMemo(
-    () => matchedHardwareQueryItems.map((item) => item.asset),
-    [matchedHardwareQueryItems]
+  const hardwareQueryItems = useMemo<HardwareQueryItem[]>(() => buildHardwareQueryItems(assets), [assets]);
+  const matchedHardwareQueryItems = useMemo(
+    () => filterHardwareQueryItems(hardwareQueryItems, hardwareQuery),
+    [hardwareQuery, hardwareQueryItems]
   );
-  const hardwareQueryDepartmentRows = useMemo(() => analysisDistribution(matchedHardwareQueryItems.map((item) => item.asset.department || "未填写")), [matchedHardwareQueryItems]);
   const hardwareDepartmentOptions = useMemo(() => analysisDistribution(assets.map((asset) => asset.department || "未填写")).map((row) => ({ label: `${row.label}（${row.value}）`, value: row.label })), [assets]);
   const hardwareGraphicsOptions = useMemo(() => analysisDistribution(hardwareQueryItems.map((item) => item.graphics).filter(Boolean)).map((row) => ({ label: `${row.label}（${row.value}）`, value: row.label })), [hardwareQueryItems]);
   const hardwareCpuOptions = useMemo(() => analysisDistribution(hardwareQueryItems.map((item) => item.cpu).filter(Boolean)).map((row) => ({ label: `${row.label}（${row.value}）`, value: row.label })), [hardwareQueryItems]);
@@ -4930,311 +4667,111 @@ const AnalysisWorkspace = () => {
         </div>
       ) : null}
       {analysisViewKey === "inventory" ? (
-        <div className="npcink-v3-analysis-grid">
-          <section className="npcink-v3-analysis-panel is-wide">
-            <div className="npcink-v3-analysis-panel-head">
-              <div>
-                <Title level={4}>硬件型号盘点</Title>
-                <Text type="secondary">按未归档电脑的当前有效硬件事实统计（优先最新观测，兼容已有导入数据）；CPU、内存和主板按设备计数，硬盘同时统计物理块数与涉及设备数。</Text>
-              </div>
-              <Input
-                allowClear
-                prefix={<SearchOutlined />}
-                className="npcink-v3-hardware-inventory-search"
-                placeholder="搜索型号或容量"
-                value={hardwareInventorySearch}
-                onChange={(event) => setHardwareInventorySearch(event.target.value)}
-              />
-            </div>
-            <Radio.Group
-              className="npcink-v3-hardware-inventory-tabs"
-              optionType="button"
-              buttonStyle="solid"
-              value={hardwareInventoryKey}
-              onChange={(event) => {
-                setHardwareInventoryKey(event.target.value);
-                setHardwareInventorySearch("");
-              }}
-              options={HARDWARE_INVENTORY_OPTIONS.map((item) => ({ label: item.label, value: item.key }))}
-            />
-            <div className="npcink-v3-query-kpis npcink-v3-hardware-inventory-kpis">
-              <div><span>电脑范围</span><strong>{assets.length} 台</strong></div>
-              <div><span>已采集设备</span><strong>{hardwareInventoryCollectedAssets} 台</strong></div>
-              <div><span>{hardwareInventoryKey === "disk" ? "物理硬盘" : "统计部件"}</span><strong>{hardwareInventoryComponents} {hardwareInventoryKey === "disk" ? "块" : "个"}</strong></div>
-              <div><span>型号或容量分类</span><strong>{hardwareInventoryRows.length} 项</strong></div>
-            </div>
-          </section>
-          <section className="npcink-v3-analysis-panel is-wide">
-            <div className="npcink-v3-analysis-panel-head">
-              <div><Title level={4}>{HARDWARE_INVENTORY_OPTIONS.find((item) => item.key === hardwareInventoryKey)?.label}统计明细</Title><Text type="secondary">点击型号或“查看设备”可下钻到对应电脑的只读列表。</Text></div>
-              <Text type="secondary">显示 {visibleHardwareInventoryRows.length} 项</Text>
-            </div>
-            <Table<HardwareInventoryRow>
-              rowKey="key"
-              size="middle"
-              loading={assetsQuery.isLoading || assetsQuery.isFetching}
-              dataSource={visibleHardwareInventoryRows}
-              pagination={{ pageSize: 20, showTotal: (total) => `共 ${total} 项` }}
-              columns={[
-                { title: hardwareInventoryKey === "memory" ? "整机容量" : "型号", dataIndex: "label", render: (value, row) => <Button type="link" className="npcink-v3-link npcink-v3-inventory-model-link" onClick={() => openDrillDown(`${value} 设备`, row.assets)}>{value}</Button> },
-                { title: "补充信息", dataIndex: "detail", width: 220, render: (value) => value || <Text type="secondary">-</Text> },
-                ...(hardwareInventoryKey === "disk" ? [{ title: "硬盘数", dataIndex: "componentCount", width: 100, sorter: (a: HardwareInventoryRow, b: HardwareInventoryRow) => a.componentCount - b.componentCount }] : []),
-                { title: "设备数", dataIndex: "assetCount", width: 100, sorter: (a, b) => a.assetCount - b.assetCount },
-                { title: "设备占比", dataIndex: "percent", width: 120, render: (value) => `${value.toFixed(1)}%`, sorter: (a, b) => a.percent - b.percent },
-                { title: "操作", width: 100, render: (_, row) => <Button type="link" className="npcink-v3-link" onClick={() => openDrillDown(`${row.label} 设备`, row.assets)}>查看设备</Button> },
-              ]}
-              scroll={{ x: 760 }}
-              locale={{ emptyText: <Empty description={hardwareInventorySearch ? "没有匹配的硬件型号" : "暂无已采集硬件"} /> }}
-            />
-          </section>
-        </div>
+        <HardwareInventoryView
+          assetsCount={assets.length}
+          collectedAssets={hardwareInventoryCollectedAssets}
+          componentCount={hardwareInventoryComponents}
+          rows={hardwareInventoryRows}
+          visibleRows={visibleHardwareInventoryRows}
+          inventoryKey={hardwareInventoryKey}
+          search={hardwareInventorySearch}
+          loading={assetsQuery.isLoading || assetsQuery.isFetching}
+          onSearchChange={setHardwareInventorySearch}
+          onInventoryKeyChange={(value) => {
+            setHardwareInventoryKey(value);
+            setHardwareInventorySearch("");
+          }}
+          onOpenDrillDown={openDrillDown}
+        />
       ) : null}
       {analysisViewKey === "query" ? (
-        <div className="npcink-v3-analysis-grid">
-          <section className="npcink-v3-analysis-panel is-wide">
-            <div className="npcink-v3-analysis-panel-head">
-              <div><Title level={4}>组合查询条件</Title><Text type="secondary">不同字段之间为 AND；部门、状态、显卡和 CPU 的多个值在字段内部为 OR。</Text></div>
-              {hardwareQueryConditions.length ? <Button onClick={() => setHardwareQuery(createEmptyHardwareQuery())}>重置条件</Button> : null}
-            </div>
-            <div className="npcink-v3-hardware-query-controls">
-              <div><Text type="secondary">部门</Text><Select mode="multiple" allowClear showSearch placeholder="选择部门" options={hardwareDepartmentOptions} value={hardwareQuery.departments} onChange={(departments) => setHardwareQuery((value) => ({ ...value, departments }))} filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())} /></div>
-              <div><Text type="secondary">状态</Text><Select mode="multiple" allowClear placeholder="选择状态" options={EDITABLE_STATUS_OPTIONS} value={hardwareQuery.statuses} onChange={(statuses) => setHardwareQuery((value) => ({ ...value, statuses }))} /></div>
-              <div><Text type="secondary">使用人</Text><Select allowClear placeholder="全部使用人" options={[{ label: "已分配", value: "assigned" }, { label: "未分配", value: "unassigned" }]} value={hardwareQuery.ownerMode} onChange={(ownerMode) => setHardwareQuery((value) => ({ ...value, ownerMode }))} /></div>
-              <div><div className="npcink-v3-query-label"><Text type="secondary">显卡</Text><Tooltip title="系列包含会忽略 NVIDIA、GeForce 等常见厂商词；精确型号要求规范化后的完整型号一致。"><QuestionCircleOutlined /></Tooltip></div><Select mode="tags" allowClear showSearch placeholder="例如：4060" options={hardwareGraphicsOptions} value={hardwareQuery.graphicsTerms} onChange={(graphicsTerms) => setHardwareQuery((value) => ({ ...value, graphicsTerms }))} filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())} /><Radio.Group size="small" optionType="button" buttonStyle="solid" options={[{ label: "系列包含", value: "contains" }, { label: "精确型号", value: "exact" }]} value={hardwareQuery.graphicsMode} onChange={(event) => setHardwareQuery((value) => ({ ...value, graphicsMode: event.target.value }))} /></div>
-              <div><div className="npcink-v3-query-label"><Text type="secondary">CPU</Text><Tooltip title="可输入多个 CPU 系列或型号；多个值之间按 OR 匹配。"><QuestionCircleOutlined /></Tooltip></div><Select mode="tags" allowClear showSearch placeholder="例如：i5-12400 或 Ryzen 7" options={hardwareCpuOptions} value={hardwareQuery.cpuTerms} onChange={(cpuTerms) => setHardwareQuery((value) => ({ ...value, cpuTerms }))} filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())} /><Radio.Group size="small" optionType="button" buttonStyle="solid" options={[{ label: "系列包含", value: "contains" }, { label: "精确型号", value: "exact" }]} value={hardwareQuery.cpuMode} onChange={(event) => setHardwareQuery((value) => ({ ...value, cpuMode: event.target.value }))} /></div>
-              <div><Text type="secondary">使用人姓名</Text><Input allowClear placeholder="姓名包含关键词" value={hardwareQuery.ownerKeyword} onChange={(event) => setHardwareQuery((value) => ({ ...value, ownerKeyword: event.target.value }))} /></div>
-              <div><Text type="secondary">最低内存</Text><InputNumber min={1} max={1024} placeholder="不限" addonAfter="GB" value={hardwareQuery.minMemoryGb} onChange={(value) => setHardwareQuery((query) => ({ ...query, minMemoryGb: value || undefined }))} /></div>
-              <div><Text type="secondary">最低硬盘</Text><InputNumber min={1} max={16384} placeholder="不限" addonAfter="GB" value={hardwareQuery.minDiskGb} onChange={(value) => setHardwareQuery((query) => ({ ...query, minDiskGb: value || undefined }))} /></div>
-            </div>
-            {hardwareQueryTags.length ? <div className="npcink-v3-query-conditions">{hardwareQueryTags}</div> : null}
-            <div className="npcink-v3-query-kpis">
-              <div><span>筛选范围</span><strong>{assets.length} 台</strong></div>
-              <div><span>命中设备</span><strong>{matchedHardwareQueryItems.length} 台</strong></div>
-              <div><span>涉及人员</span><strong>{new Set(matchedHardwareQueryItems.map((item) => item.asset.ownerName.trim()).filter(Boolean)).size} 人</strong></div>
-              <div><span>涉及部门</span><strong>{new Set(matchedHardwareQueryItems.map((item) => item.asset.department || "未填写")).size} 个</strong></div>
-            </div>
-          </section>
-          <section className="npcink-v3-analysis-panel is-wide npcink-v3-query-distribution"><Title level={4}>命中部门分布</Title><AnalysisDistribution rows={hardwareQueryDepartmentRows} onSelect={(row) => openDrillDown(`${row.label}命中设备`, matchedHardwareQueryItems.filter((item) => (item.asset.department || "未填写") === row.label).map((item) => item.asset))} emptyText="暂无命中部门" /></section>
-          <section className="npcink-v3-analysis-panel is-wide">
-            <div className="npcink-v3-analysis-panel-head"><div><Title level={4}>命中人员与设备</Title><Text type="secondary">点击资产编号可在当前分析页查看只读详情。</Text></div><Text type="secondary">共 {matchedHardwareQueryItems.length} 台</Text></div>
-            <Table<HardwareQueryItem>
-              rowKey={(item) => item.asset.uuid}
-              size="middle"
-              loading={assetsQuery.isLoading || assetsQuery.isFetching}
-              dataSource={matchedHardwareQueryItems}
-              pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 台` }}
-              columns={[
-                { title: "使用人", width: 120, render: (_, item) => item.asset.ownerName || <Text type="secondary">未分配</Text> },
-                { title: "部门", width: 120, render: (_, item) => item.asset.department || "未填写" },
-                { title: "资产", width: 110, render: (_, item) => analysisAssetLink(item.asset, matchedHardwareQueryAssets) },
-                { title: "显卡", dataIndex: "graphics", ellipsis: true },
-                { title: "CPU", dataIndex: "cpu", ellipsis: true },
-                { title: "配置", width: 150, render: (_, item) => `${item.memoryGb > 0 ? `${Number(item.memoryGb.toFixed(1))} GB` : "-"} / ${item.diskGb > 0 ? `${Number(item.diskGb.toFixed(0))} GB` : "-"}` },
-                { title: "状态", width: 90, render: (_, item) => statusLabel(item.asset.status) },
-                { title: "最后采集", width: 180, render: (_, item) => formatDate(item.asset.latestObservation?.observedAt) },
-                { title: "操作", width: 80, fixed: "right", render: (_, item) => <Button type="link" className="npcink-v3-link" onClick={() => openAnalysisAsset(item.asset, matchedHardwareQueryAssets)}>查看</Button> },
-              ]}
-              scroll={{ x: 1040 }}
-              locale={{ emptyText: <Empty description="没有符合全部条件的电脑" /> }}
-            />
-          </section>
-        </div>
+        <HardwareQueryView
+          assetsCount={assets.length}
+          query={hardwareQuery}
+          matchedItems={matchedHardwareQueryItems}
+          departmentOptions={hardwareDepartmentOptions}
+          graphicsOptions={hardwareGraphicsOptions}
+          cpuOptions={hardwareCpuOptions}
+          conditions={hardwareQueryConditions}
+          tags={hardwareQueryTags}
+          loading={assetsQuery.isLoading || assetsQuery.isFetching}
+          onQueryChange={(updater) => setHardwareQuery(updater)}
+          onReset={() => setHardwareQuery(createEmptyHardwareQuery())}
+          onOpenDrillDown={openDrillDown}
+          onOpenAsset={openAnalysisAsset}
+          assetLink={analysisAssetLink}
+          statusLabel={statusLabel}
+          formatDate={formatDate}
+        />
       ) : null}
       {analysisViewKey === "collection" ? (
-        <div className="npcink-v3-analysis-grid">
-          <section className="npcink-v3-analysis-panel"><Title level={4}>采集新鲜度</Title><AnalysisDistribution rows={collectionBandRows} onSelect={(row) => openDrillDown(row.label, collectionRows.filter((item) => COLLECTION_BAND_META[item.band].label === row.label).map((item) => item.asset))} /></section>
-          <section className="npcink-v3-analysis-panel"><Title level={4}>部门 30 天采集覆盖率</Title><Text type="secondary">仅把最近 30 天内有采集的电脑计为新鲜覆盖。</Text><AnalysisDistribution rows={departmentCoverageRows} onSelect={(row) => openDrillDown(`${row.label}电脑`, assets.filter((asset) => (asset.department.trim() || "未填写") === row.label))} /></section>
-          <section className="npcink-v3-analysis-panel is-wide">
-            <Title level={4}>采集待关注设备</Title>
-            <Table
-              rowKey={(row) => row.asset.uuid}
-              size="middle"
-              dataSource={collectionRows.filter((row) => !["fresh", "aging"].includes(row.band))}
-              pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
-              columns={[
-                { title: "资产", render: (_, row) => analysisAssetLink(row.asset) },
-                { title: "部门", render: (_, row) => row.asset.department || "-", width: 150 },
-                { title: "采集状态", width: 140, render: (_, row) => <Tag color={COLLECTION_BAND_META[row.band].color}>{COLLECTION_BAND_META[row.band].label}</Tag> },
-                { title: "距今", width: 120, render: (_, row) => row.days === null ? "从未采集" : `${row.days} 天` },
-                { title: "最后采集", width: 180, render: (_, row) => formatDate(row.asset.latestObservation?.observedAt) },
-              ]}
-              locale={{ emptyText: <Empty description="所有电脑最近 30 天内均有采集" /> }}
-            />
-          </section>
-        </div>
+        <CollectionHealthView
+          collectionRows={collectionRows}
+          collectionBandRows={collectionBandRows}
+          departmentCoverageRows={departmentCoverageRows}
+          assets={assets}
+          assetLink={analysisAssetLink}
+          formatDate={formatDate}
+          onOpenDrillDown={openDrillDown}
+        />
       ) : null}
       {analysisViewKey === "quality" ? (
-        <div className="npcink-v3-analysis-grid">
-          <section className="npcink-v3-analysis-panel"><Title level={4}>平均完整度</Title><div className="npcink-v3-analysis-score">{averageCompleteness}%</div><Text type="secondary">按基础资料、采集硬件和金额字段计算。</Text></section>
-          <section className="npcink-v3-analysis-panel"><Title level={4}>字段覆盖率</Title><AnalysisDistribution rows={completenessFieldRows} onSelect={(row) => openDrillDown(`缺少${row.label}`, completenessRows.filter((item) => item.missing.includes(row.label)).map((item) => item.asset))} /></section>
-          <section className="npcink-v3-analysis-panel is-wide"><Title level={4}>资料待补设备</Title><Table rowKey={(row) => row.asset.uuid} size="middle" dataSource={completenessRows.filter((row) => row.missing.length)} pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }} columns={[
-            { title: "资产", render: (_, row) => analysisAssetLink(row.asset) },
-            { title: "部门", render: (_, row) => row.asset.department || "-", width: 150 },
-            { title: "完整度", dataIndex: "score", width: 110, render: (score) => <Tag color={score >= 80 ? "green" : score >= 60 ? "orange" : "red"}>{score}%</Tag> },
-            { title: "缺失项目", render: (_, row) => row.missing.join("、") },
-          ]} locale={{ emptyText: <Empty description="资料完整" /> }} /></section>
-          <section className="npcink-v3-analysis-panel is-wide">
-            <div className="npcink-v3-analysis-panel-head"><div><Title level={4}>财务资料待补充</Title><Text type="secondary">列出采购价或二手市场价未填写的未归档资产，点击编号可查看详情。</Text></div><strong>{pendingFinancialRows.length} 条</strong></div>
-            <Table
-              rowKey={(row) => row.asset.uuid}
-              size="middle"
-              dataSource={pendingFinancialRows}
-              pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
-              columns={[
-                { title: "资产编号", width: 150, render: (_, row) => analysisAssetLink(row.asset, pendingFinancialRows.map((item) => item.asset)) },
-                { title: "使用人", width: 120, render: (_, row) => row.asset.ownerName || <Text type="secondary">未分配</Text> },
-                { title: "部门", width: 140, render: (_, row) => row.asset.department || "-" },
-                { title: "采购价", width: 130, render: (_, row) => Number(row.asset.purchasePrice || 0) > 0 ? formatMoney(row.asset.purchasePrice) : <Tag color="red">未填写</Tag> },
-                { title: "二手市场价", width: 140, render: (_, row) => Number(row.asset.secondHandMarketValue || 0) > 0 ? formatMoney(row.asset.secondHandMarketValue) : <Tag color="orange">未填写</Tag> },
-                { title: "待补字段", render: (_, row) => row.missing.map((field) => <Tag key={field} color={field === "采购价" ? "red" : "orange"}>{field}</Tag>) },
-              ]}
-              scroll={{ x: 900 }}
-              locale={{ emptyText: <Empty description="采购价和二手市场价均已填写" /> }}
-            />
-          </section>
-        </div>
+        <DataQualityView
+          averageCompleteness={averageCompleteness}
+          completenessRows={completenessRows}
+          completenessFieldRows={completenessFieldRows}
+          pendingFinancialRows={pendingFinancialRows}
+          platformRows={platformRows}
+          issueGroupRows={issueGroupRows}
+          visibleIssues={visibleIssues}
+          groupOptions={groupOptions}
+          typeOptions={typeOptions}
+          selectedGroup={selectedGroup}
+          selectedType={selectedType}
+          assetsError={Boolean(assetsQuery.isError)}
+          loading={assetsQuery.isLoading || assetsQuery.isFetching}
+          assetLink={analysisAssetLink}
+          formatMoney={formatMoney}
+          onOpenDrillDown={openDrillDown}
+          onGroupChange={(value) => {
+            setSelectedGroup(value);
+            setSelectedType(undefined);
+          }}
+          onTypeChange={setSelectedType}
+        />
       ) : null}
       {analysisViewKey === "changes" ? (
-        <div className="npcink-v3-analysis-grid">
-          <section className="npcink-v3-analysis-panel is-wide">
-            <div className="npcink-v3-analysis-panel-head">
-              <div><Title level={4}>最近两次有效采集变化</Title><Text type="secondary">仅当变化前后字段均存在时展示，缺失字段不视为硬件移除。</Text></div>
-              <Select allowClear placeholder="变化类型" options={hardwareChangeTypes} value={selectedChangeType} onChange={setSelectedChangeType} className="npcink-v3-filter" />
-            </div>
-          </section>
-          <section className="npcink-v3-analysis-panel is-wide">
-            {observationsQuery.isError ? <Alert type="error" showIcon message="历史采集加载失败" /> : null}
-            <Table<HardwareChangeRow>
-              rowKey="key"
-              size="middle"
-              loading={observationsQuery.isLoading || observationsQuery.isFetching}
-              dataSource={visibleHardwareChanges}
-              pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 项变化` }}
-              columns={[
-                { title: "资产", width: 130, render: (_, row) => analysisAssetLink(row.asset) },
-                { title: "部门", width: 120, render: (_, row) => row.asset.department || "-" },
-                { title: "字段", dataIndex: "field", width: 120 },
-                { title: "变化前", dataIndex: "before" },
-                { title: "变化后", dataIndex: "after" },
-                { title: "采集时间", dataIndex: "observedAt", width: 180, render: formatDate },
-              ]}
-              scroll={{ x: 900 }}
-              locale={{ emptyText: <Empty description="最近两次采集未发现可确认的硬件变化" /> }}
-            />
-          </section>
-        </div>
+        <HardwareChangesView
+          rows={visibleHardwareChanges}
+          types={hardwareChangeTypes}
+          selectedType={selectedChangeType}
+          loading={observationsQuery.isLoading || observationsQuery.isFetching}
+          error={Boolean(observationsQuery.isError)}
+          assetLink={analysisAssetLink}
+          formatDate={formatDate}
+          onTypeChange={setSelectedChangeType}
+        />
       ) : null}
       {analysisViewKey === "renewal" ? (
-        <div className="npcink-v3-analysis-grid">
-          <section className="npcink-v3-analysis-panel is-wide"><div className="npcink-v3-analysis-panel-head"><div><Title level={4}>设备更新候选</Title><Text type="secondary">仅依据设置阈值列出候选，不代表必须淘汰。</Text></div><strong>{renewalRows.length} 台</strong></div><div className="npcink-v3-threshold-summary"><span>年限 ≥ {renewalSettings.renewalAgeYears} 年</span><span>内存 &lt; {renewalSettings.renewalMinMemoryGb} GB</span><span>硬盘 &lt; {renewalSettings.renewalMinDiskGb} GB</span><span>账面净值率 ≤ {renewalSettings.renewalMaxResidualRate}%</span></div></section>
-          <section className="npcink-v3-analysis-panel is-wide"><Table rowKey={(row) => row.asset.uuid} size="middle" loading={settingsQuery.isLoading} dataSource={renewalRows} rowSelection={{ selectedRowKeys: Array.from(selectedRenewalUuids), onChange: (keys) => setSelectedRenewalUuids(new Set(keys.map(String))) }} pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 台候选` }} columns={[
-            { title: "资产", render: (_, row) => analysisAssetLink(row.asset) },
-            { title: "部门", render: (_, row) => row.asset.department || "-", width: 150 },
-            { title: "状态", render: (_, row) => statusLabel(row.asset.status), width: 100 },
-            { title: "候选依据", render: (_, row) => row.reasons.map((reason) => <Tag key={reason} color="orange">{reason}</Tag>) },
-          ]} locale={{ emptyText: <Empty description="暂无符合阈值的更新候选" /> }} /></section>
-          <section className="npcink-v3-analysis-panel is-wide">
-            <div className="npcink-v3-analysis-panel-head">
-              <div><Title level={4}>更新计划草案</Title><Text type="secondary">勾选候选设备后按部门汇总；金额来自现有资产事实，不是未来采购报价。</Text></div>
-              <Space><Button disabled={!selectedRenewalRows.length} onClick={() => setSelectedRenewalUuids(new Set())}>清空选择</Button><Button type="primary" disabled={!selectedRenewalRows.length} onClick={exportRenewalPlan}>导出计划草案</Button></Space>
-            </div>
-            <div className="npcink-v3-value-kpis npcink-v3-renewal-plan-kpis">
-              <div><span>已选设备</span><strong>{selectedRenewalRows.length} 台</strong></div>
-              <div><span>历史采购价</span><strong>{formatMoney(selectedRenewalPurchase)}</strong></div>
-              <div><span>账面净值（估算）</span><strong>{formatMoney(selectedRenewalResidual)}</strong></div>
-              <div><span>累计折旧（估算）</span><strong>{formatMoney(Math.max(0, selectedRenewalPurchase - selectedRenewalResidual))}</strong><small>历史采购价 - 账面净值</small></div>
-            </div>
-            <AnalysisDistribution rows={renewalDepartmentPlanRows} emptyText="请先勾选更新候选设备" />
-          </section>
-        </div>
+        <RenewalView
+          rows={renewalRows}
+          selectedRows={selectedRenewalRows}
+          selectedPurchase={selectedRenewalPurchase}
+          selectedResidual={selectedRenewalResidual}
+          departmentRows={renewalDepartmentPlanRows}
+          settings={renewalSettings}
+          loading={settingsQuery.isLoading}
+          assetLink={analysisAssetLink}
+          formatMoney={formatMoney}
+          statusLabel={statusLabel}
+          onSelectionChange={(keys) => setSelectedRenewalUuids(new Set(keys.map(String)))}
+          onClear={() => setSelectedRenewalUuids(new Set())}
+          onExport={exportRenewalPlan}
+        />
       ) : null}
       {analysisViewKey === "value" ? (
-        <div className="npcink-v3-analysis-grid">
-          <section className="npcink-v3-analysis-panel is-wide">
-            <div className="npcink-v3-value-kpis">
-              <div><span>采购价合计</span><strong>{formatMoney(totalPurchase)}</strong></div>
-              <div><span>账面净值合计</span><strong>{formatMoney(totalResidual)}</strong></div>
-              <div><span>已知折价</span><strong>{formatMoney(knownDepreciation)}</strong></div>
-              <div><span>估值覆盖</span><strong>{allAssets.length ? `${Math.round((valuedAssets.length / allAssets.length) * 100)}%` : "-"}</strong><small>{valuedAssets.length}/{allAssets.length} 条有金额</small></div>
-            </div>
-          </section>
-          <section className="npcink-v3-analysis-panel is-wide"><Title level={4}>全部资产部门账面净值分布</Title><Text type="secondary">汇总 {allAssets.length} 条未归档电脑和自定义资产的当前有效账面净值；自动模式使用实时估算值，手动模式使用已登记值。</Text><AnalysisDistribution rows={departmentValueRows} emptyText="暂无账面净值数据" /></section>
-        </div>
+        <ValueOverviewView totalPurchase={totalPurchase} totalResidual={totalResidual} knownDepreciation={knownDepreciation} valuedCount={valuedAssets.length} totalCount={allAssets.length} departmentRows={departmentValueRows} formatMoney={formatMoney} />
       ) : null}
-      {analysisViewKey === "quality" ? <div className="npcink-v3-analysis-grid">
-        <section className="npcink-v3-analysis-panel"><Title level={4}>操作系统分布</Title><AnalysisDistribution rows={platformRows} /></section>
-        <section className="npcink-v3-analysis-panel"><Title level={4}>问题分组</Title><AnalysisDistribution rows={issueGroupRows} emptyText="暂无硬件问题" /></section>
-      </div> : null}
-      {analysisViewKey === "quality" ? <div className="npcink-v3-analysis-issues">
-        <div className="npcink-v3-analysis-issues-head">
-          <div>
-            <Title level={4}>问题清单</Title>
-            <Text type="secondary">
-              共 {assetsQuery.isError ? "-" : visibleIssues.length} 条，只读展示，不在分析页执行修复。
-            </Text>
-          </div>
-          <Space wrap>
-            <Select
-              allowClear
-              placeholder="问题分组"
-              aria-label="按问题分组筛选"
-              options={groupOptions}
-              value={selectedGroup}
-              disabled={assetsQuery.isError}
-              onChange={(value) => {
-                setSelectedGroup(value);
-                setSelectedType(undefined);
-              }}
-              className="npcink-v3-filter"
-            />
-            <Select
-              allowClear
-              placeholder="问题类型"
-              aria-label="按问题类型筛选"
-              options={typeOptions}
-              value={selectedType}
-              disabled={assetsQuery.isError}
-              onChange={setSelectedType}
-              className="npcink-v3-filter"
-            />
-          </Space>
-        </div>
-        <Table<HardwareIssue>
-          rowKey="key"
-          size="middle"
-          loading={assetsQuery.isLoading || assetsQuery.isFetching}
-          dataSource={assetsQuery.isError ? [] : visibleIssues}
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
-          columns={[
-            {
-              title: "级别",
-              dataIndex: "level",
-              width: 88,
-              render: (level: HardwareIssue["level"]) => (
-                <Tag color={ISSUE_LEVEL_META[level].color}>{ISSUE_LEVEL_META[level].label}</Tag>
-              ),
-            },
-            { title: "类型", dataIndex: "type", width: 150 },
-            {
-              title: "资产",
-              width: 220,
-              render: (_, issue) => (
-                <Space direction="vertical" size={0}>
-                  <Text strong>{issue.asset.assetNumber || issue.asset.name || issue.asset.uuid}</Text>
-                  {issue.asset.assetNumber && issue.asset.name ? <Text type="secondary">{issue.asset.name}</Text> : null}
-                </Space>
-              ),
-            },
-            { title: "说明", dataIndex: "message" },
-          ]}
-          scroll={{ x: 760 }}
-          locale={{
-            emptyText: (
-              <Empty description={assetsQuery.isError ? "分析数据加载失败" : "暂无异常发现"} />
-            ),
-          }}
-        />
-      </div> : null}
       <Modal
         title={drillDown?.title || "分析下钻"}
         open={Boolean(drillDown)}
