@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +19,7 @@ if (!version) {
   process.exit(1);
 }
 
+await normalizeReleaseAssetNames(artifactsDir);
 const files = await listFiles(artifactsDir);
 const macDmg = findOne(files, (file) => file.endsWith(".dmg"));
 const macUpdater = findOne(files, (file) => file.endsWith(".tar.gz"));
@@ -119,4 +120,22 @@ function releaseAssetUrl(ownerRepo, releaseTag, fileName) {
 
 function releaseAssetName(fileName) {
   return fileName.replace(/\s+/g, ".");
+}
+
+async function normalizeReleaseAssetNames(dir) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await normalizeReleaseAssetNames(entryPath);
+      continue;
+    }
+
+    const normalizedName = releaseAssetName(entry.name);
+    if (normalizedName === entry.name) continue;
+
+    const normalizedPath = path.join(dir, normalizedName);
+    await rename(entryPath, normalizedPath);
+    console.log(`Normalized release asset name: ${entry.name} -> ${normalizedName}`);
+  }
 }

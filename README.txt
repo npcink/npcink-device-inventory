@@ -4,7 +4,7 @@ Tags: inventory, assets, device management, rest api, admin
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 3.2.0
+Stable tag: 3.2.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -73,6 +73,9 @@ Npcink Device Inventory stores device asset data in the local WordPress database
 The plugin does not transmit this data to Npcink or any third-party server during normal plugin operation. Site administrators are responsible for informing users and employees about their own device inventory policies.
 
 == Changelog ==
+
+= 3.2.1 =
+* Normalize desktop release asset filenames before integrity verification and publication.
 
 = 3.2.0 =
 * Add transactional asset table imports that roll back the full batch on any write failure.

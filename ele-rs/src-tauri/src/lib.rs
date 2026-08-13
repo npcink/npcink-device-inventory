@@ -617,6 +617,7 @@ fn create_diagnostics_package(app: tauri::AppHandle) -> Result<DiagnosticsPackag
     progress.step("收集应用日志", "保存软件本地日志尾部");
     write_app_log_snapshot(&directory_path)?;
     progress.step("生成摘要", "汇总排障包内容和关键状态");
+    let config = read_config().unwrap_or_default();
     write_diagnostics_summary(
         &directory_path,
         &static_data,
@@ -624,6 +625,7 @@ fn create_diagnostics_package(app: tauri::AppHandle) -> Result<DiagnosticsPackag
         &runtime_history_summary,
         &runtime_history_coverage,
         &privilege_info,
+        &config,
     )?;
 
     progress.step("压缩排障包", "生成可发送的 zip 文件");
@@ -814,8 +816,8 @@ fn write_diagnostics_summary(
     runtime_history_summary: &Value,
     runtime_history_coverage: &Value,
     privilege_info: &Value,
+    config: &AgentConfig,
 ) -> Result<()> {
-    let config = read_config().unwrap_or_default();
     let recent_error_lines = count_log_payload_lines(&out.join("recent-errors.log"));
     let diagnostic_report_count = count_matching_lines(
         &out.join("recent-diagnostic-reports.txt"),
@@ -2163,6 +2165,7 @@ mod tests {
             &runtime_history_summary,
             &runtime_history_coverage,
             &privilege_info,
+            &AgentConfig::default(),
         )
         .unwrap();
         let summary: Value = serde_json::from_str(
