@@ -69,6 +69,10 @@ jobs:
         with:
           toolchain: 1.96.0
           components: rustfmt, clippy
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - run: npm ci --prefix ele-rs
       - run: npm audit --prefix ele-rs --audit-level=high
       - run: cargo fmt --manifest-path ele-rs/Cargo.toml -- --check
