@@ -105,7 +105,7 @@ jobs:
         run: bash .github/scripts/package-wordpress-plugin.sh
 
       - name: Plugin Check
-        uses: wordpress/plugin-check-action@98a1788320dadd90df2d8183934ecccbc4e05d2
+        uses: wordpress/plugin-check-action@98a1788320d0add90df2d8183934ecccbc4e05d2
         with:
           build-dir: ./release/npcink-device-inventory
 
