@@ -26,7 +26,7 @@ const APP_LOG_MAX_BYTES: u64 = 1024 * 1024;
 const DIAGNOSTICS_LOG_TAIL_BYTES: u64 = 256 * 1024;
 const DIAGNOSTICS_COMMAND_TIMEOUT: Duration = Duration::from_secs(12);
 const DIAGNOSTICS_PROGRESS_EVENT: &str = "diagnostics-progress";
-const PROJECT_URL: &str = "https://github.com/muze-page/npcink-device-inventory";
+const PROJECT_URL: &str = "https://github.com/npcink/npcink-device-inventory";
 const MENU_CHECK_UPDATE: &str = "check_for_updates";
 const MENU_CHECK_UPDATE_EVENT: &str = "desktop-check-update";
 const MENU_OPEN_PROJECT: &str = "open_project_url";
@@ -418,7 +418,7 @@ fn about_metadata() -> AboutMetadata<'static> {
 
 fn validate_external_url(input: &str) -> Result<(), String> {
     let url = url::Url::parse(input.trim()).map_err(|_| "更新地址格式无效".to_string())?;
-    let project_path = "/muze-page/npcink-device-inventory";
+    let project_path = "/npcink/npcink-device-inventory";
     let allowed = url.scheme() == "https"
         && url.host_str() == Some("github.com")
         && (url.path() == project_path || url.path().starts_with(&format!("{project_path}/")))
@@ -1887,12 +1887,10 @@ mod tests {
     fn external_url_is_limited_to_project_github_pages() {
         assert!(validate_external_url(PROJECT_URL).is_ok());
         assert!(validate_external_url(
-            "https://github.com/muze-page/npcink-device-inventory/releases/download/v1/app.zip"
+            "https://github.com/npcink/npcink-device-inventory/releases/download/v1/app.zip"
         )
         .is_ok());
-        assert!(
-            validate_external_url("http://github.com/muze-page/npcink-device-inventory").is_err()
-        );
+        assert!(validate_external_url("http://github.com/npcink/npcink-device-inventory").is_err());
         assert!(validate_external_url("https://example.com/update.exe").is_err());
         assert!(validate_external_url("file:///tmp/update.exe").is_err());
     }

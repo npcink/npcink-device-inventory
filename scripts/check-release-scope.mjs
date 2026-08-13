@@ -18,6 +18,11 @@ const cases = [
     expected: true,
   },
   {
+    name: "release integrity change",
+    paths: ["scripts/verify-release-assets.mjs"],
+    expected: true,
+  },
+  {
     name: "release workflow change",
     paths: [".github/workflows/release.yml"],
     expected: true,

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const artifactsDir = path.resolve(repoRoot, process.argv[2] || "artifacts");
-const repo = process.env.GITHUB_REPOSITORY || process.env.RELEASE_REPOSITORY || "muze-page/npcink-device-inventory";
+const repo = process.env.GITHUB_REPOSITORY || process.env.RELEASE_REPOSITORY || "npcink/npcink-device-inventory";
 const tag = process.env.TAG_NAME || process.env.RELEASE_TAG || "";
 
 if (!tag) {
