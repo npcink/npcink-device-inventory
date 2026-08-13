@@ -64,6 +64,42 @@ register_activation_hook(__FILE__, 'npcink_device_inventory_activate');
 register_deactivation_hook(__FILE__, 'npcink_device_inventory_deactivate');
 
 /**
+ * Run schema upgrades as part of the WordPress plugin update transaction,
+ * rather than waiting for an administrator to open the dashboard.
+ */
+function npcink_device_inventory_upgrade_after_update($upgrader, $hook_extra)
+{
+	if (
+		!is_array($hook_extra)
+		|| empty($hook_extra['action'])
+		|| $hook_extra['action'] !== 'update'
+		|| empty($hook_extra['type'])
+		|| $hook_extra['type'] !== 'plugin'
+		|| empty($hook_extra['plugins'])
+		|| !in_array(plugin_basename(__FILE__), (array) $hook_extra['plugins'], true)
+	) {
+		return;
+	}
+
+	if (function_exists('is_multisite') && is_multisite() && function_exists('get_sites') && function_exists('switch_to_blog') && function_exists('restore_current_blog')) {
+		$site_ids = get_sites(array('fields' => 'ids', 'number' => 0));
+		foreach ((array) $site_ids as $site_id) {
+			switch_to_blog((int) $site_id);
+			try {
+				npcink_device_inventory_activate();
+			} finally {
+				restore_current_blog();
+			}
+		}
+		return;
+	}
+
+	npcink_device_inventory_activate();
+}
+
+add_action('upgrader_process_complete', 'npcink_device_inventory_upgrade_after_update', 10, 2);
+
+/**
  * The core plugin class that is used to define internationalization,
  * admin-specific hooks, and public-facing site hooks.
  */
