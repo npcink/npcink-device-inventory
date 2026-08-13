@@ -1,6 +1,6 @@
 [package]
 name = "npcink-device-agent-desktop"
-version = "0.3.3"
+version = "0.4.0"
 description = "Npcink Device Agent desktop shell"
 authors = ["Npcink"]
 edition = "2021"
@@ -25,3 +25,6 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 url = "2"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["apple-native", "windows-native"] }

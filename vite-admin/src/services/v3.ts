@@ -5,6 +5,8 @@ import type {
   AssetEventInput,
   AssetIdentity,
   AssetInput,
+  AssetImportWriteItem,
+  AssetImportWriteResult,
   AssetListParams,
   AssetObservation,
   BatchAssetContext,
@@ -18,6 +20,7 @@ import type {
   EventListParams,
   InventorySettings,
   ObservationListParams,
+  ObservationCleanupResult,
   PaginatedResult,
 } from "@/type/v3";
 
@@ -84,6 +87,15 @@ export const batchAssets = async (
   return unwrapData(response.data);
 };
 
+export const importAssets = async (items: AssetImportWriteItem[]): Promise<AssetImportWriteResult> => {
+  const response = await restInstance.post<DataEnvelope<AssetImportWriteResult>>(
+    "/assets/import",
+    { items },
+    { showSuccessMessage: false } as RequestConfig
+  );
+  return unwrapData(response.data);
+};
+
 export const getAssetIdentities = async (
   uuid: string
 ): Promise<AssetIdentity[]> => {
@@ -117,6 +129,15 @@ export const getObservations = async (
     showSuccessMessage: false,
   } as RequestConfig);
   return response.data;
+};
+
+export const cleanupObservations = async (): Promise<ObservationCleanupResult> => {
+  const response = await restInstance.post<DataEnvelope<ObservationCleanupResult>>(
+    "/observations/cleanup",
+    {},
+    { showSuccessMessage: false } as RequestConfig
+  );
+  return unwrapData(response.data);
 };
 
 export const getAssetEvents = async (

@@ -41,7 +41,7 @@
 - 新增一键导出硬件反馈 JSON，便于在真实机器上反馈采集和设备识别问题；文件仅保存在本机且不包含上传授权码。
 - 新增稳定设备 ID 展示，用于服务端识别重复上传。
 - 新增 WordPress v3 observation 上传接口支持。
-- 新增上传备注字段，方便管理员识别电脑使用人或部署批次。
+- 新增可选使用人字段，用于在后台使用人为空时补齐人员姓名；不要填写部署批次、工位或设备用途。
 - 新增 HMAC 签名上传流程，不再使用明文共享密码。
 
 ### 需要管理员准备
@@ -62,7 +62,7 @@ https://example.com/wp-json/npcink-device-inventory/v1/device-observations
 1. 打开 `Npcink Device Agent`。
 2. 填写 WordPress v3 observation 上传接口地址。
 3. 填写管理员提供的上传授权码。
-4. 可选填写上传备注，例如员工姓名、工位号或部门。
+4. 可选填写使用人姓名；不要填写工位号、部门或设备用途。
 5. 查看本机硬件采集预览。
 6. 点击上传。
 7. 管理员在 WordPress 后台的电脑设备列表中确认记录。
@@ -97,11 +97,11 @@ cargo run -- submit --site "https://example.com/wp-json/npcink-device-inventory/
 ## 发布前检查
 
 - 确认 WordPress 插件已通过 Plugin Check。
-- 确认服务端 `/device-observations` 未签名请求返回 `403`。
+- 确认服务端 `/device-observations` 未签名请求返回 `401`。
 - 确认管理员可在后台生成、禁用、删除客户端授权码。
 - 确认 Windows 样机上传后不会重复创建同一设备。
 - 确认 macOS 样机上传后不会重复创建同一设备。
-- 确认上传备注不会参与设备合并判断。
+- 确认使用人不会参与设备合并判断，只会在后台使用人为空时补齐。
 - 确认发布包不包含测试 token、站点私有地址或本地 `.env`。
 
 ## 隐私说明

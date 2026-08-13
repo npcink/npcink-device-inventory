@@ -4,7 +4,7 @@
   "plugin": {
     "name": "Npcink Device Inventory",
     "slug": "npcink-device-inventory",
-    "version": "3.1.4",
+    "version": "3.2.0",
     "requires_at_least": "6.5",
     "tested_up_to": "7.0",
     "requires_php": "7.4",
@@ -14,11 +14,11 @@
     "upload_file": "sj/npcink-device-inventory.zip",
     "source_file": "release/npcink-device-inventory.zip",
     "zip_root": "npcink-device-inventory/",
-    "sha256": "ac82125299ce884f1d60f506e849ec5afe91c598d38d8e9322d582a4d5055ada",
+    "sha256": "23204b430a25f2c44da7cf25440e1998f15a54df9a801d1f563970268d6ef9c5",
     "entry_count": 80,
     "file_count": 62,
-    "uncompressed_bytes": 3257672,
-    "compressed_bytes": 923938
+    "uncompressed_bytes": 3275597,
+    "compressed_bytes": 928512
   },
   "verification": {
     "plugin_check": "passed_official_2.0.0_wordpress_7.0.2_php_8.3",
@@ -31,7 +31,7 @@
     "release_package_check": "passed",
     "wordpress_org_review_rules": "passed",
     "activation_smoke": "passed_wordpress_7_0_php_8_3_mariadb_11",
-    "unsigned_upload_fixture_status": 403,
+    "unsigned_upload_fixture_status": 401,
     "screenshots": "stale_do_not_publish_until_recaptured",
     "i18n_pot": "updated"
   },

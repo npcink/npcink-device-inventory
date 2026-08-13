@@ -18,7 +18,7 @@ use tauri::Emitter;
 use tauri_plugin_opener::OpenerExt;
 use zip::write::SimpleFileOptions;
 
-use config::{read_config, validate_config, write_config, AgentConfig, APP_DIR_NAME};
+use config::{clear_config, read_config, validate_config, write_config, AgentConfig, APP_DIR_NAME};
 
 const APP_NAME: &str = "Npcink Device Agent";
 const APP_LOG_FILE: &str = "app.log";
@@ -102,6 +102,22 @@ fn save_config(config: AgentConfig) -> Result<(), String> {
             Err(message)
         }
     }
+}
+
+#[tauri::command]
+fn clear_saved_config() -> Result<(), String> {
+    clear_config().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn verify_upload_config(config: AgentConfig) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        validate_config(&config)?;
+        npcink_device_agent::upload::verify_connection(&config.site, &config.token)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -306,6 +322,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_saved_config,
             save_config,
+            clear_saved_config,
+            verify_upload_config,
             collect_device_snapshot,
             collect_runtime_status,
             get_runtime_history,

@@ -11,7 +11,10 @@ const queryClient = new QueryClient({
       staleTime: 30_000,
       cacheTime: 5 * 60 * 1000,
       refetchOnWindowFocus: false,
-      retry: false,
+      retry: (failureCount, error: unknown) => {
+        const status = (error as { response?: { status?: number } })?.response?.status;
+        return failureCount < 1 && (!status || status >= 500);
+      },
     },
   },
 });

@@ -144,6 +144,29 @@ class Npcink_Device_Inventory
 		$plugin_admin = new Npcink_Device_Inventory_Admin($this->get_plugin_name(), $this->get_version());
 
 		$this->loader->add_action('admin_init', $this, 'maybe_upgrade');
+		$this->loader->add_action('init', $this, 'ensure_observation_cleanup_schedule');
+		$this->loader->add_action('npcink_device_inventory_cleanup_observations', $this, 'cleanup_observations');
+	}
+
+	public function ensure_observation_cleanup_schedule()
+	{
+		if (!wp_next_scheduled('npcink_device_inventory_cleanup_observations')) {
+			wp_schedule_event(time() + HOUR_IN_SECONDS, 'daily', 'npcink_device_inventory_cleanup_observations');
+		}
+	}
+
+	public function cleanup_observations()
+	{
+		require_once plugin_dir_path(dirname(__FILE__)) . 'includes/v3/class-npcink-device-inventory-v3-tables.php';
+		$options = Npcink_Device_Inventory_V3_Tables::options();
+		$days = intval($options['observation_retention_days']);
+		if ($days <= 0) {
+			return;
+		}
+		require_once plugin_dir_path(dirname(__FILE__)) . 'includes/v3/class-npcink-device-inventory-v3-sanitizer.php';
+		require_once plugin_dir_path(dirname(__FILE__)) . 'includes/v3/repositories/class-npcink-device-inventory-observation-repository.php';
+		$repository = new Npcink_Device_Inventory_Observation_Repository();
+		$repository->delete_older_than(gmdate('Y-m-d H:i:s', time() - ($days * DAY_IN_SECONDS)));
 	}
 
 

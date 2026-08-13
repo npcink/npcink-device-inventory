@@ -34,6 +34,20 @@ class Npcink_Device_Inventory_Device_Observations_Controller
 				'permission_callback' => array($this, 'permissions_check'),
 			)
 		);
+		register_rest_route(
+			'npcink-device-inventory/v1',
+			'/device-observations/verify',
+			array(
+				'methods' => WP_REST_Server::READABLE,
+				'callback' => array($this, 'verify_connection'),
+				'permission_callback' => array($this, 'permissions_check'),
+			)
+		);
+	}
+
+	public function verify_connection()
+	{
+		return rest_ensure_response(array('data' => array('connected' => true)));
 	}
 
 	public function permissions_check($request)

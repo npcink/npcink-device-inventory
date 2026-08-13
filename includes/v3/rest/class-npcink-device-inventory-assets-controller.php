@@ -62,6 +62,16 @@ class Npcink_Device_Inventory_Assets_Controller
 
 		register_rest_route(
 			'npcink-device-inventory/v1',
+			'/assets/import',
+			array(
+				'methods' => WP_REST_Server::CREATABLE,
+				'callback' => array($this, 'import_items'),
+				'permission_callback' => array($this, 'admin_permissions_check'),
+			)
+		);
+
+		register_rest_route(
+			'npcink-device-inventory/v1',
 			'/assets/(?P<uuid>[A-Za-z0-9_-]+)',
 			array(
 				array(
@@ -401,6 +411,91 @@ class Npcink_Device_Inventory_Assets_Controller
 				),
 			)
 		);
+	}
+
+	public function import_items($request)
+	{
+		$params = $request->get_json_params();
+		$items = is_array($params) && isset($params['items']) && is_array($params['items']) ? $params['items'] : null;
+		if (!$items || count($items) > self::MAX_BATCH_SIZE) {
+			return Npcink_Device_Inventory_V3_Response::error('invalid_import_items', 'Import must contain 1 to 100 items.', 422);
+		}
+
+		$prepared = array();
+		$numbers = array();
+		foreach ($items as $index => $item) {
+			if (!is_array($item)) {
+				return Npcink_Device_Inventory_V3_Response::error('invalid_import_item', 'Import item is invalid.', 422, array('index' => $index));
+			}
+			$operation = isset($item['operation']) ? sanitize_key((string) $item['operation']) : '';
+			if (!in_array($operation, array('create', 'update'), true)) {
+				return Npcink_Device_Inventory_V3_Response::error('invalid_import_operation', 'Import operation must be create or update.', 422, array('index' => $index));
+			}
+			$input = $this->validate_asset_input(isset($item['input']) && is_array($item['input']) ? $item['input'] : array(), $operation === 'create');
+			if (is_wp_error($input)) {
+				return $input;
+			}
+			$asset = null;
+			if ($operation === 'update') {
+				$uuid = isset($item['uuid']) && is_scalar($item['uuid']) ? sanitize_text_field((string) $item['uuid']) : '';
+				$asset = $uuid !== '' ? $this->assets->find_by_uuid($uuid) : null;
+				if (!$asset) {
+					return Npcink_Device_Inventory_V3_Response::error('asset_not_found', 'Import target asset was not found.', 404, array('index' => $index));
+				}
+			}
+			$input = $this->apply_retired_value_policy($asset, $input);
+			$number = isset($input['asset_number']) ? trim((string) $input['asset_number']) : '';
+			if ($number !== '') {
+				$key = strtolower($number);
+				if (isset($numbers[$key])) {
+					return Npcink_Device_Inventory_V3_Response::error('duplicate_number', 'Import contains duplicate asset numbers.', 409, array('assetNumber' => $number));
+				}
+				$numbers[$key] = true;
+				$conflict = $this->asset_number_conflict($number, $asset ? $asset['uuid'] : '');
+				if (is_wp_error($conflict)) {
+					return $conflict;
+				}
+			}
+			$prepared[] = array('operation' => $operation, 'input' => $input, 'asset' => $asset);
+		}
+
+		if (!$this->begin_transaction()) {
+			return Npcink_Device_Inventory_V3_Response::error('transaction_start_failed', 'Failed to start import transaction.', 500);
+		}
+		$created = 0;
+		$updated = 0;
+		foreach ($prepared as $item) {
+			if ($item['operation'] === 'create') {
+				$asset = $this->assets->create($item['input']);
+				if (!$asset) {
+					if ($this->assets->last_write_was_duplicate_asset_number()) {
+						return $this->rollback_error('duplicate_number', 'Asset number already exists.', 409);
+					}
+					return $this->rollback_error('asset_create_failed', 'Failed to create imported asset.');
+				}
+				$created++;
+				$event_type = 'import_created';
+				$message = 'Asset created from table import.';
+			} else {
+				$asset = $this->assets->update($item['asset']['uuid'], $item['input']);
+				if (!$asset) {
+					if ($this->assets->last_write_was_duplicate_asset_number()) {
+						return $this->rollback_error('duplicate_number', 'Asset number already exists.', 409);
+					}
+					return $this->rollback_error('asset_update_failed', 'Failed to update imported asset.');
+				}
+				$updated++;
+				$event_type = 'import_updated';
+				$message = 'Asset updated from table import.';
+			}
+			if (!$this->event_service->record(intval($asset['id']), 'manual', $event_type, $message)) {
+				return $this->rollback_error('event_create_failed', 'Failed to record import event.');
+			}
+		}
+		if (!$this->commit_transaction()) {
+			return $this->rollback_error('transaction_commit_failed', 'Failed to commit import transaction.');
+		}
+		return rest_ensure_response(array('data' => array('created' => $created, 'updated' => $updated)));
 	}
 
 	public function get_identities($request)

@@ -162,6 +162,21 @@ class Npcink_Device_Inventory_Asset_Repository
 		return $this->assets[$uuid];
 	}
 
+	public function create($changes)
+	{
+		$uuid = !empty($changes['uuid']) ? $changes['uuid'] : '33333333-3333-4333-8333-333333333333';
+		if ($this->duplicate_write_failure || isset($this->assets[$uuid])) {
+			return null;
+		}
+		$row = array_merge(
+			npcink_asset_row(count($this->assets) + 1, $uuid),
+			$changes,
+			array('id' => count($this->assets) + 1, 'uuid' => $uuid)
+		);
+		$this->assets[$uuid] = $row;
+		return $row;
+	}
+
 	public function last_write_was_duplicate_asset_number()
 	{
 		return $this->duplicate_write_failure;
@@ -337,6 +352,55 @@ npcink_asset_write_assert($wpdb->commands === array(), 'legacy asset type failur
 $first_uuid = '11111111-1111-4111-8111-111111111111';
 $second_uuid = '22222222-2222-4222-8222-222222222222';
 $rows = array($first_uuid => npcink_asset_row(1, $first_uuid), $second_uuid => npcink_asset_row(2, $second_uuid));
+list($controller, $assets, $events) = npcink_asset_write_controller($rows);
+
+$imported = $controller->import_items(
+	new Npcink_Asset_Write_Request(
+		array(
+			'items' => array(
+				array('operation' => 'update', 'uuid' => $first_uuid, 'input' => array('department' => '财务')),
+				array(
+					'operation' => 'create',
+					'input' => array(
+						'uuid' => '33333333-3333-4333-8333-333333333333',
+						'assetType' => 'custom',
+						'assetNumber' => 'ASSET-3',
+						'name' => 'Imported',
+						'department' => 'IT',
+					),
+				),
+			),
+		)
+	)
+);
+npcink_asset_write_assert($imported instanceof WP_REST_Response, 'transactional import must return a REST response');
+npcink_asset_write_assert($imported->get_data()['data'] === array('created' => 1, 'updated' => 1), 'transactional import must report created and updated counts');
+npcink_asset_write_assert($wpdb->commands === array('START TRANSACTION', 'COMMIT'), 'transactional import must commit exactly once');
+npcink_asset_write_assert(count($events->records) === 2, 'transactional import must record one event per written asset');
+
+$wpdb = new Npcink_Asset_Write_Wpdb();
+list($controller, $assets, $events) = npcink_asset_write_controller($rows);
+$assets->duplicate_write_failure = true;
+$import_race = $controller->import_items(
+	new Npcink_Asset_Write_Request(
+		array('items' => array(array('operation' => 'update', 'uuid' => $first_uuid, 'input' => array('assetNumber' => 'RACE-IMPORT'))))
+	)
+);
+npcink_asset_write_assert(is_wp_error($import_race) && $import_race->get_error_code() === 'duplicate_number', 'transactional import must preserve duplicate-number semantics on write races');
+npcink_asset_write_assert($wpdb->commands === array('START TRANSACTION', 'ROLLBACK'), 'failed transactional import must roll back');
+npcink_asset_write_assert($events->records === array(), 'failed transactional import must not record events');
+
+$wpdb = new Npcink_Asset_Write_Wpdb();
+list($controller) = npcink_asset_write_controller($rows);
+$missing_import = $controller->import_items(
+	new Npcink_Asset_Write_Request(
+		array('items' => array(array('operation' => 'update', 'uuid' => 'missing', 'input' => array('department' => 'IT'))))
+	)
+);
+npcink_asset_write_assert(is_wp_error($missing_import) && $missing_import->get_error_code() === 'asset_not_found', 'transactional import must validate all targets before starting a transaction');
+npcink_asset_write_assert($wpdb->commands === array(), 'invalid transactional import must not start a transaction');
+
+$wpdb = new Npcink_Asset_Write_Wpdb();
 list($controller, $assets, $events) = npcink_asset_write_controller($rows);
 
 $financial_values = $controller->update_item(

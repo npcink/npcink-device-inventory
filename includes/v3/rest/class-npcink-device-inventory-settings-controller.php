@@ -27,6 +27,16 @@ class Npcink_Device_Inventory_Settings_Controller
 
 		register_rest_route(
 			'npcink-device-inventory/v1',
+			'/observations/cleanup',
+			array(
+				'methods' => WP_REST_Server::CREATABLE,
+				'callback' => array($this, 'cleanup_observations'),
+				'permission_callback' => array($this, 'admin_permissions_check'),
+			)
+		);
+
+		register_rest_route(
+			'npcink-device-inventory/v1',
 			'/client-tokens',
 			array(
 				'methods' => WP_REST_Server::CREATABLE,
@@ -114,6 +124,21 @@ class Npcink_Device_Inventory_Settings_Controller
 
 		update_option(Npcink_Device_Inventory_V3_Tables::OPTION, $options);
 		return rest_ensure_response(array('data' => $this->public_options($options)));
+	}
+
+	public function cleanup_observations()
+	{
+		$options = Npcink_Device_Inventory_V3_Tables::options();
+		$days = intval($options['observation_retention_days']);
+		if ($days <= 0) {
+			return Npcink_Device_Inventory_V3_Response::error('retention_disabled', '请先设置大于 0 的采集快照保留天数。', 422);
+		}
+		$repository = new Npcink_Device_Inventory_Observation_Repository();
+		$deleted = $repository->delete_older_than(gmdate('Y-m-d H:i:s', time() - ($days * DAY_IN_SECONDS)));
+		if ($deleted === false) {
+			return Npcink_Device_Inventory_V3_Response::error('observation_cleanup_failed', '采集快照清理失败。', 500);
+		}
+		return rest_ensure_response(array('data' => array('deleted' => $deleted, 'retentionDays' => $days)));
 	}
 
 	public function create_token($request)

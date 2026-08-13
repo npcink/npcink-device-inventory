@@ -3,6 +3,7 @@ use hmac::{Hmac, Mac};
 use rand::{distributions::Alphanumeric, Rng};
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
+use reqwest::Method;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -11,7 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 type HmacSha256 = Hmac<Sha256>;
 
 pub fn submit_v3(site: &str, name: &str, token_value: &str, data: &Value) -> Result<Value> {
-    let endpoint = resolve_observation_endpoint(site);
+    let endpoint = resolved_observation_endpoint(site);
     validate_upload_endpoint(&endpoint)?;
     if let Some(token) = parse_client_token(token_value)? {
         let body = json!({
@@ -23,7 +24,28 @@ pub fn submit_v3(site: &str, name: &str, token_value: &str, data: &Value) -> Res
     bail!("新版上传接口必须使用后台生成的上传授权码");
 }
 
+pub fn verify_connection(site: &str, token_value: &str) -> Result<String> {
+    let endpoint = format!(
+        "{}/verify",
+        resolved_observation_endpoint(site).trim_end_matches('/')
+    );
+    validate_config_values(&endpoint, token_value)?;
+    let token =
+        parse_client_token(token_value)?.context("上传授权码格式不正确，请从后台重新复制")?;
+    submit_json_hmac_with_method(Method::GET, &endpoint, &json!({}), &token)?;
+    Ok("连接正常，站点地址和授权码均可用。".to_string())
+}
+
 fn submit_json_hmac<T: Serialize>(site: &str, body: &T, token: &ClientToken) -> Result<Value> {
+    submit_json_hmac_with_method(Method::POST, site, body, token)
+}
+
+fn submit_json_hmac_with_method<T: Serialize>(
+    method: Method,
+    site: &str,
+    body: &T,
+    token: &ClientToken,
+) -> Result<Value> {
     let body_json = serde_json::to_string(body).context("failed to encode submit body")?;
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -48,6 +70,7 @@ fn submit_json_hmac<T: Serialize>(site: &str, body: &T, token: &ClientToken) -> 
     );
 
     send_json(
+        method,
         site,
         body_json,
         vec![
@@ -59,7 +82,12 @@ fn submit_json_hmac<T: Serialize>(site: &str, body: &T, token: &ClientToken) -> 
     )
 }
 
-fn send_json(site: &str, body_json: String, headers: Vec<(&'static str, String)>) -> Result<Value> {
+fn send_json(
+    method: Method,
+    site: &str,
+    body_json: String,
+    headers: Vec<(&'static str, String)>,
+) -> Result<Value> {
     let client = Client::builder()
         .timeout(Duration::from_secs(30))
         .user_agent(format!("npcink-device-agent/{}", env!("CARGO_PKG_VERSION")))
@@ -67,7 +95,7 @@ fn send_json(site: &str, body_json: String, headers: Vec<(&'static str, String)>
         .context("failed to build HTTP client")?;
 
     let mut request = client
-        .post(site)
+        .request(method, site)
         .header(CONTENT_TYPE, "application/json")
         .body(body_json);
 
@@ -77,7 +105,7 @@ fn send_json(site: &str, body_json: String, headers: Vec<(&'static str, String)>
 
     let response = request
         .send()
-        .with_context(|| format!("failed to submit device data to {site}"))?;
+        .with_context(|| format!("无法连接站点，请检查网络、地址和 HTTPS 证书：{site}"))?;
 
     let status = response.status();
     let text = response.text().context("failed to read submit response")?;
@@ -87,15 +115,40 @@ fn send_json(site: &str, body_json: String, headers: Vec<(&'static str, String)>
 
 fn parse_submit_response(status: reqwest::StatusCode, text: String) -> Result<Value> {
     if !status.is_success() {
-        let detail = serde_json::from_str::<Value>(&text)
-            .map(|value| value.to_string())
-            .unwrap_or(text);
-        bail!("submit failed with status {status}: {detail}");
+        let payload = serde_json::from_str::<Value>(&text).unwrap_or(Value::Null);
+        let code = payload
+            .get("code")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let server_message = payload
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let guidance = match (status.as_u16(), code) {
+            (401, "expired_signature") => "电脑时间与服务器偏差过大，请校准系统时间后重试。",
+            (401, _) => "授权码无效、已禁用或签名校验失败，请让管理员重新生成配置。",
+            (403, _) => "当前账号或客户端没有上传权限，请联系站点管理员。",
+            (404, _) => "站点未找到设备上传接口，请确认插件已启用且地址指向正确站点。",
+            (409, "asset_archived") => "对应资产已归档，请先在后台恢复资产后再上传。",
+            (409, _) => "设备身份与后台现有资产冲突，请联系管理员核对资产身份。",
+            (413, _) => "采集数据超过服务器限制，请导出排障包并联系管理员。",
+            (429, _) => "上传过于频繁，请稍后再试。",
+            (500..=599, _) => "服务器暂时无法处理上传，请稍后重试并查看 WordPress 日志。",
+            _ => "请检查站点地址和插件状态；如仍失败，请复制技术详情给管理员。",
+        };
+        let technical = if server_message.is_empty() {
+            code
+        } else {
+            server_message
+        };
+        if technical.is_empty() {
+            bail!("上传失败（HTTP {status}）。{guidance}");
+        }
+        bail!("上传失败（HTTP {status}）。{guidance}\n技术详情：{technical}");
     }
 
-    serde_json::from_str::<Value>(&text).with_context(|| {
-        format!("submit succeeded with status {status}, but response was not JSON")
-    })
+    serde_json::from_str::<Value>(&text)
+        .with_context(|| format!("服务器返回成功状态 {status}，但响应格式不是有效 JSON"))
 }
 
 fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
@@ -167,7 +220,7 @@ fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
     }))
 }
 
-fn resolve_observation_endpoint(site: &str) -> String {
+pub fn resolved_observation_endpoint(site: &str) -> String {
     let site = site.trim().trim_end_matches('/');
     if site.ends_with("/device-observations") {
         return site.to_string();
@@ -179,6 +232,14 @@ fn resolve_observation_endpoint(site: &str) -> String {
         return format!("{site}/npcink-device-inventory/v1/device-observations");
     }
     format!("{site}/?rest_route=/npcink-device-inventory/v1/device-observations")
+}
+
+pub fn validate_config_values(endpoint: &str, token_value: &str) -> Result<()> {
+    validate_upload_endpoint(endpoint)?;
+    if parse_client_token(token_value)?.is_none() {
+        bail!("上传授权码格式不正确，请从后台重新复制");
+    }
+    Ok(())
 }
 
 fn validate_upload_endpoint(endpoint: &str) -> Result<()> {
@@ -374,29 +435,29 @@ mod tests {
     #[test]
     fn resolves_common_site_inputs_to_v3_observation_endpoint() {
         assert_eq!(
-            resolve_observation_endpoint("https://example.com"),
+            resolved_observation_endpoint("https://example.com"),
             "https://example.com/?rest_route=/npcink-device-inventory/v1/device-observations"
         );
         assert_eq!(
-            resolve_observation_endpoint("https://example.com/wordpress/"),
+            resolved_observation_endpoint("https://example.com/wordpress/"),
             "https://example.com/wordpress/?rest_route=/npcink-device-inventory/v1/device-observations"
         );
         assert_eq!(
-            resolve_observation_endpoint("https://example.com/wp-json"),
+            resolved_observation_endpoint("https://example.com/wp-json"),
             "https://example.com/wp-json/npcink-device-inventory/v1/device-observations"
         );
         assert_eq!(
-            resolve_observation_endpoint("https://example.com/wp-json/npcink-device-inventory/v1"),
+            resolved_observation_endpoint("https://example.com/wp-json/npcink-device-inventory/v1"),
             "https://example.com/wp-json/npcink-device-inventory/v1/device-observations"
         );
         assert_eq!(
-            resolve_observation_endpoint(
+            resolved_observation_endpoint(
                 "https://example.com/wp-json/npcink-device-inventory/v1/device-observations/"
             ),
             "https://example.com/wp-json/npcink-device-inventory/v1/device-observations"
         );
         assert_eq!(
-            resolve_observation_endpoint(
+            resolved_observation_endpoint(
                 "https://example.com/index.php?rest_route=/npcink-device-inventory/v1/device-observations"
             ),
             "https://example.com/index.php?rest_route=/npcink-device-inventory/v1/device-observations"
@@ -429,7 +490,20 @@ mod tests {
         let error = result.expect_err("HTML must not be accepted as a successful upload response");
         assert!(error
             .to_string()
-            .contains("submit succeeded with status 200 OK, but response was not JSON"));
+            .contains("服务器返回成功状态 200 OK，但响应格式不是有效 JSON"));
+    }
+
+    #[test]
+    fn maps_unauthorized_uploads_to_actionable_guidance() {
+        let result = parse_submit_response(
+            reqwest::StatusCode::UNAUTHORIZED,
+            json!({"code": "invalid_token", "message": "Device token is invalid."}).to_string(),
+        );
+        let error = result
+            .expect_err("unauthorized upload must fail")
+            .to_string();
+        assert!(error.contains("授权码无效、已禁用或签名校验失败"));
+        assert!(error.contains("技术详情：Device token is invalid."));
     }
 
     #[test]

@@ -45,6 +45,34 @@ class Npcink_Device_Inventory_Observation_Repository
 		$this->bump_list_cache_version();
 	}
 
+	public function delete_older_than($cutoff)
+	{
+		global $wpdb;
+		$cutoff = sanitize_text_field((string) $cutoff);
+		if ($cutoff === '') {
+			return 0;
+		}
+		$observations = Npcink_Device_Inventory_V3_Tables::observations();
+		$assets = Npcink_Device_Inventory_V3_Tables::assets();
+		// Keep each asset's current snapshot even when it is older than the retention window.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded maintenance write against plugin-owned tables.
+		$deleted = $wpdb->query(
+			$wpdb->prepare(
+				'DELETE o FROM %i o LEFT JOIN %i a ON a.latest_observation_id = o.id WHERE o.observed_at < %s AND a.id IS NULL',
+				$observations,
+				$assets,
+				$cutoff
+			)
+		);
+		if ($deleted === false) {
+			return false;
+		}
+		if ($deleted > 0) {
+			$this->invalidate_cache();
+		}
+		return intval($deleted);
+	}
+
 	private function update_asset_latest_observation($asset_id, $observation_id, $observed_at)
 	{
 		global $wpdb;

@@ -32,5 +32,6 @@ class Npcink_Device_Inventory_Deactivator
 	 */
 	public static function deactivate()
 	{
+		wp_clear_scheduled_hook('npcink_device_inventory_cleanup_observations');
 	}
 }

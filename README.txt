@@ -4,7 +4,7 @@ Tags: inventory, assets, device management, rest api, admin
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 3.1.4
+Stable tag: 3.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -13,6 +13,8 @@ Manage device assets in WordPress with a v3 asset registry, signed client observ
 == Description ==
 
 Npcink Device Inventory is a device asset management plugin for small teams that want to keep hardware inventory inside WordPress.
+
+The current admin workspace and desktop client are provided in Simplified Chinese. WordPress plugin metadata remains translatable, but a complete English application interface is not yet included.
 
 The plugin provides:
 
@@ -31,6 +33,7 @@ The WordPress plugin does not load JavaScript or CSS from third-party CDNs. Buil
 2. Activate the plugin from the WordPress Plugins screen.
 3. Open Plugins > Device Inventory.
 4. Generate a client authorization token before using the optional desktop uploader.
+5. Download the matching Windows x64 or macOS Apple Silicon client from the latest GitHub Release, then verify it against SHA256SUMS before importing the generated configuration. Desktop installers are currently intended for trusted internal environments until platform signing is complete.
 
 == Frequently Asked Questions ==
 
@@ -40,7 +43,7 @@ No. The WordPress plugin stores device asset data in the site's own WordPress da
 
 = What data is stored? =
 
-The plugin can store asset names, numbers, ownership fields, departments, statuses, hardware identifiers, collected hardware observations, and event history.
+The plugin can store asset names, numbers, ownership fields, departments, statuses, IP and MAC addresses, hardware identifiers, raw collected hardware observations, and event history. The default observation retention value is 0, which means observations are not automatically deleted. Site administrators must define and enforce an appropriate retention policy for their organization.
 
 = Are device upload endpoints open to anonymous users? =
 
@@ -70,6 +73,14 @@ Npcink Device Inventory stores device asset data in the local WordPress database
 The plugin does not transmit this data to Npcink or any third-party server during normal plugin operation. Site administrators are responsible for informing users and employees about their own device inventory policies.
 
 == Changelog ==
+
+= 3.2.0 =
+* Add transactional asset table imports that roll back the full batch on any write failure.
+* Add persistent admin error states, scoped saved filters, and guarded settings forms.
+* Add desktop download guidance, configuration validation, signed connection checks, and configuration removal.
+* Store desktop upload tokens in the macOS Keychain or Windows Credential Manager instead of configuration JSON.
+* Add observation retention cleanup while preserving each asset's latest hardware snapshot.
+* Improve desktop upload error guidance, keyboard navigation, focus visibility, and small-window layouts.
 
 = 3.1.4 =
 * Complete computer device-type editing, filtering, importing, exporting, and batch-update workflows.

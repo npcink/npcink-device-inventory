@@ -51,6 +51,17 @@ export interface BatchAssetResult {
   items: Asset[];
 }
 
+export interface AssetImportWriteItem {
+  operation: "create" | "update";
+  uuid?: string;
+  input: AssetInput;
+}
+
+export interface AssetImportWriteResult {
+  created: number;
+  updated: number;
+}
+
 export interface BatchAssetContext {
   source?: string;
   message?: string;
@@ -187,6 +198,11 @@ export interface InventorySettings {
   departments: string[];
   deleteDataOnUninstall: boolean;
   clientTokens: ClientToken[];
+}
+
+export interface ObservationCleanupResult {
+  deleted: number;
+  retentionDays: number;
 }
 
 export interface BackupRestoreSummary {

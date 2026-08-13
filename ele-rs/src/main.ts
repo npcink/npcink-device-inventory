@@ -210,12 +210,12 @@ app.innerHTML = `
           <span class="brand-mark" data-tauri-drag-region></span>
           <strong data-tauri-drag-region>设备信息上传</strong>
         </div>
-        <nav class="tabs" aria-label="页面">
-          <button class="tab active" data-tab="settings" type="button">设置</button>
-          <button class="tab" data-tab="overview" type="button">概览</button>
-          <button class="tab" data-tab="runtime" type="button">运行</button>
-          <button class="tab" data-tab="diagnostics" type="button">排障</button>
-          <button class="tab" data-tab="details" type="button">技术详情</button>
+        <nav class="tabs" role="tablist" aria-label="页面">
+          <button class="tab active" id="settingsTab" data-tab="settings" type="button" role="tab" aria-selected="true" aria-controls="settingsPage">设置</button>
+          <button class="tab" id="overviewTab" data-tab="overview" type="button" role="tab" aria-selected="false" aria-controls="overviewPage">概览</button>
+          <button class="tab" id="runtimeTab" data-tab="runtime" type="button" role="tab" aria-selected="false" aria-controls="runtimePage">运行</button>
+          <button class="tab" id="diagnosticsTab" data-tab="diagnostics" type="button" role="tab" aria-selected="false" aria-controls="diagnosticsPage">排障</button>
+          <button class="tab" id="detailsTab" data-tab="details" type="button" role="tab" aria-selected="false" aria-controls="detailsPage">技术详情</button>
         </nav>
         <div class="head-actions">
           <span class="head-drag-fill" data-tauri-drag-region aria-hidden="true"></span>
@@ -223,32 +223,34 @@ app.innerHTML = `
         </div>
       </header>
 
-      <section class="tab-page active" id="settingsPage">
+      <section class="tab-page active" id="settingsPage" role="tabpanel" aria-labelledby="settingsTab">
         <div class="settings-page-layout">
           <div class="settings-layout">
             <div class="settings-left-panel">
               <form class="upload-form" id="configForm">
                 <label class="field">
                   <span class="field-head">
-                    <span class="field-label">上传备注</span>
+                    <span class="field-label">使用人（可选）</span>
                     <span class="config-state-inline">
                       <span>上传配置</span>
                       <strong id="configStateText">未配置</strong>
                     </span>
                   </span>
-                  <input id="name" name="name" placeholder="可选，例如：张三、财务电脑、前台备用机" />
+                  <input id="name" name="name" placeholder="例如：张三；不要填写部门、工位或设备用途" />
                 </label>
 
                 <div class="config-toolbar" id="configImportToolbar">
                   <div class="config-actions">
                     <button class="button config-button config-button-dark" id="importConfigButton" type="button">导入配置</button>
                     <button class="button config-button config-button-light" id="manualConfigButton" type="button" aria-controls="manualConfigDialog">手动填写</button>
+                    <button class="button config-button config-button-light" id="verifyConfigButton" type="button">验证连接</button>
+                    <button class="button config-button config-button-light" id="clearConfigButton" type="button">清除配置</button>
                   </div>
                 </div>
 
                 <button class="button primary submit-button" id="submitButton" type="button" hidden>提交</button>
                 <div class="submit-meta" id="submitMeta" hidden></div>
-                <div class="message" id="toast"></div>
+                <div class="message" id="toast" role="status" aria-live="polite"></div>
               </form>
 
               <section class="software-note" aria-label="软件说明">
@@ -277,11 +279,11 @@ app.innerHTML = `
         </div>
       </section>
 
-      <section class="tab-page" id="overviewPage">
+      <section class="tab-page" id="overviewPage" role="tabpanel" aria-labelledby="overviewTab" hidden>
         <div class="overview-grid" id="overviewGrid"></div>
       </section>
 
-      <section class="tab-page" id="runtimePage">
+      <section class="tab-page" id="runtimePage" role="tabpanel" aria-labelledby="runtimeTab" hidden>
         <section class="runtime-card runtime-page-card" aria-label="运行状态">
           <div class="settings-summary-head runtime-page-head">
             <div class="runtime-title-line">
@@ -311,7 +313,7 @@ app.innerHTML = `
         </section>
       </section>
 
-      <section class="tab-page" id="diagnosticsPage">
+      <section class="tab-page" id="diagnosticsPage" role="tabpanel" aria-labelledby="diagnosticsTab" hidden>
         <div class="diagnostics-layout">
           <section class="diagnostics-panel">
             <span class="panel-kicker">本地反馈与排障</span>
@@ -323,7 +325,7 @@ app.innerHTML = `
               <button class="button secondary diagnostics-button" id="openDiagnosticsFolderButton" type="button" hidden>打开文件夹</button>
               <button class="button secondary diagnostics-button" id="copyDiagnosticsPathButton" type="button" hidden>复制文件位置</button>
             </div>
-            <div class="diagnostics-result" id="diagnosticsResult"></div>
+            <div class="diagnostics-result" id="diagnosticsResult" role="status" aria-live="polite"></div>
           </section>
           <section class="diagnostics-note">
             <strong>隐私提示</strong>
@@ -334,7 +336,7 @@ app.innerHTML = `
         </div>
       </section>
 
-      <section class="tab-page" id="detailsPage">
+      <section class="tab-page" id="detailsPage" role="tabpanel" aria-labelledby="detailsTab" hidden>
         <div class="detail-layout">
           <div class="detail-menu" id="detailMenu"></div>
           <div class="detail-panel">
@@ -376,8 +378,8 @@ app.innerHTML = `
     <dialog class="config-dialog help-dialog" id="helpDialog" aria-labelledby="helpDialogTitle">
       <div class="config-dialog-box">
         <h2 id="helpDialogTitle">帮助</h2>
-        <p class="dialog-copy">使用问题请联系管理员。</p>
-        <p class="dialog-note">请不要自行修改上传地址或授权码。</p>
+        <p class="dialog-copy">首次使用：导入管理员提供的配置，点击“验证连接”，确认连接正常后再上传。</p>
+        <p class="dialog-note">授权失败请重新获取配置；网络失败请检查 HTTPS 地址和系统时间；仍无法解决时，在“排障”页生成排障包交给管理员。关闭窗口会退出软件，不会继续后台监控。</p>
         <div class="dialog-actions">
           <button class="button primary compact" id="closeHelpButton" type="button">知道了</button>
         </div>
@@ -401,6 +403,8 @@ const tokenInput = document.querySelector<HTMLInputElement>("#token")!;
 const configStateText = document.querySelector<HTMLElement>("#configStateText")!;
 const configImportToolbar = document.querySelector<HTMLElement>("#configImportToolbar")!;
 const manualConfigButton = document.querySelector<HTMLButtonElement>("#manualConfigButton")!;
+const verifyConfigButton = document.querySelector<HTMLButtonElement>("#verifyConfigButton")!;
+const clearConfigButton = document.querySelector<HTMLButtonElement>("#clearConfigButton")!;
 const configForm = document.querySelector<HTMLFormElement>("#configForm")!;
 const collectButton = document.querySelector<HTMLButtonElement>("#collectButton")!;
 const submitButton = document.querySelector<HTMLButtonElement>("#submitButton")!;
@@ -468,6 +472,7 @@ let currentAppVersion = "";
 let latestDesktopManifest: DesktopUpdateManifest | null = null;
 let pendingAutoUpdate: Update | null = null;
 let downloadUpdateUrl = "";
+let verifiedConfigKey = "";
 
 const DESKTOP_UPDATE_MANIFEST_URL =
   "https://github.com/npcink/npcink-device-inventory/releases/latest/download/latest-desktop.json";
@@ -1034,6 +1039,8 @@ const updateInteractiveState = () => {
   submitButton.disabled = isCollecting || isSubmitting || diagnosticsBusy;
   importConfigButton.disabled = isSubmitting;
   manualConfigButton.disabled = isSubmitting;
+  verifyConfigButton.disabled = isSubmitting || !hasUploadConfig();
+  clearConfigButton.disabled = isSubmitting || !hasUploadConfig(activeConfig);
   saveManualConfigButton.disabled = isSubmitting;
   exportHardwareButton.disabled = diagnosticsBusy || isCollecting || isSubmitting;
   generateDiagnosticsButton.disabled = diagnosticsBusy || isCollecting || isSubmitting;
@@ -1259,10 +1266,16 @@ const showSubmitResult = (kind: "success" | "error", title: string, message: str
 
 const switchTab = (tab: TabId) => {
   tabs.forEach((button) => {
-    button.classList.toggle("active", button.dataset.tab === tab);
+    const selected = button.dataset.tab === tab;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
   });
-  pages.forEach((page) => page.classList.remove("active"));
-  document.querySelector<HTMLElement>(`#${tab}Page`)?.classList.add("active");
+  pages.forEach((page) => {
+    const selected = page.id === `${tab}Page`;
+    page.classList.toggle("active", selected);
+    page.hidden = !selected;
+  });
 };
 
 const overviewRows = (): OverviewRow[] => {
@@ -1275,7 +1288,7 @@ const overviewRows = (): OverviewRow[] => {
   const ip = displayValue(firstNet.ip4 || firstNet.ip6);
   const iface = displayValue(firstNet.ifaceName || firstNet.iface, "");
   const rows = [
-    { label: "上传备注", value: nameInput.value.trim() || "未填写" },
+    { label: "使用人", value: nameInput.value.trim() || "未填写" },
     { label: "电脑名称", value: firstText(data, ["os.hostname", "system.model"], "未采集"), wide: true },
     { label: "系统", value: systemLabel(os.distro, os.release), wide: true },
     { label: "内存", value: [memoryType, memorySize].filter(Boolean).join(" ") },
@@ -1337,9 +1350,8 @@ const renderConfigStatus = (config: AgentConfig = getConfig()) => {
   submitButton.hidden = !canSubmit;
 
   if (config.site && config.token) {
-    configStateText.textContent = config.preset_label
-      ? `已导入：${config.preset_label}`
-      : "已配置";
+    const label = config.preset_label ? `已导入：${config.preset_label}` : "已保存";
+    configStateText.textContent = verifiedConfigKey === `${config.site}\n${config.token}` ? "连接正常" : `${label}，待验证`;
     return;
   }
   configStateText.textContent = "未配置";
@@ -1836,6 +1848,7 @@ const saveConfig = async (options: { quietMissing?: boolean } = {}) => {
   }
 
   await invoke("save_config", { config });
+  verifiedConfigKey = "";
   activeConfig = { ...config };
   renderConfigStatus(config);
   renderAll();
@@ -1873,6 +1886,7 @@ const importConfig = async () => {
   try {
     const config = parseImportedConfig(configJsonInput.value);
     await invoke("save_config", { config });
+    verifiedConfigKey = "";
     resetSubmittedState();
     renderConfig(config);
     closeManualConfigDialog();
@@ -1883,6 +1897,43 @@ const importConfig = async () => {
     const message = errorMessage(error);
     importDialogMessage.textContent = message;
     logAppEvent("warn", "ui.import_config_failed", message);
+  }
+};
+
+const verifyConfig = async () => {
+  const config = getConfig();
+  if (!hasUploadConfig(config)) {
+    showSubmitResult("error", "无法验证", "请先导入配置，或手动填写完整授权码和站点地址。");
+    return;
+  }
+  verifyConfigButton.disabled = true;
+  setToast("正在验证连接...");
+  try {
+    const result = await invoke<string>("verify_upload_config", { config });
+    verifiedConfigKey = `${config.site}\n${config.token}`;
+    renderConfigStatus(config);
+    setToast(result || "连接正常。", "ok");
+  } catch (error) {
+    verifiedConfigKey = "";
+    renderConfigStatus(config);
+    setToast(`连接验证失败：${errorMessage(error)}`, "error");
+  } finally {
+    updateInteractiveState();
+  }
+};
+
+const clearConfig = async () => {
+  if (!window.confirm("清除站点地址和授权码？清除后需要重新导入配置才能上传。")) {
+    return;
+  }
+  try {
+    await invoke("clear_saved_config");
+    verifiedConfigKey = "";
+    resetSubmittedState();
+    renderConfig({ site: "", name: "", token: "" });
+    setToast("上传配置已清除。", "ok");
+  } catch (error) {
+    setToast(`清除配置失败：${errorMessage(error)}`, "error");
   }
 };
 
@@ -2221,6 +2272,8 @@ collectButton.addEventListener("click", () => {
 });
 importConfigButton.addEventListener("click", openImportDialog);
 manualConfigButton.addEventListener("click", openManualConfigDialog);
+verifyConfigButton.addEventListener("click", () => void verifyConfig());
+clearConfigButton.addEventListener("click", () => void clearConfig());
 cancelImportButton.addEventListener("click", closeImportDialog);
 confirmImportButton.addEventListener("click", importConfig);
 configImportDialog.addEventListener("close", clearImportDialog);
@@ -2308,6 +2361,17 @@ closeSubmitResultButton.addEventListener("click", () => closeDialogSafely(submit
 
 tabs.forEach((button) => {
   button.addEventListener("click", () => switchTab((button.dataset.tab ?? "settings") as TabId));
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+    event.preventDefault();
+    const current = tabs.indexOf(button);
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const next = tabs[(current + direction + tabs.length) % tabs.length];
+    switchTab((next.dataset.tab ?? "settings") as TabId);
+    next.focus();
+  });
 });
 
 runtimeRangeButtons.forEach((button) => {
@@ -2332,9 +2396,11 @@ nameInput.addEventListener("input", () => {
   renderAll();
 });
 siteInput.addEventListener("input", () => {
+  verifiedConfigKey = "";
   markManualConfigEdited();
 });
 tokenInput.addEventListener("input", () => {
+  verifiedConfigKey = "";
   markManualConfigEdited();
 });
 

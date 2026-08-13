@@ -32,6 +32,7 @@ import { InitialAssets, RestUrl } from "@/utils/index";
 import {
   archiveAsset,
   batchAssets,
+  cleanupObservations,
   createAsset,
   createAssetEvent,
   createClientToken,
@@ -45,6 +46,7 @@ import {
   getEvents,
   getObservations,
   getSettings,
+  importAssets,
   updateClientToken,
   updateSettings,
   updateAsset,
@@ -1238,6 +1240,7 @@ const fieldText = (value: unknown) => {
 };
 
 const DEFAULT_DEPARTMENT = "未分配";
+const DESKTOP_RELEASE_URL = "https://github.com/npcink/npcink-device-inventory/releases/latest";
 
 const normalizeDepartmentList = (departments: unknown) => {
   const normalized = Array.isArray(departments)
@@ -2121,28 +2124,20 @@ const AssetImportModal = ({ open, onClose, onImported }: AssetImportModalProps) 
   });
   const importMutation = useMutation(
     async (rows: AssetImportPreviewRow[]) => {
-      let created = 0;
-      let updated = 0;
-      let skipped = 0;
-      for (const row of rows) {
-        if (row.action === "create") {
-          await createAsset(row.input);
-          created += 1;
-        } else if (row.action === "update" && row.existing) {
-          await updateAsset(row.existing.uuid, row.input);
-          updated += 1;
-        } else {
-          skipped += 1;
-        }
-      }
-      return { created, updated, skipped };
+      const executable = rows.filter((row) => row.action === "create" || row.action === "update");
+      const result = await importAssets(executable.map((row) => ({
+        operation: row.action as "create" | "update",
+        uuid: row.existing?.uuid,
+        input: row.input,
+      })));
+      return { ...result, skipped: rows.length - executable.length };
     },
     {
       onSuccess: (result) => {
+        onImported();
         message.success(`导入完成：新增 ${result.created} 条，更新 ${result.updated} 条，跳过 ${result.skipped} 条`);
         setRawText("");
         setPreviewRows([]);
-        onImported();
         onClose();
       },
     }
@@ -2178,7 +2173,13 @@ const AssetImportModal = ({ open, onClose, onImported }: AssetImportModalProps) 
         <Button
           key="import"
           type="primary"
-          disabled={!previewRows.some((row) => row.action === "create" || row.action === "update")}
+          disabled={
+            settingsQuery.isError ||
+            settingsQuery.isLoading ||
+            existingAssetsQuery.isError ||
+            existingAssetsQuery.isLoading ||
+            !previewRows.some((row) => row.action === "create" || row.action === "update")
+          }
           loading={importMutation.isLoading}
           onClick={() => importMutation.mutate(previewRows)}
         >
@@ -2193,6 +2194,16 @@ const AssetImportModal = ({ open, onClose, onImported }: AssetImportModalProps) 
           message="只支持标准资产 CSV"
           description="请先下载模板填写。导入以资产编号为匹配键，可选择仅新增、仅更新，或按编号新增/更新。"
         />
+        {settingsQuery.isError || existingAssetsQuery.isError ? (
+          <Alert
+            type="error"
+            showIcon
+            message="导入预检数据加载失败"
+            description="无法安全判断部门和已有资产，请重试后再导入。"
+            action={<Button onClick={() => { settingsQuery.refetch(); existingAssetsQuery.refetch(); }}>重试</Button>}
+          />
+        ) : null}
+        <Alert type="success" showIcon message="导入使用单次服务端事务" description="任意一行写入失败时，本次可执行数据会全部回滚，不会留下半导入。" />
         <Space wrap>
           <Button onClick={() => downloadCsvFile(`asset-import-template-${Date.now()}.csv`, importTemplateCsv())}>
             下载导入模板
@@ -2750,6 +2761,17 @@ const TokenModal = ({ open, onClose }: TokenModalProps) => {
           {uploadEndpoint}
         </Text>
       </div>
+      <Alert
+        type="info"
+        showIcon
+        message="先下载客户端，再导入配置"
+        description={
+          <Space direction="vertical" size={4}>
+            <Text>支持 Windows x64 和 macOS Apple Silicon。安装包尚未完成平台代码签名，仅建议在可信内部环境使用。</Text>
+            <Button type="link" href={DESKTOP_RELEASE_URL} target="_blank" rel="noreferrer">打开客户端下载页</Button>
+          </Space>
+        }
+      />
       <Form
         form={form}
         className="npcink-v3-token-form"
@@ -4088,7 +4110,7 @@ const ChangeWorkspace = () => {
       title: "姓名",
       width: 160,
       render: (_, event) => (
-        <span className={hideNames ? "npcink-v3-name-blur" : undefined}>{changeActorName(event)}</span>
+        <span>{hideNames ? "已隐藏" : changeActorName(event)}</span>
       ),
     },
     {
@@ -4109,7 +4131,7 @@ const ChangeWorkspace = () => {
         const asset = changeAssetLabelParts(event.asset);
         return (
           <span>
-            <span className={hideNames && asset.name !== "-" ? "npcink-v3-name-blur" : undefined}>{asset.name}</span>
+            <span>{hideNames && asset.name !== "-" ? "已隐藏" : asset.name}</span>
             {asset.suffix ? ` _ ${asset.suffix}` : ""}
           </span>
         );
@@ -4154,12 +4176,21 @@ const ChangeWorkspace = () => {
           />
         </div>
       </div>
+      {eventsQuery.isError ? (
+        <Alert
+          type="error"
+          showIcon
+          message="变更记录加载失败"
+          description="当前内容不是空数据，请重试获取真实记录。"
+          action={<Button onClick={() => eventsQuery.refetch()}>重试</Button>}
+        />
+      ) : null}
       <Table
         rowKey="id"
         size="middle"
         className="npcink-v3-change-table"
         columns={columns}
-        dataSource={events}
+        dataSource={eventsQuery.isError ? [] : events}
         loading={eventsQuery.isLoading || eventsQuery.isFetching}
         scroll={{ x: 980 }}
         pagination={{
@@ -4173,7 +4204,7 @@ const ChangeWorkspace = () => {
           setPage(nextPagination.current || 1);
           setPageSize(nextPagination.pageSize || 20);
         }}
-        locale={{ emptyText: <Empty description="暂无变更数据" /> }}
+        locale={{ emptyText: eventsQuery.isError ? null : <Empty description="暂无变更数据" /> }}
       />
     </div>
   );
@@ -5314,6 +5345,12 @@ const SettingsWorkspace = () => {
       message.success("设置已保存");
     },
   });
+  const cleanupMutation = useMutation(cleanupObservations, {
+    onSuccess: (result) => {
+      queryClient.invalidateQueries(["v3-observations"]);
+      message.success(result.deleted ? `已清理 ${result.deleted} 条过期采集快照` : "没有需要清理的过期快照");
+    },
+  });
 
   useEffect(() => {
     if (settingsQuery.data) {
@@ -5332,6 +5369,15 @@ const SettingsWorkspace = () => {
           <Text type="secondary">管理采集客户端、部门和卸载清理策略。</Text>
         </div>
       </div>
+      {settingsQuery.isError ? (
+        <Alert
+          type="error"
+          showIcon
+          message="设置加载失败"
+          description="为避免覆盖现有配置，加载成功前不能保存设置或管理客户端令牌。"
+          action={<Button onClick={() => settingsQuery.refetch()}>重试</Button>}
+        />
+      ) : null}
       <div className="npcink-v3-settings-panel">
         <Form
           form={form}
@@ -5347,7 +5393,7 @@ const SettingsWorkspace = () => {
           <div className="npcink-v3-settings-section">
             <div className="npcink-v3-settings-section-head">
               <Title level={4}>客户端接入</Title>
-              <Button onClick={() => setTokenModalOpen(true)}>管理客户端令牌</Button>
+              <Button disabled={settingsQuery.isError || settingsQuery.isLoading} onClick={() => setTokenModalOpen(true)}>管理客户端令牌</Button>
             </div>
             <div className="npcink-v3-settings-grid">
               <Form.Item
@@ -5359,6 +5405,27 @@ const SettingsWorkspace = () => {
                 <Input placeholder={RestUrl} />
               </Form.Item>
             </div>
+          </div>
+          <div className="npcink-v3-settings-section">
+            <Title level={4}>采集快照保留</Title>
+            <Text type="secondary">设置原始硬件快照的自动保留期。0 表示不自动删除；清理时始终保留每台资产的最新快照。</Text>
+            <div className="npcink-v3-settings-grid">
+              <Form.Item name="observationRetentionDays" label="保留天数" extra="保存设置后每日自动清理；建议先完成 JSON 备份。">
+                <InputNumber min={0} max={3650} precision={0} addonAfter="天" />
+              </Form.Item>
+            </div>
+            <Button
+              loading={cleanupMutation.isLoading}
+              disabled={settingsQuery.isError || settingsQuery.isLoading || Number(settingsQuery.data?.observationRetentionDays || 0) <= 0}
+              onClick={() => Modal.confirm({
+                title: "立即清理过期采集快照？",
+                content: "将按当前已保存的保留天数删除历史快照，并保留每台资产的最新快照。此操作不可撤销。",
+                okText: "确认清理",
+                okButtonProps: { danger: true },
+                cancelText: "取消",
+                onOk: () => cleanupMutation.mutateAsync(),
+              })}
+            >立即清理</Button>
           </div>
           <div className="npcink-v3-settings-section">
             <Title level={4}>账面净值估算</Title>
@@ -5445,7 +5512,7 @@ const SettingsWorkspace = () => {
             </div>
           </div>
           <div className="npcink-v3-settings-actions">
-            <Button type="primary" htmlType="submit" loading={settingsMutation.isLoading}>
+            <Button type="primary" htmlType="submit" disabled={settingsQuery.isError || settingsQuery.isLoading} loading={settingsMutation.isLoading}>
               保存设置
             </Button>
           </div>
@@ -5602,7 +5669,7 @@ const AssetWorkspace = ({
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState("");
   const [searchDraft, setSearchDraft] = useState("");
-  const [assetScope, setAssetScope] = useState<AssetScope>(initialScope);
+  const assetScope = initialScope;
   const [assetType, setAssetType] = useState<AssetType | undefined>();
   const [status, setStatus] = useState<string | undefined>();
   const [category, setCategory] = useState<string | undefined>();
@@ -5755,6 +5822,7 @@ const AssetWorkspace = ({
   const maintenanceCount = countStatus(assets, "maintenance");
   const activeScopeLabel =
     title || ASSET_SCOPE_OPTIONS.find((item) => item.value === assetScope)?.label || "资产";
+  const workspaceSavedFilters = savedFilters.filter((filter) => filter.assetScope === initialScope);
   const categoryOptions = useMemo(
     () =>
       Array.from(new Set([...DEFAULT_CUSTOM_CATEGORIES, ...assets.map((asset) => asset.category).filter(Boolean)]))
@@ -5793,10 +5861,10 @@ const AssetWorkspace = ({
 
   const applySavedFilter = (id: string) => {
     const filter = savedFilters.find((item) => item.id === id);
-    if (!filter) {
+    if (!filter || filter.assetScope !== initialScope) {
+      message.error("这个筛选属于其他资产工作区，无法在当前页面应用");
       return;
     }
-    setAssetScope(filter.assetScope);
     setAssetType(filter.assetType);
     setStatus(filter.status);
     setCategory(filter.category);
@@ -5817,7 +5885,7 @@ const AssetWorkspace = ({
       {
         id: `${Date.now()}`,
         name,
-        assetScope,
+        assetScope: initialScope,
         assetType,
         status,
         search,
@@ -5933,7 +6001,7 @@ const AssetWorkspace = ({
         <div>
           <p>{asset.assetNumber || asset.uuid} 将退出日常资产管理。</p>
           <p>归档后不参与列表、统计、分析和资产表格导出；历史数据与资产编号仍会保留。</p>
-          <p><strong>当前不提供自行恢复，请确认设备已经永久退出管理。</strong></p>
+          <p><strong>归档后可通过“已归档”筛选找到资产，并在详情设置中把状态恢复为在用。</strong></p>
         </div>
       ),
       okText: "确认归档",
@@ -5955,7 +6023,7 @@ const AssetWorkspace = ({
         <div>
           <p>已选 {selectedCount} 条资产，将统一退出日常资产管理。</p>
           <p>归档后不参与列表、统计、分析和资产表格导出；历史数据与资产编号仍会保留。</p>
-          <p><strong>当前不提供自行恢复，请确认这些设备已经永久退出管理。</strong></p>
+          <p><strong>归档后可通过“已归档”筛选找到资产，并在详情设置中恢复状态。</strong></p>
         </div>
       ),
       okText: "确认归档",
@@ -6104,7 +6172,7 @@ const AssetWorkspace = ({
                 ...(viewMode === "card"
                   ? [{ key: "layout", label: compactLayout ? "舒展模式" : "紧凑模式" }]
                   : []),
-                ...savedFilters.map((filter) => ({
+                ...workspaceSavedFilters.map((filter) => ({
                   key: `filter:${filter.id}`,
                   label: `筛选：${filter.name}`,
                 })),
@@ -6154,7 +6222,17 @@ const AssetWorkspace = ({
         </div>
       ) : null}
 
-      {viewMode === "card" ? (
+      {assetsQuery.isError ? (
+        <Alert
+          type="error"
+          showIcon
+          message={`${activeScopeLabel}加载失败`}
+          description="当前页面不能判断是否真的没有资产，也不会开放批量操作。"
+          action={<Button onClick={() => assetsQuery.refetch()}>重试</Button>}
+        />
+      ) : null}
+
+      {!assetsQuery.isError && viewMode === "card" ? (
         <div className="npcink-v3-card-surface">
           {assetsQuery.isLoading && !assets.length ? (
             <Table loading pagination={false} showHeader={false} />
@@ -6198,7 +6276,7 @@ const AssetWorkspace = ({
             />
           </div>
         </div>
-      ) : (
+      ) : !assetsQuery.isError ? (
         <Table
           rowKey="uuid"
           size="middle"
@@ -6233,7 +6311,7 @@ const AssetWorkspace = ({
           }}
           locale={{ emptyText: <Empty description="暂无资产" /> }}
         />
-      )}
+      ) : null}
 
       <DetailDrawer
         uuid={selectedUuid}
