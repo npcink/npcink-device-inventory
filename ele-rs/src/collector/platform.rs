@@ -1,4 +1,5 @@
 use serde_json::{json, Map, Value};
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::process::Command;
 
 // Some Windows NIC drivers fail when hidden adapters are enumerated. Retry
@@ -1124,11 +1125,13 @@ fn chassis_type_label(code: u64) -> String {
     .to_string()
 }
 
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn command_json(program: &str, args: &[&str]) -> Option<Value> {
     let text = command_text(program, args)?;
     serde_json::from_str(&text).ok()
 }
 
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn command_text(program: &str, args: &[&str]) -> Option<String> {
     let output = new_command(program).args(args).output().ok()?;
     if !output.status.success() {
@@ -1137,6 +1140,7 @@ fn command_text(program: &str, args: &[&str]) -> Option<String> {
     String::from_utf8(output.stdout).ok()
 }
 
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn new_command(program: &str) -> Command {
     let mut command = Command::new(program);
     configure_command_window(&mut command);
@@ -1151,7 +1155,7 @@ fn configure_command_window(command: &mut Command) {
     command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
 fn configure_command_window(_command: &mut Command) {}
 
 fn insert_empty_if_missing(root: &mut Map<String, Value>, key: &str) {
@@ -1183,6 +1187,7 @@ fn string_value(value: &Value, key: &str) -> String {
         .to_string()
 }
 
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 fn first_non_empty(values: &[String]) -> String {
     values
         .iter()
