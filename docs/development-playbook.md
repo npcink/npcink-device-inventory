@@ -69,7 +69,9 @@
 
 ## 当前运行与后续观察
 
-- 当前发布候选为 WordPress 插件 3.1.4 与 Device Agent 0.3.3，发布记录见 [`release-verification-2026-08-10-v3.1.4.md`](release-verification-2026-08-10-v3.1.4.md)。
+截至 2026-08-21，当前正式发布为 WordPress 插件 `3.2.2` 与 Device Agent `0.4.2`；完整收尾记录见 [`release-closeout-2026-08-21-v3.2.2.md`](release-closeout-2026-08-21-v3.2.2.md)。
+
+- 上一阶段发布候选为 WordPress 插件 3.1.4 与 Device Agent 0.3.3，历史记录见 [`release-verification-2026-08-10-v3.1.4.md`](release-verification-2026-08-10-v3.1.4.md)。
 - 部署顺序必须是先升级插件，再部署 Agent；否则新 Agent 的身份事实和错误语义可能无法按当前契约处理。
 - 观察已有 v1 资产首次上传是否唯一命中并补写 v2；在实际覆盖完成前，不删除 v1 过渡查询。
 - 对 133 这类只依赖 PCI 永久 MAC 的设备，网卡更换后需要人工确认资产关系，不能自动把新身份并入旧资产。

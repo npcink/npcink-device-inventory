@@ -6,6 +6,7 @@ This folder keeps the current product contracts, development guardrails, release
 
 - `development-playbook.md`: the working agreement for new changes: scope, evidence, contracts, testing, and release gates.
 - `development-and-release-governance-2026-08-13.md`: consolidated development lessons, failure modes, release gates, and agent working rules from the v3.1.4 hardening cycle.
+- `release-closeout-2026-08-21-v3.2.2.md`: final closeout for plugin 3.2.2 and Device Agent 0.4.2, including lightweight collection, department settings, GitHub/WordPress.org publishing, and reusable release rules.
 - `v3.1.4-asset-lifecycle-admin-quality-retrospective-2026-08-10.md`: consolidated 3.1.4 lifecycle, device-type, finance, hardware-summary, admin-UI, full-chain, and release standards.
 - `admin-read-only-analysis-development-standard.md`: implementation, data-semantics, UI, permission, and verification rules for read-only admin analytics.
 - `analysis-hardware-inventory-and-navigation-retrospective-2026-08-10.md`: legacy hardware-inventory history, restored v3 counting semantics, consolidated analysis navigation, review findings, and future development rules.
