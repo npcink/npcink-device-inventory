@@ -60,6 +60,44 @@ pub fn collect_static_data() -> Result<Value> {
     Ok(Value::Object(root))
 }
 
+/// Collect only the fields required for the normal upload flow. Expensive
+/// platform enrichment (system_profiler/CIM inventories and raw platform
+/// payloads) remains available through collect_static_data for diagnostics.
+pub fn collect_upload_data() -> Result<Value> {
+    let mut system = System::new_all();
+    system.refresh_all();
+
+    let disks = Disks::new_with_refreshed_list();
+    let networks = Networks::new_with_refreshed_list();
+    let network_ips = network_ip_map();
+    let macs = collect_macs(&networks, &network_ips);
+    let hardware_uuid = platform::hardware_uuid().unwrap_or_default();
+
+    let mut root = Map::new();
+    root.insert("os".to_string(), collect_os());
+    root.insert("cpu".to_string(), collect_cpu(&system));
+    root.insert("mem".to_string(), collect_memory(&system));
+    root.insert("system".to_string(), collect_system(&hardware_uuid));
+    root.insert("diskLayout".to_string(), collect_disks(&disks));
+    root.insert("net".to_string(), collect_networks(&networks, &network_ips));
+    root.insert(
+        "uuid".to_string(),
+        json!({ "hardware": hardware_uuid, "macs": macs }),
+    );
+    root.insert(
+        "collector".to_string(),
+        json!({
+            "name": env!("CARGO_PKG_NAME"),
+            "version": env!("CARGO_PKG_VERSION"),
+            "runtime": "rust",
+            "schema": "npcink-upload-light-v1",
+            "collected_at": Utc::now().to_rfc3339(),
+        }),
+    );
+
+    Ok(Value::Object(root))
+}
+
 pub fn collect_runtime_status() -> Result<Value> {
     let mut system = System::new_all();
     system.refresh_all();

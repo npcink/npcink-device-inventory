@@ -7,9 +7,11 @@ use reqwest::Method;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 type HmacSha256 = Hmac<Sha256>;
+static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
 
 pub fn submit_v3(site: &str, name: &str, token_value: &str, data: &Value) -> Result<Value> {
     let endpoint = resolved_observation_endpoint(site);
@@ -88,11 +90,13 @@ fn send_json(
     body_json: String,
     headers: Vec<(&'static str, String)>,
 ) -> Result<Value> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(30))
-        .user_agent(format!("npcink-device-agent/{}", env!("CARGO_PKG_VERSION")))
-        .build()
-        .context("failed to build HTTP client")?;
+    let client = HTTP_CLIENT.get_or_init(|| {
+        Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent(format!("npcink-device-agent/{}", env!("CARGO_PKG_VERSION")))
+            .build()
+            .expect("failed to build HTTP client")
+    });
 
     let mut request = client
         .request(method, site)
@@ -212,10 +216,7 @@ fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
             },
         },
         "raw": {
-            "source": "npcink-device-agent-v5",
-            "static_data": data,
-            "filesystems": value_at(data, "/fsSize"),
-            "platform": value_at(data, "/platformData"),
+            "source": "npcink-device-agent-v5"
         },
     }))
 }

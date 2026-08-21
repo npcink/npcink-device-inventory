@@ -2205,6 +2205,23 @@
   max-width: none;
 }
 
+.npcink-v3-department-add-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.npcink-v3-department-add-row .ant-input {
+  flex: 1;
+}
+
+@media (max-width: 720px) {
+  .npcink-v3-department-add-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .npcink-v3-finance-summary {
   display: flex;
   flex-wrap: wrap;

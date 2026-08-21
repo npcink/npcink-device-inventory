@@ -4874,11 +4874,14 @@ const DataToolsWorkspace = () => {
 const SettingsWorkspace = () => {
   const [form] = Form.useForm<InventorySettings>();
   const [tokenModalOpen, setTokenModalOpen] = useState(false);
+  const [newDepartment, setNewDepartment] = useState("");
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const queryClient = useQueryClient();
   const settingsQuery = useQuery(["v3-settings"], getSettings);
   const settingsMutation = useMutation(updateSettings, {
     onSuccess: (settings) => {
       queryClient.setQueryData(["v3-settings"], settings);
+      setHasUnsavedChanges(false);
       message.success("设置已保存");
     },
   });
@@ -4889,12 +4892,29 @@ const SettingsWorkspace = () => {
     },
   });
 
+  const addDepartment = () => {
+    const department = newDepartment.trim().slice(0, 80);
+    if (!department) {
+      message.warning("请输入部门名称");
+      return;
+    }
+    const departments = normalizeDepartmentList(form.getFieldValue("departments") || []);
+    if (departments.includes(department)) {
+      message.info("该部门已经存在");
+      setNewDepartment("");
+      return;
+    }
+    form.setFieldValue("departments", normalizeDepartmentList([...departments, department]));
+    setNewDepartment("");
+  };
+
   useEffect(() => {
     if (settingsQuery.data) {
       form.setFieldsValue({
         ...settingsQuery.data,
         departments: normalizeDepartmentList(settingsQuery.data.departments),
       });
+      setHasUnsavedChanges(false);
     }
   }, [form, settingsQuery.data]);
 
@@ -4920,6 +4940,7 @@ const SettingsWorkspace = () => {
           form={form}
           className="npcink-v3-global-settings-form"
           layout="vertical"
+          onValuesChange={() => setHasUnsavedChanges(true)}
           onFinish={(values) =>
             settingsMutation.mutate({
               ...values,
@@ -5022,16 +5043,27 @@ const SettingsWorkspace = () => {
                 className="npcink-v3-settings-wide"
               >
                 <Select
-                  mode="tags"
+                  mode="multiple"
                   showSearch
-                  tokenSeparators={[",", "，", "\n"]}
                   options={departmentSelectOptions(form.getFieldValue("departments") || [])}
                   tagRender={departmentTagRender}
                   onChange={(value) => form.setFieldValue("departments", normalizeDepartmentList(value))}
-                  placeholder="输入部门名称后回车，例如：财务部"
+                  placeholder="已维护的部门"
                   popupMatchSelectWidth={false}
                 />
               </Form.Item>
+              <div className="npcink-v3-settings-wide npcink-v3-department-add-row">
+                <Input
+                  value={newDepartment}
+                  maxLength={80}
+                  placeholder="输入新部门名称，例如：财务部"
+                  onChange={(event) => setNewDepartment(event.target.value)}
+                  onPressEnter={addDepartment}
+                />
+                <Button type="primary" icon={<PlusOutlined />} onClick={addDepartment}>
+                  添加部门
+                </Button>
+              </div>
             </div>
           </div>
           <div className="npcink-v3-settings-section npcink-v3-danger-section">
@@ -5049,8 +5081,9 @@ const SettingsWorkspace = () => {
             </div>
           </div>
           <div className="npcink-v3-settings-actions">
+            {hasUnsavedChanges ? <Text type="warning">有未保存的更改</Text> : null}
             <Button type="primary" htmlType="submit" disabled={settingsQuery.isError || settingsQuery.isLoading} loading={settingsMutation.isLoading}>
-              保存设置
+              {hasUnsavedChanges ? "保存设置（含部门变更）" : "保存设置"}
             </Button>
           </div>
         </Form>

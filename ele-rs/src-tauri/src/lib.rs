@@ -23,6 +23,8 @@ use config::{clear_config, read_config, validate_config, write_config, AgentConf
 const APP_NAME: &str = "Npcink Device Agent";
 const APP_LOG_FILE: &str = "app.log";
 const APP_LOG_MAX_BYTES: u64 = 1024 * 1024;
+const SNAPSHOT_CACHE_FILE: &str = "upload-snapshot.json";
+const SNAPSHOT_CACHE_TTL: Duration = Duration::from_secs(600);
 const DIAGNOSTICS_LOG_TAIL_BYTES: u64 = 256 * 1024;
 const DIAGNOSTICS_COMMAND_TIMEOUT: Duration = Duration::from_secs(12);
 const DIAGNOSTICS_PROGRESS_EVENT: &str = "diagnostics-progress";
@@ -31,7 +33,7 @@ const MENU_CHECK_UPDATE: &str = "check_for_updates";
 const MENU_CHECK_UPDATE_EVENT: &str = "desktop-check-update";
 const MENU_OPEN_PROJECT: &str = "open_project_url";
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct DeviceSnapshot {
     data: Value,
     device_identity_type: String,
@@ -133,12 +135,47 @@ async fn collect_device_snapshot() -> Result<DeviceSnapshot, String> {
     }
 }
 
+#[tauri::command]
+fn get_cached_device_snapshot() -> Result<Option<DeviceSnapshot>, String> {
+    let path = app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join(SNAPSHOT_CACHE_FILE);
+    if !path.exists() {
+        return Ok(None);
+    }
+    if let Ok(modified_at) = fs::metadata(&path).and_then(|metadata| metadata.modified()) {
+        if modified_at.elapsed().unwrap_or(SNAPSHOT_CACHE_TTL) > SNAPSHOT_CACHE_TTL {
+            return Ok(None);
+        }
+    }
+    let raw = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    serde_json::from_str(&raw)
+        .map(Some)
+        .map_err(|error| format!("缓存快照格式无效：{error}"))
+}
+
 fn collect_device_snapshot_inner() -> Result<DeviceSnapshot, String> {
-    match collector::collect_static_data() {
+    let started_at = Instant::now();
+    match collector::collect_upload_data() {
         Ok(data) => {
             let (device_identity_type, device_identity) =
                 collector::hardware_identity_v2(&data).unwrap_or(("", String::new()));
-            write_app_log("info", "device.collect_static_succeeded", "");
+            write_app_log(
+                "info",
+                "device.collect_upload_succeeded",
+                &format!("elapsed_ms={}", started_at.elapsed().as_millis()),
+            );
+            if let Err(error) = write_cached_device_snapshot(&DeviceSnapshot {
+                data: data.clone(),
+                device_identity_type: device_identity_type.to_string(),
+                device_identity: device_identity.clone(),
+            }) {
+                write_app_log(
+                    "warn",
+                    "device.snapshot_cache_write_failed",
+                    &error.to_string(),
+                );
+            }
             Ok(DeviceSnapshot {
                 data,
                 device_identity_type: device_identity_type.to_string(),
@@ -151,6 +188,15 @@ fn collect_device_snapshot_inner() -> Result<DeviceSnapshot, String> {
             Err(message)
         }
     }
+}
+
+fn write_cached_device_snapshot(snapshot: &DeviceSnapshot) -> Result<()> {
+    let directory = app_data_dir()?;
+    fs::create_dir_all(&directory)?;
+    let path = directory.join(SNAPSHOT_CACHE_FILE);
+    let raw = serde_json::to_string(snapshot)?;
+    fs::write(path, raw)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -186,9 +232,9 @@ fn get_runtime_history(range_minutes: Option<u64>) -> Value {
 }
 
 #[tauri::command]
-async fn submit_device_data(config: AgentConfig) -> Result<Value, String> {
+async fn submit_device_data(config: AgentConfig, data: Value) -> Result<Value, String> {
     let result =
-        tauri::async_runtime::spawn_blocking(move || submit_device_data_inner(config)).await;
+        tauri::async_runtime::spawn_blocking(move || submit_device_data_inner(config, data)).await;
     match result {
         Ok(response) => response,
         Err(error) => {
@@ -199,29 +245,25 @@ async fn submit_device_data(config: AgentConfig) -> Result<Value, String> {
     }
 }
 
-fn submit_device_data_inner(config: AgentConfig) -> Result<Value, String> {
+fn submit_device_data_inner(config: AgentConfig, data: Value) -> Result<Value, String> {
     if let Err(error) = validate_config(&config) {
         write_app_log("warn", "upload.validation_failed", &error);
         return Err(error);
     }
-    let data = match collector::collect_static_data() {
-        Ok(data) => data,
-        Err(error) => {
-            let message = error.to_string();
-            write_app_log("error", "upload.collect_failed", &message);
-            return Err(message);
-        }
-    };
-
+    let started_at = Instant::now();
     match upload::submit_v3(&config.site, &config.name, &config.token, &data) {
         Ok(response) => {
             write_app_log(
                 "info",
                 "upload.succeeded",
                 &format!(
-                    "name_present={} site={}",
+                    "name_present={} site={} elapsed_ms={} payload_bytes={}",
                     !config.name.trim().is_empty(),
                     redact_url_for_log(&config.site),
+                    started_at.elapsed().as_millis(),
+                    serde_json::to_vec(&data)
+                        .map(|body| body.len())
+                        .unwrap_or_default(),
                 ),
             );
             Ok(response)
@@ -325,6 +367,7 @@ pub fn run() {
             clear_saved_config,
             verify_upload_config,
             collect_device_snapshot,
+            get_cached_device_snapshot,
             collect_runtime_status,
             get_runtime_history,
             submit_device_data,

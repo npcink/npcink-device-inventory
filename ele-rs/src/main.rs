@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use npcink_device_agent::{collector, upload};
 use std::env;
+use std::time::Instant;
 
 fn main() -> Result<()> {
     let args = env::args().skip(1).collect::<Vec<_>>();
@@ -8,6 +9,7 @@ fn main() -> Result<()> {
 
     match command {
         "inspect" => inspect(&args[1..]),
+        "upload-inspect" => upload_inspect(&args[1..]),
         "runtime" => runtime(&args[1..]),
         "device-id" => device_id(),
         "submit" => submit(&args[1..]),
@@ -33,6 +35,21 @@ fn runtime(args: &[String]) -> Result<()> {
 fn inspect(args: &[String]) -> Result<()> {
     let pretty = args.iter().any(|arg| arg == "--pretty");
     let data = collector::collect_static_data()?;
+    if pretty {
+        println!("{}", serde_json::to_string_pretty(&data)?);
+    } else {
+        println!("{}", serde_json::to_string(&data)?);
+    }
+    Ok(())
+}
+
+fn upload_inspect(args: &[String]) -> Result<()> {
+    let pretty = args.iter().any(|arg| arg == "--pretty");
+    let started_at = Instant::now();
+    let data = collector::collect_upload_data()?;
+    let elapsed_ms = started_at.elapsed().as_millis();
+    let payload_bytes = serde_json::to_vec(&data)?.len();
+    eprintln!("upload-light collection: elapsed_ms={elapsed_ms} payload_bytes={payload_bytes}");
     if pretty {
         println!("{}", serde_json::to_string_pretty(&data)?);
     } else {
@@ -82,6 +99,7 @@ fn print_help() {
         "Npcink Device Agent\n\n\
 Commands:\n\
   inspect [--pretty]    Print compatible hardware JSON\n\
+  upload-inspect [--pretty]  Print the lightweight upload JSON and timing\n\
   runtime [--pretty]    Print runtime monitor JSON\n\
   device-id             Print the canonical or fallback device identity\n\
   submit --site URL --token TOKEN [--note NOTE]            Submit to device observation endpoint\n"

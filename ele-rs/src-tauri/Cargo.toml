@@ -1,6 +1,6 @@
 [package]
 name = "npcink-device-agent-desktop"
-version = "0.4.1"
+version = "0.4.2"
 description = "Npcink Device Agent desktop shell"
 authors = ["Npcink"]
 edition = "2021"

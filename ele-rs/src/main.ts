@@ -2343,7 +2343,10 @@ submitButton.addEventListener("click", async () => {
     if (!saved) {
       return;
     }
-    const response = await invoke<SubmitDeviceResponse>("submit_device_data", { config: getConfig() });
+    const response = await invoke<SubmitDeviceResponse>("submit_device_data", {
+      config: getConfig(),
+      data: snapshot.data,
+    });
     lastSubmittedAt = new Date();
     lastSubmittedConfigLabel = configLabel();
     renderSubmitMeta();
@@ -2418,6 +2421,16 @@ const bootstrap = async () => {
     setToast(loadConfigError, "error");
   }
 
+  try {
+    const cachedSnapshot = await invoke<DeviceSnapshot | null>("get_cached_device_snapshot");
+    if (cachedSnapshot) {
+      snapshot = cachedSnapshot;
+      collectStateText.textContent = "已加载缓存，正在刷新";
+      renderAll();
+    }
+  } catch (error) {
+    console.warn("cached snapshot load failed", error);
+  }
   await collect({ preserveToast: Boolean(loadConfigError) });
   if (loadConfigError && collectStateText.textContent === "已采集") {
     setToast(loadConfigError, "error");
