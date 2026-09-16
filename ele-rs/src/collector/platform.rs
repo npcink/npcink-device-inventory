@@ -28,9 +28,6 @@ pub(crate) fn hardware_uuid() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn enrich_impl(root: &mut Map<String, Value>) {
-    if let Some(value) = powershell_json("Get-CimInstance Win32_BIOS | Select-Object Manufacturer,SMBIOSBIOSVersion,SerialNumber,ReleaseDate,Version") {
-        root.insert("bios".to_string(), normalize_windows_bios(&value));
-    }
     enrich_identity(root);
     if let Some(value) = powershell_json("Get-NetIPConfiguration -All -ErrorAction SilentlyContinue | Select-Object InterfaceAlias,InterfaceIndex,@{Name='IPv4DefaultGateway';Expression={$_.IPv4DefaultGateway.NextHop}},@{Name='IPv6DefaultGateway';Expression={$_.IPv6DefaultGateway.NextHop}},@{Name='DnsServers';Expression={$_.DNSServer.ServerAddresses}},@{Name='Dhcp';Expression={$_.NetIPv4Interface.Dhcp}}") {
         enrich_windows_network_configuration(root, &value);
@@ -56,7 +53,7 @@ fn enrich_impl(root: &mut Map<String, Value>) {
             root.insert("diskLayout".to_string(), disks);
         }
     }
-    enrich_windows_media_with(root, powershell_identity_json);
+    enrich_windows_summary_with(root, powershell_identity_json);
     insert_empty_if_missing(root, "bios");
     insert_empty_if_missing(root, "baseboard");
     insert_empty_if_missing(root, "chassis");
@@ -65,25 +62,31 @@ fn enrich_impl(root: &mut Map<String, Value>) {
     insert_array_if_missing(root, "networkHardware");
 }
 
-// Ordinary uploads include the hardware that the overview promises to show.
+// Ordinary uploads include the hardware that the local summary promises to show.
 pub(crate) fn enrich_upload(root: &mut Map<String, Value>) {
     enrich_identity(root);
     #[cfg(target_os = "windows")]
-    enrich_windows_media_with(root, powershell_identity_json);
+    enrich_windows_summary_with(root, powershell_identity_json);
     #[cfg(target_os = "macos")]
     {
         let started = std::time::Instant::now();
         let value = command_json(
             "system_profiler",
-            &["-json", "SPDisplaysDataType", "SPPowerDataType"],
+            &[
+                "-json",
+                "SPHardwareDataType",
+                "SPDisplaysDataType",
+                "SPPowerDataType",
+            ],
         );
         if let Some(value) = &value {
-            enrich_macos_system_profiler(root, value);
+            enrich_macos_bios(root, value);
+            enrich_macos_media(root, value);
         }
         root.insert(
             "hardwareProbeAttempts".into(),
             json!([{
-                "source": "system_profiler_displays_power",
+                "source": "system_profiler_hardware_displays_power",
                 "status": if value.is_some() { "ok" } else { "failed" },
                 "elapsedMs": started.elapsed().as_millis() as u64,
             }]),
@@ -92,7 +95,7 @@ pub(crate) fn enrich_upload(root: &mut Map<String, Value>) {
 }
 
 #[cfg(any(target_os = "windows", test))]
-fn enrich_windows_media_with(
+fn enrich_windows_summary_with(
     root: &mut Map<String, Value>,
     mut query: impl FnMut(&str) -> Result<Value, String>,
 ) {
@@ -124,6 +127,10 @@ fn enrich_windows_media_with(
     let monitors = read("monitor_edid", "Get-CimInstance -Namespace root\\wmi -ClassName WmiMonitorID -ErrorAction Stop | Select-Object InstanceName,Active,ManufacturerName,UserFriendlyName,SerialNumberID,YearOfManufacture,WeekOfManufacture");
     let desktop = read("desktop_monitors", "Get-CimInstance Win32_DesktopMonitor -ErrorAction Stop | Select-Object PNPDeviceID,Name,MonitorManufacturer,MonitorType,ScreenWidth,ScreenHeight,Status");
     let batteries = read("batteries", "Get-CimInstance Win32_Battery -ErrorAction Stop | Select-Object Name,DeviceID,Status,BatteryStatus,Chemistry,DesignCapacity,FullChargeCapacity,EstimatedChargeRemaining,EstimatedRunTime,DesignVoltage");
+    let bios = read("bios", "Get-CimInstance Win32_BIOS -ErrorAction Stop | Select-Object Manufacturer,SMBIOSBIOSVersion,SerialNumber,ReleaseDate,Version");
+    if let Some(bios) = value_items(&bios).first() {
+        root.insert("bios".into(), normalize_windows_bios(bios));
+    }
     root.insert(
         "graphics".into(),
         json!({
@@ -372,7 +379,6 @@ fn enrich_macos_system_profiler(root: &mut Map<String, Value>, value: &Value) {
         let platform_uuid = string_field(hardware, "platform_UUID");
         let chip_type = string_field(hardware, "chip_type");
         let physical_memory = string_field(hardware, "physical_memory");
-        let boot_rom_version = string_field(hardware, "boot_rom_version");
 
         root.insert(
             "system".to_string(),
@@ -397,16 +403,31 @@ fn enrich_macos_system_profiler(root: &mut Map<String, Value>, value: &Value) {
                 "chip": chip_type,
             }),
         );
+    }
+    enrich_macos_bios(root, value);
+    enrich_macos_media(root, value);
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn enrich_macos_bios(root: &mut Map<String, Value>, value: &Value) {
+    if let Some(hardware) = value
+        .get("SPHardwareDataType")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+    {
         root.insert(
-            "bios".to_string(),
+            "bios".into(),
             json!({
                 "vendor": "Apple",
-                "version": boot_rom_version,
-                "serial": serial_number,
+                "version": string_value(hardware, "boot_rom_version"),
+                "serial": string_value(hardware, "serial_number"),
             }),
         );
     }
+}
 
+#[cfg(target_os = "macos")]
+fn enrich_macos_media(root: &mut Map<String, Value>, value: &Value) {
     if let Some(displays) = value.get("SPDisplaysDataType").and_then(Value::as_array) {
         let controllers = displays
             .iter()
@@ -521,7 +542,7 @@ fn powershell_utf8_command(command: &str) -> String {
     format!("{WINDOWS_POWERSHELL_UTF8_PREAMBLE}{command}")
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn normalize_windows_bios(value: &Value) -> Value {
     json!({
         "vendor": value_text(value, "Manufacturer"),
@@ -1331,16 +1352,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ordinary_upload_keeps_graphics_battery_and_identity_when_edid_fails() {
+    fn ordinary_upload_keeps_bios_graphics_battery_and_identity_when_edid_fails() {
         let data = super::super::collect_upload_data_with(|root| {
             root.insert("uuid".into(), json!({"hardware": "9e9738c7-0418-fb17-af0e-345a601d798b"}));
-            enrich_windows_media_with(root, |command| {
+            enrich_windows_summary_with(root, |command| {
+                if command.contains("Win32_BIOS") { return Ok(json!({"Manufacturer": "AMI", "SMBIOSBIOSVersion": "1.20", "SerialNumber": "Default string"})); }
                 if command.contains("Win32_VideoController") { return Ok(json!({"Name": "Test GPU", "DriverVersion": "1.2", "CurrentHorizontalResolution": 1920, "CurrentVerticalResolution": 1080})); }
                 if command.contains("WmiMonitorID") { return Err("query_failed".into()); }
                 if command.contains("Win32_DesktopMonitor") { return Ok(json!({"PNPDeviceID": "DISPLAY\\TEST\\1", "Name": "Test monitor", "ScreenWidth": 1920, "ScreenHeight": 1080})); }
                 Ok(json!({"Name": "Laptop battery", "EstimatedChargeRemaining": 0, "DesignCapacity": 50000, "FullChargeCapacity": 40000}))
             });
         }).unwrap();
+        assert_eq!(data["bios"]["vendor"], "AMI");
+        assert_eq!(data["bios"]["version"], "1.20");
         assert_eq!(data["graphics"]["controllers"][0]["model"], "Test GPU");
         assert_eq!(data["graphics"]["displays"][0]["model"], "Test monitor");
         assert_eq!(data["graphics"]["displays"][0]["currentResX"], 1920);
@@ -1348,6 +1372,7 @@ mod tests {
         assert_eq!(data["battery"][0]["healthPercent"], 80.0);
         assert_eq!(data["hardwareProbeAttempts"][1]["status"], "failed");
         let upload = crate::upload::build_observation_v3("test", &data).unwrap();
+        assert_eq!(upload["asset"]["hardware"]["bios"], data["bios"]);
         assert_eq!(upload["asset"]["hardware"]["graphics"], data["graphics"]);
         assert_eq!(upload["asset"]["hardware"]["battery"], data["battery"]);
         assert_eq!(super::super::hardware_identities_v2(&data).len(), 1);
@@ -1360,7 +1385,7 @@ mod tests {
             "uuid".into(),
             json!({"hardware": "9e9738c7-0418-fb17-af0e-345a601d798b"}),
         );
-        enrich_windows_media_with(&mut root, |command| {
+        enrich_windows_summary_with(&mut root, |command| {
             if command.contains("Win32_Battery") {
                 Ok(json!([]))
             } else {
@@ -1371,7 +1396,25 @@ mod tests {
         assert_eq!(data["graphics"], json!({"controllers": [], "displays": []}));
         assert_eq!(data["battery"], json!([]));
         assert_eq!(data["hardwareProbeAttempts"][3]["status"], "empty");
+        assert_eq!(data["hardwareProbeAttempts"][4]["status"], "failed");
+        assert!(data.get("bios").is_none());
         assert!(crate::upload::build_observation_v3("test", &data).is_ok());
+    }
+
+    #[test]
+    fn macos_firmware_summary_preserves_existing_identity_facts() {
+        let mut root = Map::new();
+        root.insert("system".into(), json!({"uuid": "existing-system"}));
+        root.insert("baseboard".into(), json!({"serial": "existing-board"}));
+        enrich_macos_bios(
+            &mut root,
+            &json!({"SPHardwareDataType": [{
+                "boot_rom_version": "123.4", "serial_number": "new-serial", "platform_UUID": "new-uuid"
+            }]}),
+        );
+        assert_eq!(root["bios"]["version"], "123.4");
+        assert_eq!(root["system"]["uuid"], "existing-system");
+        assert_eq!(root["baseboard"]["serial"], "existing-board");
     }
 
     #[test]

@@ -169,13 +169,7 @@ type SubmitDeviceResponse = {
   asset?: SubmitDeviceAsset;
 };
 
-type OverviewRow = {
-  label: string;
-  value: string;
-  wide?: boolean;
-};
-
-type TabId = "settings" | "overview" | "runtime" | "diagnostics" | "details";
+type TabId = "settings" | "runtime" | "diagnostics" | "details";
 
 type DesktopDownload = {
   label?: string;
@@ -212,7 +206,6 @@ app.innerHTML = `
         </div>
         <nav class="tabs" role="tablist" aria-label="页面">
           <button class="tab active" id="settingsTab" data-tab="settings" type="button" role="tab" aria-selected="true" aria-controls="settingsPage">设置</button>
-          <button class="tab" id="overviewTab" data-tab="overview" type="button" role="tab" aria-selected="false" aria-controls="overviewPage">概览</button>
           <button class="tab" id="runtimeTab" data-tab="runtime" type="button" role="tab" aria-selected="false" aria-controls="runtimePage">运行</button>
           <button class="tab" id="diagnosticsTab" data-tab="diagnostics" type="button" role="tab" aria-selected="false" aria-controls="diagnosticsPage">排障</button>
           <button class="tab" id="detailsTab" data-tab="details" type="button" role="tab" aria-selected="false" aria-controls="detailsPage">技术详情</button>
@@ -277,10 +270,6 @@ app.innerHTML = `
             </div>
           </div>
         </div>
-      </section>
-
-      <section class="tab-page" id="overviewPage" role="tabpanel" aria-labelledby="overviewTab" hidden>
-        <div class="overview-grid" id="overviewGrid"></div>
       </section>
 
       <section class="tab-page" id="runtimePage" role="tabpanel" aria-labelledby="runtimeTab" hidden>
@@ -448,7 +437,6 @@ const closeSubmitResultButton = document.querySelector<HTMLButtonElement>("#clos
 const collectState = document.querySelector<HTMLElement>("#collectState")!;
 const collectStateText = document.querySelector<HTMLElement>("#collectStateText")!;
 const toast = document.querySelector<HTMLElement>("#toast")!;
-const overviewGrid = document.querySelector<HTMLElement>("#overviewGrid")!;
 const settingsSummaryList = document.querySelector<HTMLElement>("#settingsSummaryList")!;
 const runtimeCollectedAt = document.querySelector<HTMLElement>("#runtimeCollectedAt")!;
 const runtimeGrid = document.querySelector<HTMLElement>("#runtimeGrid")!;
@@ -703,29 +691,28 @@ const modelWithVendor = (vendor: unknown, model: unknown) => {
 
 const graphicsLabel = (data: Record<string, unknown>) => {
   const controllers = listItems(asRecord(data.graphics).controllers);
-  const primary = controllers.length ? asRecord(controllers[0]) : {};
-  const label = modelWithVendor(
-    firstPresent(primary, ["vendor", "Vendor"]),
-    firstPresent(primary, ["model", "Name"]),
-  );
-  const vram = formatBytes(firstPresent(primary, ["vram", "AdapterRAM"]));
-  if (!label) {
-    return "未采集";
-  }
-  return vram === "未采集" ? label : `${label} ${vram}`;
+  return uniqueTexts(controllers.map((item) => {
+    const controller = asRecord(item);
+    return modelWithVendor(
+      firstPresent(controller, ["vendor", "Vendor"]),
+      firstPresent(controller, ["model", "Name"]),
+    );
+  })).join("\n") || "未采集";
 };
 
 const displayLabel = (data: Record<string, unknown>) => {
   const displays = listItems(asRecord(data.graphics).displays);
-  const primary = displays.length ? asRecord(displays[0]) : {};
-  const model = displayValue(primary.model || primary.name, "");
-  const resolution = displayValue(
-    primary.resolution ||
-      (primary.currentResX && primary.currentResY ? `${primary.currentResX} x ${primary.currentResY}` : "") ||
-      (primary.resolutionX && primary.resolutionY ? `${primary.resolutionX} x ${primary.resolutionY}` : ""),
-    "",
-  );
-  return joinUnique([model, resolution]);
+  return displays.map((item) => {
+    const display = asRecord(item);
+    const model = displayValue(display.model || display.name, "");
+    const resolution = displayValue(
+      display.resolution ||
+        (display.currentResX && display.currentResY ? `${display.currentResX} x ${display.currentResY}` : "") ||
+        (display.resolutionX && display.resolutionY ? `${display.resolutionX} x ${display.resolutionY}` : ""),
+      "",
+    );
+    return joinUnique([model, resolution]);
+  }).filter(Boolean).join("\n") || "未采集";
 };
 
 const listRow = (label: string, values: unknown[]) => {
@@ -1305,48 +1292,10 @@ const switchTab = (tab: TabId) => {
   });
 };
 
-const overviewRows = (): OverviewRow[] => {
-  const data = snapshot?.data ?? {};
-  const cpu = asRecord(data.cpu);
-  const os = asRecord(data.os);
-  const firstNet = primaryNetwork(data.net);
-  const memoryType = firstText(data, ["memory.0.type", "memLayout.0.type"], "");
-  const memorySize = formatBytes(sumSizes(data.memory) || sumSizes(data.memLayout) || asRecord(data.mem).total);
-  const ip = displayValue(firstNet.ip4 || firstNet.ip6);
-  const iface = displayValue(firstNet.ifaceName || firstNet.iface, "");
-  const rows = [
-    { label: "使用人", value: nameInput.value.trim() || "未填写" },
-    { label: "电脑名称", value: firstText(data, ["os.hostname", "system.model"], "未采集"), wide: true },
-    { label: "系统", value: systemLabel(os.distro, os.release), wide: true },
-    { label: "内存", value: [memoryType, memorySize].filter(Boolean).join(" ") },
-    {
-      label: "处理器",
-      value: [cpu.manufacturer, cpu.brand].filter(Boolean).join(" ") || "未采集",
-      wide: true,
-    },
-    { label: "硬盘", value: formatBytes(sumSizes(data.diskLayout)) },
-    { label: "显卡", value: graphicsLabel(data), wide: true },
-    { label: "主板", value: baseboardLabel(data) },
-    { label: "BIOS", value: biosLabel(data) },
-    {
-      label: "当前 IP",
-      value: iface ? `${ip} (${iface})` : ip,
-      wide: true,
-    },
-  ];
-  const display = displayLabel(data);
-  if (display) {
-    rows.push({ label: "显示器", value: display });
-  }
-  return rows;
-};
-
 const settingsSummaryRows = () => {
   const data = snapshot?.data ?? {};
   const cpu = asRecord(data.cpu);
   const os = asRecord(data.os);
-  const system = asRecord(data.system);
-  const baseboard = asRecord(data.baseboard);
   const firstNet = primaryNetwork(data.net);
   const memoryType = firstText(data, ["memory.0.type", "memLayout.0.type"], "");
   const memorySize = formatBytes(sumSizes(data.memory) || sumSizes(data.memLayout) || asRecord(data.mem).total);
@@ -1355,20 +1304,15 @@ const settingsSummaryRows = () => {
 
   return [
     { label: "电脑名称", value: firstText(data, ["os.hostname", "system.model"], "未采集") },
-    { label: "系统", value: systemLabel(os.distro, os.release) },
+    { label: "操作系统", value: systemLabel(os.distro, os.release) },
     { label: "处理器", value: joinUnique([cpu.manufacturer, cpu.brand]) || "未采集" },
     { label: "内存", value: [memoryType, memorySize].filter(Boolean).join(" ") },
+    { label: "显卡", value: graphicsLabel(data) },
     { label: "硬盘", value: formatBytes(sumSizes(data.diskLayout)) },
-    {
-      label: "主板型号",
-      value:
-        joinUnique([
-          firstPresent(baseboard, ["product", "Product"]),
-          firstPresent(baseboard, ["model", "Model"]),
-          firstPresent(system, ["model", "Model"]),
-        ]) || "未采集",
-    },
+    { label: "主板型号", value: baseboardLabel(data) },
+    { label: "BIOS", value: biosLabel(data) },
     { label: "当前 IP", value: iface ? `${ip} (${iface})` : ip },
+    { label: "显示器", value: displayLabel(data) },
   ];
 };
 
@@ -1791,19 +1735,6 @@ const renderRuntimeHistory = (
   window.requestAnimationFrame(() => renderRuntimeCharts(chart, metrics));
 };
 
-const renderOverview = () => {
-  overviewGrid.innerHTML = overviewRows()
-    .map(
-      (item) => `
-        <article class="summary-tile ${item.wide ? "wide" : ""}">
-          <span>${escapeHtml(item.label)}</span>
-          <strong>${escapeHtml(item.value)}</strong>
-        </article>
-      `,
-    )
-    .join("");
-};
-
 const hasBatteryData = (value: unknown) => listItems(value).some((item) =>
   ["name", "manufacturer", "serial", "healthPercent", "chargePercent", "cycleCount", "condition", "status"].some((key) => {
     const field = asRecord(item)[key];
@@ -1838,7 +1769,6 @@ const renderDetail = () => {
 };
 
 const renderAll = () => {
-  renderOverview();
   renderSettingsSummary();
   renderDetail();
   renderSubmitMeta();
