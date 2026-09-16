@@ -835,7 +835,7 @@ const renderHumanDetail = (key: string, data: Record<string, unknown>) => {
       const hasControllers = listItems(graphics.controllers).length > 0;
       const hasDisplays = listItems(graphics.displays).length > 0;
       const controllers = hasControllers ? listSections("显卡", graphics.controllers, (item) => [
-        row("型号", joinUnique([firstPresent(item, ["vendor", "Vendor"]), firstPresent(item, ["model", "Name"])])),
+        row("型号", modelWithVendor(firstPresent(item, ["vendor", "Vendor"]), firstPresent(item, ["model", "Name"]))),
         row("显存", formatBytes(firstPresent(item, ["vram", "AdapterRAM"]))),
         row("视频处理器", firstPresent(item, ["videoProcessor", "VideoProcessor"])),
         row("驱动版本", firstPresent(item, ["driverVersion", "DriverVersion"])),

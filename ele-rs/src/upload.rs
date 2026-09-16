@@ -398,7 +398,17 @@ fn graphics_label(data: &Value) -> String {
     data.pointer("/graphics/controllers")
         .and_then(Value::as_array)
         .and_then(|items| items.first())
-        .map(|item| join_non_empty(&[string_field(item, "vendor"), string_field(item, "model")]))
+        .map(|item| {
+            let vendor = string_field(item, "vendor");
+            let model = string_field(item, "model");
+            let vendor = vendor.trim();
+            let model = model.trim();
+            if vendor.is_empty() || model.to_lowercase().starts_with(&vendor.to_lowercase()) {
+                model.to_string()
+            } else {
+                join_non_empty(&[vendor.to_string(), model.to_string()])
+            }
+        })
         .unwrap_or_default()
 }
 
@@ -523,6 +533,41 @@ mod tests {
             .to_string();
         assert!(error.contains("授权码无效、已禁用或签名校验失败"));
         assert!(error.contains("技术详情：Device token is invalid."));
+    }
+
+    #[test]
+    fn graphics_summary_does_not_repeat_vendor_or_change_raw_hardware() {
+        for (vendor, model, expected) in [
+            (
+                "NVIDIA",
+                "NVIDIA GeForce GTX 1650",
+                "NVIDIA GeForce GTX 1650",
+            ),
+            (
+                "Intel(R)",
+                "Intel(R) Iris(R) Xe Graphics",
+                "Intel(R) Iris(R) Xe Graphics",
+            ),
+            (
+                " nvidia ",
+                " NVIDIA GeForce GTX 1650 ",
+                "NVIDIA GeForce GTX 1650",
+            ),
+            ("AMD", "Radeon RX 6600", "AMD Radeon RX 6600"),
+            ("", "Test GPU", "Test GPU"),
+            ("NVIDIA", "", "NVIDIA"),
+        ] {
+            let data = json!({
+                "uuid": {"hardware": "9e9738c7-0418-fb17-af0e-345a601d798b"},
+                "graphics": {"controllers": [{"vendor": vendor, "model": model}]}
+            });
+            let observation = build_observation_v3("", &data).unwrap();
+            assert_eq!(observation["asset"]["summary"]["graphics"], expected);
+            assert_eq!(
+                observation["asset"]["hardware"]["graphics"],
+                data["graphics"]
+            );
+        }
     }
 
     #[test]
