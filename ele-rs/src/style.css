@@ -530,6 +530,13 @@ textarea:focus-visible {
   font-size: 24px;
 }
 
+.runtime-support-note {
+  margin: 2px 0 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .runtime-history {
   display: grid;
   gap: 12px;
@@ -1095,6 +1102,10 @@ textarea:focus-visible {
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 20px;
+}
+
+.diagnostics-panel > .button {
+  margin-top: 18px;
 }
 
 .diagnostics-button {

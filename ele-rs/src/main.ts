@@ -287,6 +287,7 @@ app.innerHTML = `
             <strong id="runtimeCollectedAt">等待监控</strong>
           </div>
           <div class="runtime-grid runtime-page-grid" id="runtimeGrid"></div>
+          <p class="runtime-support-note" id="runtimeSupportNote" hidden>当前设备未提供温度、功耗和 GPU 使用率接口，已隐藏这些项目；CPU、内存、磁盘和网络基础监控仍可用。若需要进一步确认，请到“排障”页导出硬件信息或生成深度排障包。</p>
           <section class="runtime-history" aria-label="监控历史">
             <div class="runtime-history-head">
               <span>会话监控</span>
@@ -1303,14 +1304,14 @@ const settingsSummaryRows = () => {
   const iface = displayValue(firstNet.ifaceName || firstNet.iface, "");
 
   return [
-    { label: "电脑名称", value: firstText(data, ["os.hostname", "system.model"], "未采集") },
+    { label: "主板型号", value: baseboardLabel(data) },
     { label: "操作系统", value: systemLabel(os.distro, os.release) },
     { label: "处理器", value: joinUnique([cpu.manufacturer, cpu.brand]) || "未采集" },
     { label: "内存", value: [memoryType, memorySize].filter(Boolean).join(" ") },
     { label: "显卡", value: graphicsLabel(data) },
-    { label: "BIOS", value: biosLabel(data) },
-    { label: "主板型号", value: baseboardLabel(data) },
     { label: "硬盘", value: formatBytes(sumSizes(data.diskLayout)) },
+    { label: "电脑名称", value: firstText(data, ["os.hostname", "system.model"], "未采集") },
+    { label: "BIOS", value: biosLabel(data) },
     { label: "当前 IP", value: iface ? `${ip} (${iface})` : ip },
     { label: "显示器", value: displayLabel(data) },
   ];
@@ -1374,7 +1375,7 @@ const runtimeRows = (status: RuntimeStatus | null) => {
         },
       ];
 
-  return [
+  const basicRows = [
     { label: "CPU", value: status ? formatPercent(status.cpu?.usage_percent) : "等待监控" },
     {
       label: "内存",
@@ -1384,20 +1385,29 @@ const runtimeRows = (status: RuntimeStatus | null) => {
       label: `磁盘${diskMount}`,
       value: status ? `${formatBytes(diskUsed)} / ${formatBytes(diskTotal)}` : "等待监控",
     },
-    {
+  ];
+  if (primaryTemperature || advanced?.available || !status) {
+    basicRows.push({
       label: "温度",
       value: primaryTemperature
         ? `${primaryTemperature.label || "传感器"} ${primaryTemperature.temperature_c?.toFixed(1)} C`
         : advanced?.available
           ? "未采集"
-          : "当前系统暂不支持",
-    },
-    ...advancedRows,
-  ];
+          : "等待监控",
+    });
+  }
+  if (advanced?.available || !status) {
+    basicRows.push(...advancedRows);
+  }
+  return basicRows;
 };
 
 const renderRuntimeStatus = (status: RuntimeStatus | null) => {
   runtimeCollectedAt.textContent = status?.collected_at ? `更新 ${formatClock(new Date(status.collected_at))}` : "等待监控";
+  const runtimeSupportNote = document.querySelector<HTMLElement>("#runtimeSupportNote");
+  if (runtimeSupportNote) {
+    runtimeSupportNote.hidden = !status || Boolean(status.temperatures?.length) || Boolean(status.advanced?.available);
+  }
   runtimeGrid.innerHTML = runtimeRows(status)
     .map(
       (item) => `
