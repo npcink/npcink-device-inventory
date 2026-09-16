@@ -56,8 +56,12 @@ jobs:
         working-directory: .
 
   desktop:
-    name: Desktop quality
-    runs-on: ubuntu-latest
+    name: Desktop quality (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
@@ -70,6 +74,7 @@ jobs:
           toolchain: 1.96.0
           components: rustfmt, clippy
       - name: Install Tauri Linux dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --yes libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf

@@ -18,6 +18,17 @@ function npcink_identity_assert($condition, $message)
 }
 
 $service = new Npcink_Device_Inventory_Device_Identity_Service();
+// Device 135 real board/NIC evidence; CPU name is a representative CIM value.
+$device135 = json_decode(file_get_contents(__DIR__ . '/../ele-rs/tests/fixtures/identity-135.json'), true);
+$device135_identity = $service->primary_identity(array('asset' => array('hardware' => array(
+    'hardwareUuid' => $device135['systemUuid'],
+    'baseboard' => array('manufacturer' => $device135['baseboard']['Manufacturer'], 'model' => $device135['baseboard']['Product'], 'serial' => $device135['baseboard']['SerialNumber']),
+    'processors' => array(array('name' => $device135['processor']['Name'])),
+    'network' => array('identityInterfaces' => array(array('pnpDeviceId' => $device135['adapter']['PnPDeviceID'], 'permanentAddress' => $device135['adapter']['PermanentAddress'], 'virtual' => false))),
+))));
+npcink_identity_assert($device135_identity['type'] === 'pci_permanent_mac_v2', '135 must use permanent PCI fallback');
+npcink_identity_assert($device135_identity['value'] === $device135['expectedIdentity'], '135 PHP and Rust identity must agree');
+
 $canonical_observation = array(
 	'_npcink_device' => array(
 		'device_uuid_v1' => 'client-value-must-not-be-trusted',

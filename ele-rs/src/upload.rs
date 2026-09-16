@@ -155,10 +155,28 @@ fn parse_submit_response(status: reqwest::StatusCode, text: String) -> Result<Va
         .with_context(|| format!("服务器返回成功状态 {status}，但响应格式不是有效 JSON"))
 }
 
-fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
-    crate::collector::hardware_identity_v2(data).context(
-        "missing device identity; check system UUID, motherboard serial, or permanent PCI MAC data",
-    )?;
+pub(crate) fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
+    if crate::collector::hardware_identity_v2(data).is_none() {
+        let diagnostics = crate::collector::identity_diagnostics(data);
+        let label = |key: &str| match diagnostics[key].as_str() {
+            Some("valid") => "有效",
+            Some("invalid_placeholder") => "厂家默认值或无效值",
+            _ => "未采集到",
+        };
+        let failed_queries = diagnostics["probeAttempts"]
+            .as_array()
+            .map_or(0, |attempts| {
+                attempts
+                    .iter()
+                    .filter(|attempt| attempt["status"] == "failed")
+                    .count()
+            });
+        bail!(
+            "无法生成设备身份，尚未上传。系统 UUID：{}；主板序列号：{}；主板厂商：{}；主板型号：{}；CPU 型号：{}；有效永久 PCI MAC：{} 个；查询失败：{} 项。请重新采集；若仍失败，请导出硬件反馈供管理员核对。",
+            label("systemUuid"), label("baseboardSerial"), label("baseboardManufacturer"),
+            label("baseboardModel"), label("processorModel"), diagnostics["permanentPciMacCount"], failed_queries
+        );
+    }
     let collector = object_at(data, "/collector");
     let collected_at = string_at(data, "/collector/collected_at");
     let system = value_at(data, "/system");

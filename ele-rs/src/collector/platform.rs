@@ -6,9 +6,11 @@ use std::process::Command;
 // without hidden adapters so a usable physical PCI NIC is not lost merely
 // because an unrelated virtual adapter reports an error.
 #[cfg(any(target_os = "windows", test))]
-const WINDOWS_NETWORK_HARDWARE_COMMANDS: [&str; 2] = [
+const WINDOWS_NETWORK_HARDWARE_COMMANDS: [&str; 4] = [
     "Get-NetAdapter -Physical -IncludeHidden -ErrorAction Stop | Where-Object { $_.Virtual -ne $true } | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual",
     "Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Virtual -ne $true } | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual",
+    "Get-NetAdapter -IncludeHidden -ErrorAction Stop | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual",
+    "Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetAdapter -ErrorAction Stop | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual",
 ];
 
 #[cfg(any(target_os = "windows", test))]
@@ -29,25 +31,7 @@ fn enrich_impl(root: &mut Map<String, Value>) {
     if let Some(value) = powershell_json("Get-CimInstance Win32_BIOS | Select-Object Manufacturer,SMBIOSBIOSVersion,SerialNumber,ReleaseDate,Version") {
         root.insert("bios".to_string(), normalize_windows_bios(&value));
     }
-    if let Some(value) = powershell_json(
-        "Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer,Product,SerialNumber,Version",
-    ) {
-        root.insert("baseboard".to_string(), normalize_windows_baseboard(&value));
-    }
-    if let Some(value) = powershell_json("Get-CimInstance Win32_Processor | Select-Object Name,Manufacturer,ProcessorId,UniqueId,SerialNumber,SocketDesignation,NumberOfCores,NumberOfLogicalProcessors,CurrentClockSpeed,MaxClockSpeed,ExtClock") {
-        root.insert(
-            "processorIdentity".to_string(),
-            normalize_windows_processor_identity(&value),
-        );
-        enrich_windows_cpu(root, &value);
-    }
-    let network_hardware = collect_windows_network_hardware();
-    if network_hardware
-        .as_array()
-        .is_some_and(|interfaces| !interfaces.is_empty())
-    {
-        root.insert("networkHardware".to_string(), network_hardware);
-    }
+    enrich_identity(root);
     if let Some(value) = powershell_json("Get-NetIPConfiguration -All -ErrorAction SilentlyContinue | Select-Object InterfaceAlias,InterfaceIndex,@{Name='IPv4DefaultGateway';Expression={$_.IPv4DefaultGateway.NextHop}},@{Name='IPv6DefaultGateway';Expression={$_.IPv6DefaultGateway.NextHop}},@{Name='DnsServers';Expression={$_.DNSServer.ServerAddresses}},@{Name='Dhcp';Expression={$_.NetIPv4Interface.Dhcp}}") {
         enrich_windows_network_configuration(root, &value);
     }
@@ -112,21 +96,111 @@ fn enrich_impl(root: &mut Map<String, Value>) {
     insert_array_if_missing(root, "networkHardware");
 }
 
-#[cfg(target_os = "windows")]
-fn collect_windows_network_hardware() -> Value {
-    for command in WINDOWS_NETWORK_HARDWARE_COMMANDS {
-        if let Some(value) = powershell_json(command) {
-            let interfaces = normalize_windows_network_hardware(&value);
-            if interfaces
-                .as_array()
-                .is_some_and(|interfaces| !interfaces.is_empty())
-            {
-                return interfaces;
+// Identity facts are required even when upload-light skips other inventories.
+pub(crate) fn enrich_identity(root: &mut Map<String, Value>) {
+    #[cfg(target_os = "windows")]
+    enrich_windows_identity_with(root, powershell_identity_json);
+    #[cfg(not(target_os = "windows"))]
+    let _ = root;
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn enrich_windows_identity_with(
+    root: &mut Map<String, Value>,
+    mut query: impl FnMut(&str) -> Result<Value, String>,
+) {
+    let mut attempts = Vec::new();
+    for (source, command) in [
+        ("baseboard", "Get-CimInstance Win32_BaseBoard -ErrorAction Stop | Select-Object Manufacturer,Product,SerialNumber,Version"),
+        ("processors", "Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object Name,Manufacturer,ProcessorId,UniqueId,SerialNumber,SocketDesignation,NumberOfCores,NumberOfLogicalProcessors,CurrentClockSpeed,MaxClockSpeed,ExtClock"),
+    ] {
+        match query(command) {
+            Ok(value) => {
+                attempts.push(json!({"source": source, "status": if value_items(&value).is_empty() { "empty" } else { "ok" }}));
+                if source == "baseboard" {
+                    if let Some(board) = value_items(&value).first() {
+                        root.insert("baseboard".into(), normalize_windows_baseboard(board));
+                    }
+                } else {
+                    root.insert("processorIdentity".into(), normalize_windows_processor_identity(&value));
+                    enrich_windows_cpu(root, &value);
+                }
+            }
+            Err(error) => attempts.push(json!({"source": source, "status": "failed", "error": error})),
+        }
+    }
+    let mut interfaces = Vec::new();
+    for (index, command) in WINDOWS_NETWORK_HARDWARE_COMMANDS.iter().enumerate() {
+        let source = [
+            "physical_hidden",
+            "physical",
+            "all_hidden",
+            "cim_netadapter",
+        ][index];
+        match query(command) {
+            Ok(value) => {
+                let normalized = normalize_windows_network_hardware(&value);
+                let rows = normalized
+                    .as_array()
+                    .expect("normalized adapters are an array");
+                let usable = rows
+                    .iter()
+                    .filter(|item| super::permanent_pci_mac(item).is_some())
+                    .count();
+                attempts.push(json!({"source": source, "status": "ok", "adapterCount": rows.len(), "usablePermanentPciMacCount": usable}));
+                for row in rows {
+                    if !interfaces.contains(row) {
+                        interfaces.push(row.clone());
+                    }
+                }
+                // Nonempty results alone do not establish a usable identity.
+                if usable > 0 {
+                    break;
+                }
+            }
+            Err(error) => {
+                attempts.push(json!({"source": source, "status": "failed", "error": error}))
             }
         }
     }
+    root.insert("networkHardware".into(), json!(interfaces));
+    root.insert("identityProbeAttempts".into(), json!(attempts));
+}
 
-    Value::Array(Vec::new())
+#[cfg(target_os = "windows")]
+fn powershell_identity_json(command: &str) -> Result<Value, String> {
+    let wrapped = powershell_utf8_command(&format!(
+        "$ErrorActionPreference='Stop'; {command} | ConvertTo-Json -Compress -Depth 4"
+    ));
+    let output = new_command("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &wrapped])
+        .output()
+        .map_err(|error| format!("spawn_failed: {error}"))?;
+    if !output.status.success() {
+        // Do not put raw command output or private identifiers into diagnostics.
+        return Err(format!(
+            "query_failed: exit_code={:?}",
+            output.status.code()
+        ));
+    }
+    parse_identity_query_output(&output.stdout)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn parse_identity_query_output(stdout: &[u8]) -> Result<Value, String> {
+    let text = std::str::from_utf8(stdout).map_err(|_| "invalid_utf8".to_string())?;
+    let text = text.trim_start_matches('\u{feff}').trim();
+    if text.is_empty() {
+        return Ok(Value::Array(Vec::new()));
+    }
+    let value: Value = serde_json::from_str(text).map_err(|_| "invalid_json".to_string())?;
+    if value.is_null() {
+        Ok(json!([]))
+    } else if value.is_object() || value.is_array() {
+        Ok(value)
+    } else {
+        Err("unexpected_json_type".to_string())
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -421,7 +495,7 @@ fn normalize_windows_bios(value: &Value) -> Value {
     })
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn normalize_windows_baseboard(value: &Value) -> Value {
     json!({
         "manufacturer": value_text(value, "Manufacturer"),
@@ -432,7 +506,7 @@ fn normalize_windows_baseboard(value: &Value) -> Value {
     })
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn normalize_windows_processor_identity(value: &Value) -> Value {
     Value::Array(
         value_items(value)
@@ -1199,6 +1273,142 @@ fn first_non_empty(values: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upload_light_135_survives_each_network_fallback_and_preserves_identity() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/identity-135.json")).unwrap();
+        // Exercise normal success, visible-only, unfiltered, and direct CIM.
+        for success_at in 0..4 {
+            let mut network_calls = 0;
+            let data = super::super::collect_upload_data_with(|root| {
+                root.insert("uuid".into(), json!({"hardware": fixture["systemUuid"]}));
+                root.insert("system".into(), json!({"uuid": fixture["systemUuid"]}));
+                enrich_windows_identity_with(root, |command| {
+                    if command.contains("Win32_BaseBoard") { return Ok(fixture["baseboard"].clone()); }
+                    if command.contains("Win32_Processor") { return Ok(fixture["processor"].clone()); }
+                    let attempt = network_calls;
+                    network_calls += 1;
+                    if attempt == success_at {
+                        // Test single-object PowerShell JSON as well as arrays.
+                        let response = if success_at % 2 == 0 { fixture["adapter"].clone() } else { json!([fixture["adapter"]]) };
+                        return parse_identity_query_output(serde_json::to_string(&response).unwrap().as_bytes());
+                    }
+                    match attempt {
+                        0 => Err("query_failed".into()),
+                        1 => { let mut row = fixture["adapter"].clone(); row["PermanentAddress"] = json!(""); Ok(row) },
+                        _ => Ok(json!([{"PnPDeviceID": "SWD\\VIRTUAL", "PermanentAddress": "00E01E8F0234", "Virtual": true}])),
+                    }
+                });
+            }).unwrap();
+            assert_eq!(network_calls, success_at + 1);
+            let identities = super::super::hardware_identities_v2(&data);
+            assert_eq!(
+                identities,
+                vec![(
+                    "pci_permanent_mac_v2",
+                    fixture["expectedIdentity"].as_str().unwrap().into()
+                )]
+            );
+            assert_eq!(
+                data["identityDiagnostics"]["systemUuid"],
+                "invalid_placeholder"
+            );
+            assert_eq!(
+                data["identityDiagnostics"]["baseboardSerial"],
+                "invalid_placeholder"
+            );
+            assert_eq!(data["identityDiagnostics"]["permanentPciMacCount"], 1);
+            assert_eq!(data["identityDiagnostics"]["decision"], "ready");
+            let upload = crate::upload::build_observation_v3("135", &data).unwrap();
+            let interfaces = upload
+                .pointer("/asset/hardware/network/identityInterfaces")
+                .unwrap()
+                .as_array()
+                .unwrap();
+            assert!(interfaces
+                .iter()
+                .any(|row| row["permanentAddress"] == "00E01E8F0234"));
+            assert_eq!(
+                upload.pointer("/asset/hardware/baseboard/serial").unwrap(),
+                "Default string"
+            );
+        }
+    }
+
+    #[test]
+    fn upload_light_keeps_board_facts_for_legacy_transition() {
+        let data = super::super::collect_upload_data_with(|root| {
+            root.insert("uuid".into(), json!({"hardware": "ca64e029-40ba-7f2c-27dd-b082e209a3d2"}));
+            enrich_windows_identity_with(root, |command| {
+                if command.contains("Win32_BaseBoard") {
+                    Ok(json!({"Manufacturer": "ASUSTeK COMPUTER INC.", "Product": "TUF GAMING B760M-PLUS WIFI D4", "SerialNumber": "260270757501248"}))
+                } else { Ok(json!([])) }
+            });
+        }).unwrap();
+        let expected = json!({
+            "uuid": {"hardware": "ca64e029-40ba-7f2c-27dd-b082e209a3d2"},
+            "baseboard": {"manufacturer": "ASUSTeK COMPUTER INC.", "model": "TUF GAMING B760M-PLUS WIFI D4", "serial": "260270757501248"}
+        });
+        assert!(super::super::device_uuid_v1(&data).is_some());
+        assert_eq!(
+            super::super::device_uuid_v1(&data),
+            super::super::device_uuid_v1(&expected)
+        );
+        assert_eq!(super::super::hardware_identities_v2(&data).len(), 2);
+        assert_eq!(data["identityDiagnostics"]["decision"], "ready");
+    }
+
+    #[test]
+    fn all_identity_queries_fail_with_actionable_diagnostics_and_no_upload() {
+        let data = super::super::collect_upload_data_with(|root| {
+            root.insert(
+                "uuid".into(),
+                json!({"hardware": "03000200-0400-0500-0006-000700080009"}),
+            );
+            root.insert("system".into(), json!({}));
+            enrich_windows_identity_with(root, |_| Err("query_failed".into()));
+        })
+        .unwrap();
+        assert_eq!(data["identityDiagnostics"]["decision"], "needs_review");
+        assert_eq!(
+            data["identityDiagnostics"]["probeAttempts"]
+                .as_array()
+                .unwrap()
+                .len(),
+            6
+        );
+        let error = crate::upload::build_observation_v3("135", &data)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("尚未上传"));
+        assert!(error.contains("查询失败：6 项"));
+        assert!(!error.contains("03000200"));
+    }
+
+    #[test]
+    fn identity_json_handles_encoding_empty_and_malformed_results() {
+        assert_eq!(
+            parse_identity_query_output("\u{feff}{\"Name\":\"以太网\"}".as_bytes()).unwrap()
+                ["Name"],
+            "以太网"
+        );
+        for text in ["", "  ", "null", "[]"] {
+            assert!(value_items(&parse_identity_query_output(text.as_bytes()).unwrap()).is_empty());
+        }
+        assert_eq!(
+            parse_identity_query_output(&[0xff]).unwrap_err(),
+            "invalid_utf8"
+        );
+        assert_eq!(
+            parse_identity_query_output(b"{bad").unwrap_err(),
+            "invalid_json"
+        );
+        assert_eq!(
+            parse_identity_query_output(b"42").unwrap_err(),
+            "unexpected_json_type"
+        );
+    }
 
     #[test]
     fn preserves_permanent_pci_mac_for_133_style_adapter() {

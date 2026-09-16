@@ -149,9 +149,26 @@ fn get_cached_device_snapshot() -> Result<Option<DeviceSnapshot>, String> {
         }
     }
     let raw = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    serde_json::from_str(&raw)
-        .map(Some)
-        .map_err(|error| format!("缓存快照格式无效：{error}"))
+    let snapshot: DeviceSnapshot =
+        serde_json::from_str(&raw).map_err(|error| format!("缓存快照格式无效：{error}"))?;
+    if !snapshot_cache_is_current(&snapshot) {
+        return Ok(None);
+    }
+    Ok(Some(snapshot))
+}
+
+fn snapshot_cache_is_current(snapshot: &DeviceSnapshot) -> bool {
+    snapshot
+        .data
+        .pointer("/collector/schema")
+        .and_then(Value::as_str)
+        == Some("npcink-upload-light-v2")
+        && snapshot
+            .data
+            .pointer("/collector/version")
+            .and_then(Value::as_str)
+            == Some(env!("CARGO_PKG_VERSION"))
+        && collector::hardware_identity_v2(&snapshot.data).is_some()
 }
 
 fn collect_device_snapshot_inner() -> Result<DeviceSnapshot, String> {
@@ -160,6 +177,15 @@ fn collect_device_snapshot_inner() -> Result<DeviceSnapshot, String> {
         Ok(data) => {
             let (device_identity_type, device_identity) =
                 collector::hardware_identity_v2(&data).unwrap_or(("", String::new()));
+            write_app_log(
+                if device_identity.is_empty() {
+                    "warn"
+                } else {
+                    "info"
+                },
+                "device.identity_evaluated",
+                &collector::identity_diagnostics(&data).to_string(),
+            );
             write_app_log(
                 "info",
                 "device.collect_upload_succeeded",
@@ -1945,6 +1971,24 @@ fn add_dir_to_zip(
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn snapshot_cache_requires_new_identity_collection_and_current_version() {
+        let mut snapshot = DeviceSnapshot {
+            data: json!({"collector": {"schema": "npcink-upload-light-v2", "version": env!("CARGO_PKG_VERSION")}, "uuid": {"hardware": "valid-test-hardware"}}),
+            device_identity_type: "system_uuid_v2".into(),
+            device_identity: "unused".into(),
+        };
+        assert!(snapshot_cache_is_current(&snapshot));
+        snapshot.data["collector"]["schema"] = json!("npcink-upload-light-v1");
+        assert!(!snapshot_cache_is_current(&snapshot));
+        snapshot.data["collector"]["schema"] = json!("npcink-upload-light-v2");
+        snapshot.data["collector"]["version"] = json!("older-build");
+        assert!(!snapshot_cache_is_current(&snapshot));
+        snapshot.data["collector"]["version"] = json!(env!("CARGO_PKG_VERSION"));
+        snapshot.data["uuid"]["hardware"] = json!("03000200-0400-0500-0006-000700080009");
+        assert!(!snapshot_cache_is_current(&snapshot));
+    }
 
     #[test]
     fn external_url_is_limited_to_project_github_pages() {

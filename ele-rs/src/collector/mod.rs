@@ -57,13 +57,19 @@ pub fn collect_static_data() -> Result<Value> {
 
     platform::enrich(&mut root);
 
-    Ok(Value::Object(root))
+    finish_identity_collection(root, |_| {})
 }
 
 /// Collect only the fields required for the normal upload flow. Expensive
 /// platform enrichment (system_profiler/CIM inventories and raw platform
 /// payloads) remains available through collect_static_data for diagnostics.
 pub fn collect_upload_data() -> Result<Value> {
+    collect_upload_data_with(platform::enrich_identity)
+}
+
+pub(crate) fn collect_upload_data_with(
+    enrich: impl FnOnce(&mut Map<String, Value>),
+) -> Result<Value> {
     let mut system = System::new_all();
     system.refresh_all();
 
@@ -90,12 +96,12 @@ pub fn collect_upload_data() -> Result<Value> {
             "name": env!("CARGO_PKG_NAME"),
             "version": env!("CARGO_PKG_VERSION"),
             "runtime": "rust",
-            "schema": "npcink-upload-light-v1",
+            "schema": "npcink-upload-light-v2",
             "collected_at": Utc::now().to_rfc3339(),
         }),
     );
 
-    Ok(Value::Object(root))
+    finish_identity_collection(root, enrich)
 }
 
 pub fn collect_runtime_status() -> Result<Value> {
@@ -778,21 +784,7 @@ pub fn hardware_identities_v2(data: &Value) -> Vec<(&'static str, String)> {
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .filter(|item| {
-                    item.get("pnpDeviceId")
-                        .and_then(Value::as_str)
-                        .map(|value| value.trim().to_ascii_uppercase().starts_with("PCI\\"))
-                        .unwrap_or(false)
-                        && !item
-                            .get("virtual")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false)
-                })
-                .filter_map(|item| {
-                    item.get("permanentAddress")
-                        .and_then(Value::as_str)
-                        .and_then(normalize_identity_mac)
-                })
+                .filter_map(permanent_pci_mac)
                 .collect::<Vec<_>>();
             macs.sort();
             macs.dedup();
@@ -811,6 +803,71 @@ pub fn hardware_identities_v2(data: &Value) -> Vec<(&'static str, String)> {
     }
 
     identities
+}
+
+fn permanent_pci_mac(item: &Value) -> Option<String> {
+    let pci = item
+        .get("pnpDeviceId")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value.trim().to_ascii_uppercase().starts_with("PCI\\"));
+    if !pci
+        || item
+            .get("virtual")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        return None;
+    }
+    item.get("permanentAddress")
+        .and_then(Value::as_str)
+        .and_then(normalize_identity_mac)
+}
+
+fn finish_identity_collection(
+    mut root: Map<String, Value>,
+    enrich: impl FnOnce(&mut Map<String, Value>),
+) -> Result<Value> {
+    enrich(&mut root);
+    let mut data = Value::Object(root);
+    data["identityDiagnostics"] = identity_diagnostics(&data);
+    Ok(data)
+}
+
+/// Status only; raw identifiers stay in hardware feedback, not error text.
+pub fn identity_diagnostics(data: &Value) -> Value {
+    let status = |paths: &[&str]| {
+        let values: Vec<&str> = paths
+            .iter()
+            .filter_map(|path| data.pointer(path).and_then(Value::as_str))
+            .collect();
+        if values.iter().any(|v| normalize_identity_value(v).is_some()) {
+            "valid"
+        } else if values.iter().any(|v| !v.trim().is_empty()) {
+            "invalid_placeholder"
+        } else {
+            "missing"
+        }
+    };
+    let identities = hardware_identities_v2(data);
+    let mac_count = data
+        .get("networkHardware")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(permanent_pci_mac)
+        .collect::<BTreeSet<_>>()
+        .len();
+    json!({
+        "systemUuid": status(&["/uuid/hardware", "/system/uuid"]),
+        "baseboardSerial": status(&["/baseboard/serial", "/baseboard/serialNumber"]),
+        "baseboardManufacturer": status(&["/baseboard/manufacturer"]),
+        "baseboardModel": status(&["/baseboard/product", "/baseboard/model"]),
+        "processorModel": if processor_model(data).is_some() { "valid" } else { "missing" },
+        "permanentPciMacCount": mac_count,
+        "identityTypes": identities.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+        "decision": if identities.is_empty() { "needs_review" } else { "ready" },
+        "probeAttempts": data.get("identityProbeAttempts").cloned().unwrap_or(json!([])),
+    })
 }
 
 pub fn hardware_identity_v2(data: &Value) -> Option<(&'static str, String)> {

@@ -14,6 +14,7 @@ This folder keeps the current product contracts, development guardrails, release
 - `asset-data-model.md`: v3 asset, identity, observation, and event model contract.
 - `asset-finance-export-development-retrospective-2026-08-06.md`: consolidated finance-field, depreciation, missing-data, configurable export, UI iteration, and verification standard.
 - `asset-type-archive-admin-ui-development-retrospective-2026-08-06.md`: device subtype reuse, archive-as-business-exclusion, compact admin forms, date localization, summary hierarchy, and final PCP lessons.
+- `windows-upload-light-identity-incident-2026-09-16.md`: device 135 evidence, upload-light root cause, collection recovery and validation limits.
 - `identity-contract.md`: current hardware identity v2 upload contract.
 - `device-upload-troubleshooting-and-operations.md`: production upload troubleshooting, evidence, and recovery runbook.
 - `decisions/ADR-003-pre-ga-scope-reset.md`: pre-GA scope reset; its analysis restriction is partially superseded by ADR-009.
