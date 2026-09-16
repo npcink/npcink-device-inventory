@@ -20,7 +20,7 @@
         device_identity_type: "pci_permanent_mac_v2",
         device_identity: "preview-only",
         data: {
-          collector: { version: "0.4.4-rc.2", schema: "npcink-upload-light-v3" },
+          collector: { version: "0.4.4", schema: "npcink-upload-light-v3" },
           os: { hostname: "DESKTOP-PREVIEW", distro: "Windows 11 专业版", release: "24H2", platform: "win32" },
           cpu: { manufacturer: "Intel", brand: "Core i5-12400", cores: 6 },
           mem: { total: 17179869184 },
@@ -48,7 +48,7 @@
         unregisterCallback: () => {},
         invoke: async (command, args) => {
           switch (command) {
-            case "plugin:app|version": return "0.4.4-rc.2";
+            case "plugin:app|version": return "0.4.4";
             case "plugin:event|listen": return ++callbackId;
             case "plugin:event|unlisten":
             case "append_app_log": return null;
