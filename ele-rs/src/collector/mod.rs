@@ -64,7 +64,7 @@ pub fn collect_static_data() -> Result<Value> {
 /// platform enrichment (system_profiler/CIM inventories and raw platform
 /// payloads) remains available through collect_static_data for diagnostics.
 pub fn collect_upload_data() -> Result<Value> {
-    collect_upload_data_with(platform::enrich_identity)
+    collect_upload_data_with(platform::enrich_upload)
 }
 
 pub(crate) fn collect_upload_data_with(
@@ -96,7 +96,7 @@ pub(crate) fn collect_upload_data_with(
             "name": env!("CARGO_PKG_NAME"),
             "version": env!("CARGO_PKG_VERSION"),
             "runtime": "rust",
-            "schema": "npcink-upload-light-v2",
+            "schema": "npcink-upload-light-v3",
             "collected_at": Utc::now().to_rfc3339(),
         }),
     );

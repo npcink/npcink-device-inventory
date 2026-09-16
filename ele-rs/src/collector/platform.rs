@@ -56,44 +56,83 @@ fn enrich_impl(root: &mut Map<String, Value>) {
             root.insert("diskLayout".to_string(), disks);
         }
     }
-    if let Some(value) = powershell_json("Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue | Select-Object Name,DeviceID,Status,BatteryStatus,Chemistry,DesignCapacity,FullChargeCapacity,EstimatedChargeRemaining,EstimatedRunTime,DesignVoltage") {
-        let batteries = normalize_windows_batteries(&value);
-        if batteries.as_array().is_some_and(|items| !items.is_empty()) {
-            root.insert("battery".to_string(), batteries);
-        }
-    }
-    let graphics_controllers = powershell_json("Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,VideoProcessor,DriverVersion,CurrentHorizontalResolution,CurrentVerticalResolution,CurrentRefreshRate");
-    let display_monitors = powershell_json("Get-CimInstance -Namespace root\\wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | Select-Object InstanceName,Active,ManufacturerName,UserFriendlyName,SerialNumberID,YearOfManufacture,WeekOfManufacture");
-    let desktop_monitors = powershell_json("Get-CimInstance Win32_DesktopMonitor -ErrorAction SilentlyContinue | Select-Object PNPDeviceID,Name,MonitorManufacturer,MonitorType,ScreenWidth,ScreenHeight,Status");
-    if graphics_controllers.is_some() || display_monitors.is_some() || desktop_monitors.is_some() {
-        let controllers = graphics_controllers
-            .as_ref()
-            .map(normalize_windows_graphics_controllers)
-            .unwrap_or_else(|| Value::Array(Vec::new()));
-        let displays = display_monitors
-            .as_ref()
-            .map(|monitors| {
-                normalize_windows_displays(
-                    monitors,
-                    desktop_monitors.as_ref().unwrap_or(&Value::Null),
-                    graphics_controllers.as_ref().unwrap_or(&Value::Null),
-                )
-            })
-            .unwrap_or_else(|| Value::Array(Vec::new()));
-        root.insert(
-            "graphics".to_string(),
-            json!({
-                "controllers": controllers,
-                "displays": displays,
-            }),
-        );
-    }
+    enrich_windows_media_with(root, powershell_identity_json);
     insert_empty_if_missing(root, "bios");
     insert_empty_if_missing(root, "baseboard");
     insert_empty_if_missing(root, "chassis");
     insert_empty_if_missing(root, "graphics");
     insert_array_if_missing(root, "processorIdentity");
     insert_array_if_missing(root, "networkHardware");
+}
+
+// Ordinary uploads include the hardware that the overview promises to show.
+pub(crate) fn enrich_upload(root: &mut Map<String, Value>) {
+    enrich_identity(root);
+    #[cfg(target_os = "windows")]
+    enrich_windows_media_with(root, powershell_identity_json);
+    #[cfg(target_os = "macos")]
+    {
+        let started = std::time::Instant::now();
+        let value = command_json(
+            "system_profiler",
+            &["-json", "SPDisplaysDataType", "SPPowerDataType"],
+        );
+        if let Some(value) = &value {
+            enrich_macos_system_profiler(root, value);
+        }
+        root.insert(
+            "hardwareProbeAttempts".into(),
+            json!([{
+                "source": "system_profiler_displays_power",
+                "status": if value.is_some() { "ok" } else { "failed" },
+                "elapsedMs": started.elapsed().as_millis() as u64,
+            }]),
+        );
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn enrich_windows_media_with(
+    root: &mut Map<String, Value>,
+    mut query: impl FnMut(&str) -> Result<Value, String>,
+) {
+    let mut attempts = Vec::new();
+    let mut read = |source: &str, command: &str| {
+        let started = std::time::Instant::now();
+        let result = query(command);
+        let mut attempt =
+            json!({"source": source, "elapsedMs": started.elapsed().as_millis() as u64});
+        let value = match result {
+            Ok(value) => {
+                attempt["status"] = json!(if value_items(&value).is_empty() {
+                    "empty"
+                } else {
+                    "ok"
+                });
+                value
+            }
+            Err(error) => {
+                attempt["status"] = json!("failed");
+                attempt["error"] = json!(error);
+                json!([])
+            }
+        };
+        attempts.push(attempt);
+        value
+    };
+    let controllers = read("video_controllers", "Get-CimInstance Win32_VideoController -ErrorAction Stop | Select-Object Name,AdapterRAM,VideoProcessor,DriverVersion,CurrentHorizontalResolution,CurrentVerticalResolution,CurrentRefreshRate");
+    let monitors = read("monitor_edid", "Get-CimInstance -Namespace root\\wmi -ClassName WmiMonitorID -ErrorAction Stop | Select-Object InstanceName,Active,ManufacturerName,UserFriendlyName,SerialNumberID,YearOfManufacture,WeekOfManufacture");
+    let desktop = read("desktop_monitors", "Get-CimInstance Win32_DesktopMonitor -ErrorAction Stop | Select-Object PNPDeviceID,Name,MonitorManufacturer,MonitorType,ScreenWidth,ScreenHeight,Status");
+    let batteries = read("batteries", "Get-CimInstance Win32_Battery -ErrorAction Stop | Select-Object Name,DeviceID,Status,BatteryStatus,Chemistry,DesignCapacity,FullChargeCapacity,EstimatedChargeRemaining,EstimatedRunTime,DesignVoltage");
+    root.insert(
+        "graphics".into(),
+        json!({
+            "controllers": normalize_windows_graphics_controllers(&controllers),
+            "displays": normalize_windows_displays(&monitors, &desktop, &controllers),
+        }),
+    );
+    root.insert("battery".into(), normalize_windows_batteries(&batteries));
+    root.insert("hardwareProbeAttempts".into(), json!(attempts));
 }
 
 // Identity facts are required even when upload-light skips other inventories.
@@ -692,11 +731,12 @@ fn normalize_windows_system(value: &Value, current: Option<&Value>) -> Value {
     })
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn normalize_windows_graphics_controllers(value: &Value) -> Value {
     Value::Array(
         value_items(value)
             .into_iter()
+            .filter(|item| item.is_object())
             .map(|item| {
                 json!({
                     "model": value_text(item, "Name"),
@@ -719,8 +759,24 @@ fn normalize_windows_displays(
     desktop_monitors: &Value,
     controllers: &Value,
 ) -> Value {
-    let monitor_items = value_items(monitors)
+    let mut monitor_values = value_items(monitors)
         .into_iter()
+        .filter(|item| item.is_object())
+        .cloned()
+        .collect::<Vec<_>>();
+    for desktop in value_items(desktop_monitors) {
+        let pnp = value_text(desktop, "PNPDeviceID");
+        if pnp.is_empty()
+            || monitor_values
+                .iter()
+                .any(|item| same_display_instance(&value_text(item, "InstanceName"), &pnp))
+        {
+            continue;
+        }
+        monitor_values.push(json!({"InstanceName": pnp}));
+    }
+    let monitor_items = monitor_values
+        .iter()
         .filter(|item| item.is_object())
         .collect::<Vec<_>>();
     // Win32_VideoController reports a controller mode rather than a monitor-specific
@@ -1109,7 +1165,7 @@ fn memory_form_factor_label(code: u64) -> String {
     .to_string()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn graphics_vendor(value: &Value) -> String {
     let text = first_non_empty(&[
         value_text(value, "VideoProcessor"),
@@ -1273,6 +1329,66 @@ fn first_non_empty(values: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordinary_upload_keeps_graphics_battery_and_identity_when_edid_fails() {
+        let data = super::super::collect_upload_data_with(|root| {
+            root.insert("uuid".into(), json!({"hardware": "9e9738c7-0418-fb17-af0e-345a601d798b"}));
+            enrich_windows_media_with(root, |command| {
+                if command.contains("Win32_VideoController") { return Ok(json!({"Name": "Test GPU", "DriverVersion": "1.2", "CurrentHorizontalResolution": 1920, "CurrentVerticalResolution": 1080})); }
+                if command.contains("WmiMonitorID") { return Err("query_failed".into()); }
+                if command.contains("Win32_DesktopMonitor") { return Ok(json!({"PNPDeviceID": "DISPLAY\\TEST\\1", "Name": "Test monitor", "ScreenWidth": 1920, "ScreenHeight": 1080})); }
+                Ok(json!({"Name": "Laptop battery", "EstimatedChargeRemaining": 0, "DesignCapacity": 50000, "FullChargeCapacity": 40000}))
+            });
+        }).unwrap();
+        assert_eq!(data["graphics"]["controllers"][0]["model"], "Test GPU");
+        assert_eq!(data["graphics"]["displays"][0]["model"], "Test monitor");
+        assert_eq!(data["graphics"]["displays"][0]["currentResX"], 1920);
+        assert_eq!(data["battery"][0]["chargePercent"], 0);
+        assert_eq!(data["battery"][0]["healthPercent"], 80.0);
+        assert_eq!(data["hardwareProbeAttempts"][1]["status"], "failed");
+        let upload = crate::upload::build_observation_v3("test", &data).unwrap();
+        assert_eq!(upload["asset"]["hardware"]["graphics"], data["graphics"]);
+        assert_eq!(upload["asset"]["hardware"]["battery"], data["battery"]);
+        assert_eq!(super::super::hardware_identities_v2(&data).len(), 1);
+    }
+
+    #[test]
+    fn missing_optional_hardware_does_not_create_blank_devices_or_block_identity() {
+        let mut root = Map::new();
+        root.insert(
+            "uuid".into(),
+            json!({"hardware": "9e9738c7-0418-fb17-af0e-345a601d798b"}),
+        );
+        enrich_windows_media_with(&mut root, |command| {
+            if command.contains("Win32_Battery") {
+                Ok(json!([]))
+            } else {
+                Err("query_failed".into())
+            }
+        });
+        let data = Value::Object(root);
+        assert_eq!(data["graphics"], json!({"controllers": [], "displays": []}));
+        assert_eq!(data["battery"], json!([]));
+        assert_eq!(data["hardwareProbeAttempts"][3]["status"], "empty");
+        assert!(crate::upload::build_observation_v3("test", &data).is_ok());
+    }
+
+    #[test]
+    fn desktop_monitor_fallback_fills_missing_screen_without_duplicating_edid() {
+        let monitors = json!([{"InstanceName": "DISPLAY\\ONE\\1_0", "Active": true}]);
+        let desktop = json!([
+            {"PNPDeviceID": "DISPLAY\\ONE\\1", "Name": "First", "ScreenWidth": 1920, "ScreenHeight": 1080},
+            {"PNPDeviceID": "DISPLAY\\TWO\\2", "Name": "Second", "ScreenWidth": 2560, "ScreenHeight": 1440}
+        ]);
+        let result = normalize_windows_displays(&monitors, &desktop, &json!([]));
+        assert_eq!(result.as_array().unwrap().len(), 2);
+        assert_eq!(result[0]["model"], "First");
+        assert_eq!(result[1]["model"], "Second");
+        assert_eq!(result[1]["currentResX"], 2560);
+        assert!(result[1]["serial"].as_str().unwrap().is_empty());
+        assert!(result[1]["currentRefreshRate"].is_null());
+    }
 
     #[test]
     fn upload_light_135_survives_each_network_fallback_and_preserves_identity() {
