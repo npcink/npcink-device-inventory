@@ -37,7 +37,7 @@
 - Windows 普通采集和完整采集共用 BIOS 查询及诊断记录；BIOS 查询失败不阻断身份识别或上传。macOS 普通采集补充固件字段，不覆盖已有系统/主板身份事实。
 - 本地前端构建、fmt、Clippy、35 个采集测试、12 个桌面测试、两个 Cargo 审计通过；插件 fixtures 和版本契约通过。审计仍有既有允许的上游依赖警告。
 - 浏览器模拟 Tauri IPC 检查 1120×720 两列和 720×560 单列、十项信息、多显卡、长 BIOS 换行、重新采集、四 TAB 键盘切换、空电池隐藏和 WinDbg 入口。截图不代表 Windows 原生实机验收。
-- 本机 macOS 普通采集实测取得 Apple 固件版本（总采集约 432ms）；未进行上传。Windows 仍需原生构建和用户实机验收。
+- 本机 macOS 普通采集实测取得 Apple 固件版本（总采集约 432ms）；未进行上传。Windows 真实硬件数据与系统工具启动仍需用户实机验收。
 - rc.2 仍仅预览；正式发布须用户本地外观确认及明确授权。
 
 ### 后续外观调整约定
@@ -45,3 +45,14 @@
 用户进一步要求显卡和 BIOS 位于同一行左右两列，并在外观确认后再编译安装包。已取消尚在运行的 rc.2 预览构建 [35073791160](https://github.com/npcink/npcink-device-inventory/actions/runs/35073791160)。后续先提供界面预览；用户确认效果前不重新触发安装包构建，正式发布仍需明确同意。
 
 用户随后明确授权按当前界面编译安装包进行实机测试。本次恢复 rc.2 测试包构建，包含显卡/BIOS 同行布局；正式发布仍需另行明确同意。网页示例入口 `ele-rs/preview.html` 仅供开发预览，桌面构建继续使用 `index.html` 和真实采集。
+
+### rc.2 实机测试包交付
+
+- 源码提交：`65894279011813727cc3df0bbea82b371d051a04`。
+- Windows/macOS 原生测试、Clippy、前端构建及安装包构建全部成功：[Actions 35076004190](https://github.com/npcink/npcink-device-inventory/actions/runs/35076004190)。
+- 桌面构建产物检查确认不含网页预览入口或示例硬件数据。
+- 两端制品 ZIP 的 SHA-256 与 GitHub 返回的摘要一致；Windows 交付 ZIP 完整性检查通过；macOS DMG 经 `hdiutil verify` 验证通过。
+- Windows 安装程序 SHA-256：`dd66c66541fb8d22f266bd03903f32789c0184491aeccde1bad65523121e76dc`。
+- macOS DMG SHA-256：`c09ed4ce36f4c38f944914a0e36fc4af8f3c92c9bd109f362c0acdb08bede67c`。
+- 本地交付目录：`release-preview/windows-0.4.4-rc.2/`、`release-preview/macos-0.4.4-rc.2/`。各目录含测试说明、校验值和构建来源记录。
+- 本次只交付实机测试包，未创建正式 Release、tag 或更新正式更新清单。
