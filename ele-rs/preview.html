@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>设备客户端 · 外观预览（示例数据）</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      // Separate development entry; the desktop build still uses index.html.
+      if (!import.meta.env.DEV) throw new Error("仅限本地开发预览");
+      Object.defineProperty(navigator, "userAgent", {
+        value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+      });
+      let config = { site: "", token: "", name: "" };
+      let callbackId = 0;
+      const snapshot = {
+        device_identity_type: "pci_permanent_mac_v2",
+        device_identity: "preview-only",
+        data: {
+          collector: { version: "0.4.4-rc.2", schema: "npcink-upload-light-v3" },
+          os: { hostname: "DESKTOP-PREVIEW", distro: "Windows 11 专业版", release: "24H2", platform: "win32" },
+          cpu: { manufacturer: "Intel", brand: "Core i5-12400", cores: 6 },
+          mem: { total: 17179869184 },
+          memLayout: [{ size: 17179869184, type: "DDR4", clockSpeed: 3200 }],
+          baseboard: { manufacturer: "KOLOE", model: "H610M4-PLUS" },
+          bios: { vendor: "American Megatrends International, LLC.", version: "H610M4-PLUS V1.20" },
+          diskLayout: [{ name: "示例 NVMe SSD", size: 512110190592, type: "SSD" }],
+          net: [{ iface: "以太网", ip4: "192.168.1.135" }],
+          graphics: {
+            controllers: [
+              { vendor: "NVIDIA", model: "GeForce RTX 4060 Ti", vram: 8589934592 },
+              { vendor: "Intel", model: "Intel UHD Graphics 730" },
+            ],
+            displays: [{ model: "DELL P2422H", currentResX: 1920, currentResY: 1080, currentRefreshRate: 60 }],
+          },
+          battery: [],
+          identityDiagnostics: {
+            decision: "ready", systemUuid: "invalid_placeholder",
+            baseboardSerial: "invalid_placeholder", permanentPciMacCount: 1,
+          },
+        },
+      };
+      window.__TAURI_INTERNALS__ = {
+        transformCallback: () => ++callbackId,
+        unregisterCallback: () => {},
+        invoke: async (command, args) => {
+          switch (command) {
+            case "plugin:app|version": return "0.4.4-rc.2";
+            case "plugin:event|listen": return ++callbackId;
+            case "plugin:event|unlisten":
+            case "append_app_log": return null;
+            case "get_saved_config": return structuredClone(config);
+            case "save_config": config = structuredClone(args.config); return null;
+            case "clear_saved_config": config = { site: "", token: "", name: "" }; return null;
+            case "get_cached_device_snapshot": return null;
+            case "collect_device_snapshot": return structuredClone(snapshot);
+            case "collect_runtime_status": return {
+              collected_at: new Date().toISOString(),
+              cpu: { usage_percent: 12, cores: 6 },
+              memory: { used: 6442450944, total: 17179869184 },
+              disk: { used: 128000000000, total: 512110190592, mount: "C:" },
+              temperatures: [],
+            };
+            case "get_runtime_history": return { summary: { sample_count: 0 } };
+            default: throw new Error("当前为网页外观预览，此操作需在桌面客户端执行。");
+          }
+        },
+      };
+      window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+      await import("/src/main.ts");
+      const notice = document.createElement("div");
+      notice.textContent = "外观预览 · 示例数据";
+      notice.style.cssText = "position:fixed;right:16px;bottom:10px;z-index:10;padding:4px 8px;border-radius:4px;background:#34432f;color:#dce3d6;font:12px sans-serif;pointer-events:none";
+      document.body.append(notice);
+    </script>
+  </body>
+</html>

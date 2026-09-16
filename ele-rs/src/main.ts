@@ -1308,9 +1308,9 @@ const settingsSummaryRows = () => {
     { label: "处理器", value: joinUnique([cpu.manufacturer, cpu.brand]) || "未采集" },
     { label: "内存", value: [memoryType, memorySize].filter(Boolean).join(" ") },
     { label: "显卡", value: graphicsLabel(data) },
-    { label: "硬盘", value: formatBytes(sumSizes(data.diskLayout)) },
-    { label: "主板型号", value: baseboardLabel(data) },
     { label: "BIOS", value: biosLabel(data) },
+    { label: "主板型号", value: baseboardLabel(data) },
+    { label: "硬盘", value: formatBytes(sumSizes(data.diskLayout)) },
     { label: "当前 IP", value: iface ? `${ip} (${iface})` : ip },
     { label: "显示器", value: displayLabel(data) },
   ];
