@@ -633,9 +633,14 @@ fn write_hardware_feedback_export(
     stamp: &str,
 ) -> Result<HardwareFeedbackExport> {
     let directory_path = base_dir.join(format!("NpcinkDiagnostics-{stamp}-Hardware"));
-    let mut directory = fs::DirBuilder::new();
     #[cfg(unix)]
-    directory.mode(0o700);
+    let directory = {
+        let mut directory = fs::DirBuilder::new();
+        directory.mode(0o700);
+        directory
+    };
+    #[cfg(not(unix))]
+    let directory = fs::DirBuilder::new();
     directory.create(&directory_path).with_context(|| {
         format!(
             "failed to create hardware feedback dir {}",
