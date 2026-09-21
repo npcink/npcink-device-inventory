@@ -5,7 +5,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub(crate) const APP_DIR_NAME: &str = "npcink-device-agent";
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const CREDENTIAL_SERVICE: &str = "ink.npc.npcink-device-agent";
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const CREDENTIAL_USER: &str = "device-upload-token";
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
