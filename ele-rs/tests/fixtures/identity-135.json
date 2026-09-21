@@ -1,0 +1,22 @@
+{
+  "systemUuid": "03000200-0400-0500-0006-000700080009",
+  "baseboard": {
+    "Manufacturer": "KOLOE",
+    "Product": "H610M4-PLUS",
+    "SerialNumber": "Default string"
+  },
+  "processor": {
+    "Name": "12th Gen Intel(R) Core(TM) i5-12490F"
+  },
+  "adapter": {
+    "Name": "以太网",
+    "InterfaceDescription": "Realtek PCIe GbE Family Controller",
+    "PnPDeviceID": "PCI\\VEN_10EC&DEV_8168&SUBSYS_012310EC&REV_15\\4&31565445&0&00E0",
+    "MacAddress": "00-E0-1E-8F-02-34",
+    "PermanentAddress": "00E01E8F0234",
+    "HardwareInterface": true,
+    "Virtual": false,
+    "Status": "Up"
+  },
+  "expectedIdentity": "pci-v2-9fadfdeba5b521689ca099d0fedf2"
+}

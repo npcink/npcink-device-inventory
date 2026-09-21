@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -31,6 +32,21 @@ try {
   });
 
   const { collectionAgeBand, collectionFreshness, collectionOverdueLevel, detectHardwareIssues, hardwareSummary, inferredGraphicsForFallbackDriver, issueGroup } = await import(pathToFileURL(outFile).href);
+  for (const [vendor, model, expected] of [
+    ["NVIDIA", "NVIDIA GeForce GTX 1650", "NVIDIA GeForce GTX 1650"],
+    ["Intel(R)", "Intel(R) Iris(R) Xe Graphics", "Intel(R) Iris(R) Xe Graphics"],
+    [" nvidia ", " NVIDIA GeForce GTX 1650 ", "NVIDIA GeForce GTX 1650"],
+    ["AMD", "Radeon RX 6600", "AMD Radeon RX 6600"],
+    ["", "Test GPU", "Test GPU"],
+  ]) {
+    const summary = { graphics: `${vendor} ${model}` };
+    const hardware = { graphics: { controllers: [{ vendor, model }] } };
+    const before = JSON.stringify({ summary, hardware });
+    assert.equal(hardwareSummary(summary, hardware).graphics, expected);
+    assert.equal(JSON.stringify({ summary, hardware }), before, "Display must preserve stored observations");
+  }
+  assert.equal(hardwareSummary({ graphics: "Legacy GPU" }, {}).graphics, "Legacy GPU");
+  assert.equal(hardwareSummary({ graphics: "Legacy GPU" }, { graphics: { controllers: [{ vendor: "NVIDIA" }] } }).graphics, "Legacy GPU");
   const assets = JSON.parse(await readFile(fixturePath, "utf8"));
   const issues = detectHardwareIssues(assets);
   const whitespaceOwnerIssues = detectHardwareIssues([

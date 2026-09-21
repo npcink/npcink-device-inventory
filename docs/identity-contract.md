@@ -24,7 +24,7 @@
 - 硬盘、内存、显卡：属于常换部件，不参与身份。
 - TPM：本阶段采集结果不稳定且样本均不可用，不作为上传前置条件。
 
-`notUserRemovable` 也不作为硬条件；真实 PCI 网卡样本没有提供可靠的一致值。身份网卡必须来自 Windows `Get-NetAdapter -Physical -IncludeHidden`，并且 PNP 标识以 `PCI\\` 开头、`Virtual` 不为真。
+`notUserRemovable` 也不作为硬条件；真实 PCI 网卡样本没有提供可靠的一致值。身份网卡可来自 Windows `Get-NetAdapter` 或 `root/StandardCimv2:MSFT_NetAdapter`。无论查询来源，PNP 标识必须以 `PCI\\` 开头、`Virtual` 不为真，并且必须包含有效的永久地址。
 
 ## 上传决策
 
@@ -49,3 +49,22 @@
 - `asset.hardware.network.identityInterfaces[]`：物理网卡永久地址、PNP 标识和接口元数据。
 
 其余硬件和管理字段保持不变。
+
+## 轻量采集与可解释降级（2026-09-16 修复）
+
+普通上传必须执行主板、处理器身份和永久 PCI 网卡查询；Windows 完整采集与轻量采集共用该身份采集函数。0.4.4 预览同时为普通上传补齐显卡、显示器、电池基础数据，轻量快照标记为 `npcink-upload-light-v3`，上传 observation 仍为 schema 5。可更换的显示设备和电池只进入观测，不改变设备身份。
+
+网卡按以下顺序查询，只有取得有效永久 PCI MAC 才停止；查询失败、空结果、仅有当前 MAC 或虚拟网卡，都继续降级：
+
+1. `Get-NetAdapter -Physical -IncludeHidden`
+2. `Get-NetAdapter -Physical`
+3. `Get-NetAdapter -IncludeHidden`
+4. `Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetAdapter`
+
+保留每次查询的来源、结果数量、有效永久 PCI MAC 数量和失败类别；查询失败不会伪装成设备不存在该字段。PowerShell 输出统一 UTF-8，支持单对象、数组、空输出和 BOM。多个来源的结果保留为事实，身份层仍按规范化 MAC 去重。
+
+本地快照/硬件反馈新增 `identityDiagnostics`，区分字段 `valid`、`invalid_placeholder`、`missing`，包含查询尝试与最终 `ready` / `needs_review` 决策。它不参与服务端匹配。无身份时，在发起上传之前显示中文分项说明；本地应用日志记录状态，不记录原始身份值。旧版轻量快照、其他版本快照和无法计算身份的快照不再作为有效缓存使用。
+
+当前 MAC、MachineGuid、本地生成的 Agent ID 不升级为硬件身份。它们不能单独证明两次上报属于同一物理设备；没有可信硬件证据时，本版本保留本地反馈并提示管理员核对，不创建服务端“待确认资产”或自动合并。
+
+本次不调整身份摘要、置信度、v1 过渡和冲突保护。修复采集能恢复身份计算，但不自动修复此前已经产生的重复资产，也不能仅凭编号把无身份旧资产绑定到新上报。

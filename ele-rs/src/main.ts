@@ -169,13 +169,7 @@ type SubmitDeviceResponse = {
   asset?: SubmitDeviceAsset;
 };
 
-type OverviewRow = {
-  label: string;
-  value: string;
-  wide?: boolean;
-};
-
-type TabId = "settings" | "overview" | "runtime" | "diagnostics" | "details";
+type TabId = "settings" | "runtime" | "diagnostics" | "details";
 
 type DesktopDownload = {
   label?: string;
@@ -212,7 +206,6 @@ app.innerHTML = `
         </div>
         <nav class="tabs" role="tablist" aria-label="页面">
           <button class="tab active" id="settingsTab" data-tab="settings" type="button" role="tab" aria-selected="true" aria-controls="settingsPage">设置</button>
-          <button class="tab" id="overviewTab" data-tab="overview" type="button" role="tab" aria-selected="false" aria-controls="overviewPage">概览</button>
           <button class="tab" id="runtimeTab" data-tab="runtime" type="button" role="tab" aria-selected="false" aria-controls="runtimePage">运行</button>
           <button class="tab" id="diagnosticsTab" data-tab="diagnostics" type="button" role="tab" aria-selected="false" aria-controls="diagnosticsPage">排障</button>
           <button class="tab" id="detailsTab" data-tab="details" type="button" role="tab" aria-selected="false" aria-controls="detailsPage">技术详情</button>
@@ -279,10 +272,6 @@ app.innerHTML = `
         </div>
       </section>
 
-      <section class="tab-page" id="overviewPage" role="tabpanel" aria-labelledby="overviewTab" hidden>
-        <div class="overview-grid" id="overviewGrid"></div>
-      </section>
-
       <section class="tab-page" id="runtimePage" role="tabpanel" aria-labelledby="runtimeTab" hidden>
         <section class="runtime-card runtime-page-card" aria-label="运行状态">
           <div class="settings-summary-head runtime-page-head">
@@ -298,6 +287,7 @@ app.innerHTML = `
             <strong id="runtimeCollectedAt">等待监控</strong>
           </div>
           <div class="runtime-grid runtime-page-grid" id="runtimeGrid"></div>
+          <p class="runtime-support-note" id="runtimeSupportNote" hidden>当前设备未提供温度、功耗和 GPU 使用率接口，已隐藏这些项目；CPU、内存、磁盘和网络基础监控仍可用。若需要进一步确认，请到“排障”页导出硬件信息或生成深度排障包。</p>
           <section class="runtime-history" aria-label="监控历史">
             <div class="runtime-history-head">
               <span>会话监控</span>
@@ -318,7 +308,7 @@ app.innerHTML = `
           <section class="diagnostics-panel">
             <span class="panel-kicker">本地反馈与排障</span>
             <h2>导出设备信息</h2>
-            <p>硬件显示或设备识别异常时，先导出本次采集的硬件 JSON；蓝屏、异常重启或上传失败时再生成深度排障包。</p>
+            <p>硬件显示或设备识别异常时，先导出完整硬件 JSON；蓝屏、异常重启或上传失败时再生成深度排障包。</p>
             <div class="diagnostics-actions">
               <button class="button primary diagnostics-button" id="exportHardwareButton" type="button">导出硬件信息</button>
               <button class="button secondary diagnostics-button" id="generateDiagnosticsButton" type="button">生成深度排障包</button>
@@ -326,6 +316,25 @@ app.innerHTML = `
               <button class="button secondary diagnostics-button" id="copyDiagnosticsPathButton" type="button" hidden>复制文件位置</button>
             </div>
             <div class="diagnostics-result" id="diagnosticsResult" role="status" aria-live="polite"></div>
+          </section>
+          <section class="diagnostics-panel">
+            <span class="panel-kicker">设备识别</span>
+            <h2>身份自检</h2>
+            <p>重新检查 UUID、主板序列号和永久网卡地址，查看能否识别这台设备。</p>
+            <button class="button secondary" id="checkIdentityButton" type="button">检查设备身份</button>
+            <div class="diagnostics-result" id="identityCheckResult" role="status" aria-live="polite"></div>
+          </section>
+          <section class="diagnostics-panel" id="windowsToolsPanel" hidden>
+            <span class="panel-kicker">Windows 系统工具</span>
+            <h2>常用检修工具</h2>
+            <div class="diagnostics-tools">
+              <button class="button secondary" data-diagnostic-tool="device_manager" type="button">设备管理器</button>
+              <button class="button secondary" data-diagnostic-tool="event_viewer" type="button">事件查看器</button>
+              <button class="button secondary" data-diagnostic-tool="directx" type="button">DirectX 诊断</button>
+              <button class="button secondary" data-diagnostic-tool="reliability" type="button">可靠性监视器</button>
+            </div>
+            <p>蓝屏转储分析：<button class="text-button" data-diagnostic-tool="windbg" type="button">WinDbg 官方安装说明 ↗</button></p>
+            <div class="diagnostics-result" id="diagnosticToolResult" role="status" aria-live="polite"></div>
           </section>
           <section class="diagnostics-note">
             <strong>隐私提示</strong>
@@ -429,7 +438,6 @@ const closeSubmitResultButton = document.querySelector<HTMLButtonElement>("#clos
 const collectState = document.querySelector<HTMLElement>("#collectState")!;
 const collectStateText = document.querySelector<HTMLElement>("#collectStateText")!;
 const toast = document.querySelector<HTMLElement>("#toast")!;
-const overviewGrid = document.querySelector<HTMLElement>("#overviewGrid")!;
 const settingsSummaryList = document.querySelector<HTMLElement>("#settingsSummaryList")!;
 const runtimeCollectedAt = document.querySelector<HTMLElement>("#runtimeCollectedAt")!;
 const runtimeGrid = document.querySelector<HTMLElement>("#runtimeGrid")!;
@@ -440,6 +448,12 @@ const generateDiagnosticsButton = document.querySelector<HTMLButtonElement>("#ge
 const openDiagnosticsFolderButton = document.querySelector<HTMLButtonElement>("#openDiagnosticsFolderButton")!;
 const copyDiagnosticsPathButton = document.querySelector<HTMLButtonElement>("#copyDiagnosticsPathButton")!;
 const diagnosticsResult = document.querySelector<HTMLElement>("#diagnosticsResult")!;
+const checkIdentityButton = document.querySelector<HTMLButtonElement>("#checkIdentityButton")!;
+const identityCheckResult = document.querySelector<HTMLElement>("#identityCheckResult")!;
+const diagnosticToolResult = document.querySelector<HTMLElement>("#diagnosticToolResult")!;
+document.querySelector<HTMLElement>("#windowsToolsPanel")!.hidden = !/Windows/i.test(navigator.userAgent);
+let isCheckingIdentity = false;
+
 const detailMenu = document.querySelector<HTMLElement>("#detailMenu")!;
 const detailContent = document.querySelector<HTMLElement>("#detailContent")!;
 const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".tab"));
@@ -678,28 +692,28 @@ const modelWithVendor = (vendor: unknown, model: unknown) => {
 
 const graphicsLabel = (data: Record<string, unknown>) => {
   const controllers = listItems(asRecord(data.graphics).controllers);
-  const primary = controllers.length ? asRecord(controllers[0]) : {};
-  const label = modelWithVendor(
-    firstPresent(primary, ["vendor", "Vendor"]),
-    firstPresent(primary, ["model", "Name"]),
-  );
-  const vram = formatBytes(firstPresent(primary, ["vram", "AdapterRAM"]));
-  if (!label) {
-    return "未采集";
-  }
-  return vram === "未采集" ? label : `${label} ${vram}`;
+  return uniqueTexts(controllers.map((item) => {
+    const controller = asRecord(item);
+    return modelWithVendor(
+      firstPresent(controller, ["vendor", "Vendor"]),
+      firstPresent(controller, ["model", "Name"]),
+    );
+  })).join("\n") || "未采集";
 };
 
 const displayLabel = (data: Record<string, unknown>) => {
   const displays = listItems(asRecord(data.graphics).displays);
-  const primary = displays.length ? asRecord(displays[0]) : {};
-  const model = displayValue(primary.model || primary.name, "");
-  const resolution = displayValue(
-    primary.resolution ||
-      (primary.resolutionX && primary.resolutionY ? `${primary.resolutionX} x ${primary.resolutionY}` : ""),
-    "",
-  );
-  return joinUnique([model, resolution]);
+  return displays.map((item) => {
+    const display = asRecord(item);
+    const model = displayValue(display.model || display.name, "");
+    const resolution = displayValue(
+      display.resolution ||
+        (display.currentResX && display.currentResY ? `${display.currentResX} x ${display.currentResY}` : "") ||
+        (display.resolutionX && display.resolutionY ? `${display.resolutionX} x ${display.resolutionY}` : ""),
+      "",
+    );
+    return joinUnique([model, resolution]);
+  }).filter(Boolean).join("\n") || "未采集";
 };
 
 const listRow = (label: string, values: unknown[]) => {
@@ -802,8 +816,8 @@ const renderHumanDetail = (key: string, data: Record<string, unknown>) => {
         row("名称", item.name),
         row("制造商", item.manufacturer),
         row("序列号", item.serial),
-        row("健康度", item.healthPercent, item.healthPercent ? "%" : ""),
-        row("当前电量", item.chargePercent, item.chargePercent ? "%" : ""),
+        row("健康度", item.healthPercent, finiteNumber(item.healthPercent) !== null ? "%" : ""),
+        row("当前电量", item.chargePercent, finiteNumber(item.chargePercent) !== null ? "%" : ""),
         row("循环次数", item.cycleCount),
         row("状态", item.condition || item.status),
       ]);
@@ -822,7 +836,7 @@ const renderHumanDetail = (key: string, data: Record<string, unknown>) => {
       const hasControllers = listItems(graphics.controllers).length > 0;
       const hasDisplays = listItems(graphics.displays).length > 0;
       const controllers = hasControllers ? listSections("显卡", graphics.controllers, (item) => [
-        row("型号", joinUnique([firstPresent(item, ["vendor", "Vendor"]), firstPresent(item, ["model", "Name"])])),
+        row("型号", modelWithVendor(firstPresent(item, ["vendor", "Vendor"]), firstPresent(item, ["model", "Name"]))),
         row("显存", formatBytes(firstPresent(item, ["vram", "AdapterRAM"]))),
         row("视频处理器", firstPresent(item, ["videoProcessor", "VideoProcessor"])),
         row("驱动版本", firstPresent(item, ["driverVersion", "DriverVersion"])),
@@ -842,9 +856,9 @@ const renderHumanDetail = (key: string, data: Record<string, unknown>) => {
         row("Retina", item.retina),
         row("尺寸", item.sizeX && item.sizeY ? `${item.sizeX} x ${item.sizeY}` : ""),
         row("类型", item.type),
-        row("生产年份", item.productionYear),
+        row("生产年份", item.yearOfManufacture ?? item.productionYear),
       ]) : "";
-      return controllers || displays || emptyDetail();
+      return controllers + displays || emptyDetail();
     }
     case "baseboard": {
       const baseboard = asRecord(data.baseboard);
@@ -1031,7 +1045,7 @@ const hasUploadConfig = (config: AgentConfig = getConfig()) =>
   Boolean(config.site && config.token);
 
 const updateInteractiveState = () => {
-  const diagnosticsBusy = isExportingHardware || isGeneratingDiagnostics;
+  const diagnosticsBusy = isExportingHardware || isGeneratingDiagnostics || isCheckingIdentity;
   nameInput.disabled = isSubmitting;
   siteInput.disabled = isSubmitting;
   tokenInput.disabled = isSubmitting;
@@ -1042,6 +1056,7 @@ const updateInteractiveState = () => {
   verifyConfigButton.disabled = isSubmitting || !hasUploadConfig();
   clearConfigButton.disabled = isSubmitting || !hasUploadConfig(activeConfig);
   saveManualConfigButton.disabled = isSubmitting;
+  checkIdentityButton.disabled = diagnosticsBusy || isCollecting || isSubmitting;
   exportHardwareButton.disabled = diagnosticsBusy || isCollecting || isSubmitting;
   generateDiagnosticsButton.disabled = diagnosticsBusy || isCollecting || isSubmitting;
   openDiagnosticsFolderButton.disabled = diagnosticsBusy;
@@ -1278,48 +1293,10 @@ const switchTab = (tab: TabId) => {
   });
 };
 
-const overviewRows = (): OverviewRow[] => {
-  const data = snapshot?.data ?? {};
-  const cpu = asRecord(data.cpu);
-  const os = asRecord(data.os);
-  const firstNet = primaryNetwork(data.net);
-  const memoryType = firstText(data, ["memory.0.type", "memLayout.0.type"], "");
-  const memorySize = formatBytes(sumSizes(data.memory) || sumSizes(data.memLayout) || asRecord(data.mem).total);
-  const ip = displayValue(firstNet.ip4 || firstNet.ip6);
-  const iface = displayValue(firstNet.ifaceName || firstNet.iface, "");
-  const rows = [
-    { label: "使用人", value: nameInput.value.trim() || "未填写" },
-    { label: "电脑名称", value: firstText(data, ["os.hostname", "system.model"], "未采集"), wide: true },
-    { label: "系统", value: systemLabel(os.distro, os.release), wide: true },
-    { label: "内存", value: [memoryType, memorySize].filter(Boolean).join(" ") },
-    {
-      label: "处理器",
-      value: [cpu.manufacturer, cpu.brand].filter(Boolean).join(" ") || "未采集",
-      wide: true,
-    },
-    { label: "硬盘", value: formatBytes(sumSizes(data.diskLayout)) },
-    { label: "显卡", value: graphicsLabel(data), wide: true },
-    { label: "主板", value: baseboardLabel(data) },
-    { label: "BIOS", value: biosLabel(data) },
-    {
-      label: "当前 IP",
-      value: iface ? `${ip} (${iface})` : ip,
-      wide: true,
-    },
-  ];
-  const display = displayLabel(data);
-  if (display) {
-    rows.push({ label: "显示器", value: display });
-  }
-  return rows;
-};
-
 const settingsSummaryRows = () => {
   const data = snapshot?.data ?? {};
   const cpu = asRecord(data.cpu);
   const os = asRecord(data.os);
-  const system = asRecord(data.system);
-  const baseboard = asRecord(data.baseboard);
   const firstNet = primaryNetwork(data.net);
   const memoryType = firstText(data, ["memory.0.type", "memLayout.0.type"], "");
   const memorySize = formatBytes(sumSizes(data.memory) || sumSizes(data.memLayout) || asRecord(data.mem).total);
@@ -1327,21 +1304,16 @@ const settingsSummaryRows = () => {
   const iface = displayValue(firstNet.ifaceName || firstNet.iface, "");
 
   return [
-    { label: "电脑名称", value: firstText(data, ["os.hostname", "system.model"], "未采集") },
-    { label: "系统", value: systemLabel(os.distro, os.release) },
+    { label: "主板型号", value: baseboardLabel(data) },
+    { label: "操作系统", value: systemLabel(os.distro, os.release) },
     { label: "处理器", value: joinUnique([cpu.manufacturer, cpu.brand]) || "未采集" },
     { label: "内存", value: [memoryType, memorySize].filter(Boolean).join(" ") },
+    { label: "显卡", value: graphicsLabel(data) },
     { label: "硬盘", value: formatBytes(sumSizes(data.diskLayout)) },
-    {
-      label: "主板型号",
-      value:
-        joinUnique([
-          firstPresent(baseboard, ["product", "Product"]),
-          firstPresent(baseboard, ["model", "Model"]),
-          firstPresent(system, ["model", "Model"]),
-        ]) || "未采集",
-    },
+    { label: "电脑名称", value: firstText(data, ["os.hostname", "system.model"], "未采集") },
+    { label: "BIOS", value: biosLabel(data) },
     { label: "当前 IP", value: iface ? `${ip} (${iface})` : ip },
+    { label: "显示器", value: displayLabel(data) },
   ];
 };
 
@@ -1403,7 +1375,7 @@ const runtimeRows = (status: RuntimeStatus | null) => {
         },
       ];
 
-  return [
+  const basicRows = [
     { label: "CPU", value: status ? formatPercent(status.cpu?.usage_percent) : "等待监控" },
     {
       label: "内存",
@@ -1413,20 +1385,29 @@ const runtimeRows = (status: RuntimeStatus | null) => {
       label: `磁盘${diskMount}`,
       value: status ? `${formatBytes(diskUsed)} / ${formatBytes(diskTotal)}` : "等待监控",
     },
-    {
+  ];
+  if (primaryTemperature || advanced?.available || !status) {
+    basicRows.push({
       label: "温度",
       value: primaryTemperature
         ? `${primaryTemperature.label || "传感器"} ${primaryTemperature.temperature_c?.toFixed(1)} C`
         : advanced?.available
           ? "未采集"
-          : "当前系统暂不支持",
-    },
-    ...advancedRows,
-  ];
+          : "等待监控",
+    });
+  }
+  if (advanced?.available || !status) {
+    basicRows.push(...advancedRows);
+  }
+  return basicRows;
 };
 
 const renderRuntimeStatus = (status: RuntimeStatus | null) => {
   runtimeCollectedAt.textContent = status?.collected_at ? `更新 ${formatClock(new Date(status.collected_at))}` : "等待监控";
+  const runtimeSupportNote = document.querySelector<HTMLElement>("#runtimeSupportNote");
+  if (runtimeSupportNote) {
+    runtimeSupportNote.hidden = !status || Boolean(status.temperatures?.length) || Boolean(status.advanced?.available);
+  }
   runtimeGrid.innerHTML = runtimeRows(status)
     .map(
       (item) => `
@@ -1764,21 +1745,18 @@ const renderRuntimeHistory = (
   window.requestAnimationFrame(() => renderRuntimeCharts(chart, metrics));
 };
 
-const renderOverview = () => {
-  overviewGrid.innerHTML = overviewRows()
-    .map(
-      (item) => `
-        <article class="summary-tile ${item.wide ? "wide" : ""}">
-          <span>${escapeHtml(item.label)}</span>
-          <strong>${escapeHtml(item.value)}</strong>
-        </article>
-      `,
-    )
-    .join("");
-};
+const hasBatteryData = (value: unknown) => listItems(value).some((item) =>
+  ["name", "manufacturer", "serial", "healthPercent", "chargePercent", "cycleCount", "condition", "status"].some((key) => {
+    const field = asRecord(item)[key];
+    return typeof field === "number" ? Number.isFinite(field) : typeof field === "string" && field.trim() !== "";
+  })
+);
 
 const renderDetail = () => {
-  detailMenu.innerHTML = detailItems
+  const data = snapshot?.data ?? {};
+  const visibleItems = detailItems.filter((item) => item.key !== "battery" || hasBatteryData(data.battery));
+  if (!visibleItems.some((item) => item.key === activeDetail)) activeDetail = visibleItems[0].key;
+  detailMenu.innerHTML = visibleItems
     .map(
       (item) => `
         <button class="detail-button ${item.key === activeDetail ? "active" : ""}" data-detail="${item.key}" type="button">
@@ -1789,8 +1767,7 @@ const renderDetail = () => {
     )
     .join("");
 
-  const selected = detailItems.find((item) => item.key === activeDetail) ?? detailItems[0];
-  const data = snapshot?.data ?? {};
+  const selected = visibleItems.find((item) => item.key === activeDetail) ?? visibleItems[0];
   detailContent.innerHTML = renderHumanDetail(selected.key, data);
 
   detailMenu.querySelectorAll<HTMLButtonElement>(".detail-button").forEach((button) => {
@@ -1802,7 +1779,6 @@ const renderDetail = () => {
 };
 
 const renderAll = () => {
-  renderOverview();
   renderSettingsSummary();
   renderDetail();
   renderSubmitMeta();
@@ -2285,6 +2261,47 @@ manualConfigDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
   closeManualConfigDialog({ restore: true });
 });
+checkIdentityButton.addEventListener("click", async () => {
+  if (isCheckingIdentity || isCollecting || isSubmitting || isGeneratingDiagnostics || isExportingHardware) return;
+  isCheckingIdentity = true;
+  checkIdentityButton.textContent = "检查中...";
+  identityCheckResult.className = "diagnostics-result";
+  identityCheckResult.textContent = "正在重新采集设备身份...";
+  updateInteractiveState();
+  try {
+    if (!await collect()) throw new Error("采集失败，请导出深度排障包查看原因。");
+    const result = asRecord(snapshot?.data.identityDiagnostics);
+    const label = (value: unknown) => value === "valid" ? "有效" : value === "invalid_placeholder" ? "厂家默认值或无效值" : "未采集到";
+    const ready = result.decision === "ready";
+    identityCheckResult.className = `diagnostics-result ${ready ? "ok" : "error"}`;
+    identityCheckResult.innerHTML = `<strong>${ready ? "可以识别此设备" : "暂时无法识别此设备"}</strong>
+      <span>系统 UUID：${label(result.systemUuid)}</span>
+      <span>主板序列号：${label(result.baseboardSerial)}</span>
+      <span>有效永久 PCI 网卡地址：${escapeHtml(result.permanentPciMacCount ?? 0)} 个</span>
+      <span>${ready ? "本次仅检查，未上传。" : "请导出硬件信息，交给管理员核对。"}</span>`;
+  } catch (error) {
+    identityCheckResult.className = "diagnostics-result error";
+    identityCheckResult.textContent = errorMessage(error);
+  } finally {
+    isCheckingIdentity = false;
+    checkIdentityButton.textContent = "检查设备身份";
+    updateInteractiveState();
+  }
+});
+document.querySelectorAll<HTMLButtonElement>("[data-diagnostic-tool]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await invoke("open_diagnostic_tool", { tool: button.dataset.diagnosticTool });
+      diagnosticToolResult.className = "diagnostics-result ok";
+      diagnosticToolResult.textContent = `已打开${button.textContent?.replace(" ↗", "") ?? "工具"}`;
+    } catch (error) {
+      diagnosticToolResult.className = "diagnostics-result error";
+      diagnosticToolResult.textContent = errorMessage(error);
+    } finally { button.disabled = false; }
+  });
+});
+
 generateDiagnosticsButton.addEventListener("click", () => {
   void generateDiagnostics();
 });

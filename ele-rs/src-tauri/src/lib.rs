@@ -149,9 +149,26 @@ fn get_cached_device_snapshot() -> Result<Option<DeviceSnapshot>, String> {
         }
     }
     let raw = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    serde_json::from_str(&raw)
-        .map(Some)
-        .map_err(|error| format!("缓存快照格式无效：{error}"))
+    let snapshot: DeviceSnapshot =
+        serde_json::from_str(&raw).map_err(|error| format!("缓存快照格式无效：{error}"))?;
+    if !snapshot_cache_is_current(&snapshot) {
+        return Ok(None);
+    }
+    Ok(Some(snapshot))
+}
+
+fn snapshot_cache_is_current(snapshot: &DeviceSnapshot) -> bool {
+    snapshot
+        .data
+        .pointer("/collector/schema")
+        .and_then(Value::as_str)
+        == Some("npcink-upload-light-v3")
+        && snapshot
+            .data
+            .pointer("/collector/version")
+            .and_then(Value::as_str)
+            == Some(env!("CARGO_PKG_VERSION"))
+        && collector::hardware_identity_v2(&snapshot.data).is_some()
 }
 
 fn collect_device_snapshot_inner() -> Result<DeviceSnapshot, String> {
@@ -160,6 +177,15 @@ fn collect_device_snapshot_inner() -> Result<DeviceSnapshot, String> {
         Ok(data) => {
             let (device_identity_type, device_identity) =
                 collector::hardware_identity_v2(&data).unwrap_or(("", String::new()));
+            write_app_log(
+                if device_identity.is_empty() {
+                    "warn"
+                } else {
+                    "info"
+                },
+                "device.identity_evaluated",
+                &collector::identity_diagnostics(&data).to_string(),
+            );
             write_app_log(
                 "info",
                 "device.collect_upload_succeeded",
@@ -345,6 +371,53 @@ fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+const WINDBG_URL: &str = "https://learn.microsoft.com/zh-cn/windows-hardware/drivers/debugger/";
+
+#[cfg(any(target_os = "windows", test))]
+fn diagnostic_tool_spec(tool: &str) -> Result<(&'static str, &'static [&'static str]), String> {
+    match tool {
+        "device_manager" => Ok(("mmc.exe", &["devmgmt.msc"])),
+        "event_viewer" => Ok(("mmc.exe", &["eventvwr.msc"])),
+        "directx" => Ok(("dxdiag.exe", &[])),
+        "reliability" => Ok(("perfmon.exe", &["/rel"])),
+        _ => Err("不支持的排障工具".into()),
+    }
+}
+
+#[tauri::command]
+fn open_diagnostic_tool(app: tauri::AppHandle, tool: String) -> Result<(), String> {
+    if tool == "windbg" {
+        return app
+            .opener()
+            .open_url(WINDBG_URL, None::<&str>)
+            .map_err(|error| error.to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let (program, args) = diagnostic_tool_spec(&tool)?;
+        let system =
+            PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()))
+                .join("System32");
+        let args = args
+            .iter()
+            .map(|arg| {
+                if arg.ends_with(".msc") {
+                    system.join(arg).into_os_string()
+                } else {
+                    (*arg).into()
+                }
+            })
+            .collect::<Vec<_>>();
+        Command::new(system.join(program))
+            .args(args)
+            .spawn()
+            .map_err(|error| format!("无法打开系统工具：{error}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    Err("这些系统工具仅支持 Windows".into())
+}
+
 #[tauri::command]
 fn append_app_log(input: AppLogInput) {
     let level = input.level.as_deref().unwrap_or("info");
@@ -375,6 +448,7 @@ pub fn run() {
             generate_diagnostics_package,
             open_path,
             open_url,
+            open_diagnostic_tool,
             append_app_log
         ])
         .run(tauri::generate_context!())
@@ -535,7 +609,13 @@ fn diagnostics_base_dir() -> Result<PathBuf> {
 }
 
 fn create_hardware_feedback_export() -> Result<HardwareFeedbackExport> {
-    let snapshot = collect_device_snapshot_inner().map_err(anyhow::Error::msg)?;
+    let data = collector::collect_static_data()?;
+    let (kind, identity) = collector::hardware_identity_v2(&data).unwrap_or(("", String::new()));
+    let snapshot = DeviceSnapshot {
+        data,
+        device_identity_type: kind.into(),
+        device_identity: identity,
+    };
     let now = Local::now();
     let stamp = now.format("%Y%m%d-%H%M%S-%3f").to_string();
     write_hardware_feedback_export(
@@ -553,9 +633,14 @@ fn write_hardware_feedback_export(
     stamp: &str,
 ) -> Result<HardwareFeedbackExport> {
     let directory_path = base_dir.join(format!("NpcinkDiagnostics-{stamp}-Hardware"));
-    let mut directory = fs::DirBuilder::new();
     #[cfg(unix)]
-    directory.mode(0o700);
+    let directory = {
+        let mut directory = fs::DirBuilder::new();
+        directory.mode(0o700);
+        directory
+    };
+    #[cfg(not(unix))]
+    let directory = fs::DirBuilder::new();
     directory.create(&directory_path).with_context(|| {
         format!(
             "failed to create hardware feedback dir {}",
@@ -642,6 +727,23 @@ fn create_diagnostics_package(app: tauri::AppHandle) -> Result<DiagnosticsPackag
         &directory_path.join("device-static-data.json"),
         &static_data,
     )?;
+    write_json(
+        &directory_path.join("identity-check.json"),
+        &static_data
+            .get("identityDiagnostics")
+            .cloned()
+            .unwrap_or(json!({"decision": "unavailable"})),
+    )?;
+    write_json(
+        &directory_path.join("hardware-probes.json"),
+        &static_data
+            .get("hardwareProbeAttempts")
+            .cloned()
+            .unwrap_or(json!([])),
+    )?;
+    write_text(&directory_path.join("tools-guide.txt"), &format!(
+        "设备身份：查看 identity-check.json 和 device-static-data.json。\n硬件采集：查看 hardware-probes.json，区分成功、空结果和查询失败。\n系统工具：设备管理器、事件查看器、DirectX 诊断、可靠性监视器，可从客户端排障页打开。\nWinDbg 官方安装说明（分析蓝屏转储）：{WINDBG_URL}\n"
+    ))?;
     write_json(&directory_path.join("runtime-status.json"), &runtime_status)?;
     write_json(
         &directory_path.join("runtime-history.json"),
@@ -1945,6 +2047,43 @@ fn add_dir_to_zip(
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn diagnostics_launches_only_fixed_system_tools() {
+        assert_eq!(
+            diagnostic_tool_spec("device_manager").unwrap(),
+            ("mmc.exe", &["devmgmt.msc"][..])
+        );
+        for tool in ["event_viewer", "directx", "reliability"] {
+            assert!(diagnostic_tool_spec(tool).is_ok());
+        }
+        for input in [
+            "cmd.exe",
+            "directx & calc.exe",
+            "../powershell.exe",
+            "https://example.org",
+        ] {
+            assert!(diagnostic_tool_spec(input).is_err());
+        }
+    }
+
+    #[test]
+    fn snapshot_cache_requires_new_identity_collection_and_current_version() {
+        let mut snapshot = DeviceSnapshot {
+            data: json!({"collector": {"schema": "npcink-upload-light-v3", "version": env!("CARGO_PKG_VERSION")}, "uuid": {"hardware": "valid-test-hardware"}}),
+            device_identity_type: "system_uuid_v2".into(),
+            device_identity: "unused".into(),
+        };
+        assert!(snapshot_cache_is_current(&snapshot));
+        snapshot.data["collector"]["schema"] = json!("npcink-upload-light-v1");
+        assert!(!snapshot_cache_is_current(&snapshot));
+        snapshot.data["collector"]["schema"] = json!("npcink-upload-light-v3");
+        snapshot.data["collector"]["version"] = json!("older-build");
+        assert!(!snapshot_cache_is_current(&snapshot));
+        snapshot.data["collector"]["version"] = json!(env!("CARGO_PKG_VERSION"));
+        snapshot.data["uuid"]["hardware"] = json!("03000200-0400-0500-0006-000700080009");
+        assert!(!snapshot_cache_is_current(&snapshot));
+    }
 
     #[test]
     fn external_url_is_limited_to_project_github_pages() {

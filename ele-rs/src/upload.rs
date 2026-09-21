@@ -155,10 +155,28 @@ fn parse_submit_response(status: reqwest::StatusCode, text: String) -> Result<Va
         .with_context(|| format!("服务器返回成功状态 {status}，但响应格式不是有效 JSON"))
 }
 
-fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
-    crate::collector::hardware_identity_v2(data).context(
-        "missing device identity; check system UUID, motherboard serial, or permanent PCI MAC data",
-    )?;
+pub(crate) fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
+    if crate::collector::hardware_identity_v2(data).is_none() {
+        let diagnostics = crate::collector::identity_diagnostics(data);
+        let label = |key: &str| match diagnostics[key].as_str() {
+            Some("valid") => "有效",
+            Some("invalid_placeholder") => "厂家默认值或无效值",
+            _ => "未采集到",
+        };
+        let failed_queries = diagnostics["probeAttempts"]
+            .as_array()
+            .map_or(0, |attempts| {
+                attempts
+                    .iter()
+                    .filter(|attempt| attempt["status"] == "failed")
+                    .count()
+            });
+        bail!(
+            "无法生成设备身份，尚未上传。系统 UUID：{}；主板序列号：{}；主板厂商：{}；主板型号：{}；CPU 型号：{}；有效永久 PCI MAC：{} 个；查询失败：{} 项。请重新采集；若仍失败，请导出硬件反馈供管理员核对。",
+            label("systemUuid"), label("baseboardSerial"), label("baseboardManufacturer"),
+            label("baseboardModel"), label("processorModel"), diagnostics["permanentPciMacCount"], failed_queries
+        );
+    }
     let collector = object_at(data, "/collector");
     let collected_at = string_at(data, "/collector/collected_at");
     let system = value_at(data, "/system");
@@ -380,7 +398,17 @@ fn graphics_label(data: &Value) -> String {
     data.pointer("/graphics/controllers")
         .and_then(Value::as_array)
         .and_then(|items| items.first())
-        .map(|item| join_non_empty(&[string_field(item, "vendor"), string_field(item, "model")]))
+        .map(|item| {
+            let vendor = string_field(item, "vendor");
+            let model = string_field(item, "model");
+            let vendor = vendor.trim();
+            let model = model.trim();
+            if vendor.is_empty() || model.to_lowercase().starts_with(&vendor.to_lowercase()) {
+                model.to_string()
+            } else {
+                join_non_empty(&[vendor.to_string(), model.to_string()])
+            }
+        })
         .unwrap_or_default()
 }
 
@@ -505,6 +533,41 @@ mod tests {
             .to_string();
         assert!(error.contains("授权码无效、已禁用或签名校验失败"));
         assert!(error.contains("技术详情：Device token is invalid."));
+    }
+
+    #[test]
+    fn graphics_summary_does_not_repeat_vendor_or_change_raw_hardware() {
+        for (vendor, model, expected) in [
+            (
+                "NVIDIA",
+                "NVIDIA GeForce GTX 1650",
+                "NVIDIA GeForce GTX 1650",
+            ),
+            (
+                "Intel(R)",
+                "Intel(R) Iris(R) Xe Graphics",
+                "Intel(R) Iris(R) Xe Graphics",
+            ),
+            (
+                " nvidia ",
+                " NVIDIA GeForce GTX 1650 ",
+                "NVIDIA GeForce GTX 1650",
+            ),
+            ("AMD", "Radeon RX 6600", "AMD Radeon RX 6600"),
+            ("", "Test GPU", "Test GPU"),
+            ("NVIDIA", "", "NVIDIA"),
+        ] {
+            let data = json!({
+                "uuid": {"hardware": "9e9738c7-0418-fb17-af0e-345a601d798b"},
+                "graphics": {"controllers": [{"vendor": vendor, "model": model}]}
+            });
+            let observation = build_observation_v3("", &data).unwrap();
+            assert_eq!(observation["asset"]["summary"]["graphics"], expected);
+            assert_eq!(
+                observation["asset"]["hardware"]["graphics"],
+                data["graphics"]
+            );
+        }
     }
 
     #[test]
