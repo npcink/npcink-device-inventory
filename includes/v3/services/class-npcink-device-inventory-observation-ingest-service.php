@@ -89,7 +89,10 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			$mode = 'created';
 		}
 
-		$claim_results = $this->identities->claim_many(intval($asset['id']), $identities);
+		$claim_results = $this->identities->claim_many(
+			intval($asset['id']),
+			$this->claimable_identities(intval($asset['id']), $identities)
+		);
 		$claim_error = $this->claim_error($claim_results);
 		if ($claim_error) {
 			$this->rollback_transaction();
@@ -115,7 +118,10 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			}
 			$created = false;
 			$mode = 'matched_after_concurrent_claim';
-			$claim_results = $this->identities->claim_many(intval($asset['id']), $identities);
+			$claim_results = $this->identities->claim_many(
+				intval($asset['id']),
+				$this->claimable_identities(intval($asset['id']), $identities)
+			);
 			$claim_error = $this->claim_error($claim_results);
 			if ($claim_error) {
 				$this->rollback_transaction();
@@ -221,14 +227,57 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 
 	private function matching_asset_ids($identities)
 	{
-		$owner_ids = array();
+		$strong_owner_ids = array();
+		$weak_owner_ids = array();
 		foreach ($identities as $identity) {
 			$asset_id = $this->identities->find_asset_id_by_identity($identity['type'], $identity['value']);
 			if ($asset_id) {
-				$owner_ids[] = intval($asset_id);
+				if ($this->is_weak_identity($identity)) {
+					$weak_owner_ids[] = intval($asset_id);
+				} else {
+					$strong_owner_ids[] = intval($asset_id);
+				}
 			}
 		}
-		return array_values(array_unique($owner_ids));
+
+		// A repeated board serial is useful supporting evidence, but it cannot
+		// override a stronger system UUID or permanent PCI MAC owner.
+		if (!empty($strong_owner_ids)) {
+			return array_values(array_unique($strong_owner_ids));
+		}
+		return array_values(array_unique($weak_owner_ids));
+	}
+
+	private function claimable_identities($asset_id, $identities)
+	{
+		$has_strong_identity = false;
+		foreach ($identities as $identity) {
+			if (!$this->is_weak_identity($identity)) {
+				$has_strong_identity = true;
+				break;
+			}
+		}
+		if (!$has_strong_identity) {
+			return $identities;
+		}
+
+		$claimable = array();
+		foreach ($identities as $identity) {
+			if (!$this->is_weak_identity($identity)) {
+				$claimable[] = $identity;
+				continue;
+			}
+			$owner_id = $this->identities->find_asset_id_by_identity($identity['type'], $identity['value']);
+			if (!$owner_id || intval($owner_id) === intval($asset_id)) {
+				$claimable[] = $identity;
+			}
+		}
+		return $claimable;
+	}
+
+	private function is_weak_identity($identity)
+	{
+		return isset($identity['type']) && $identity['type'] === 'baseboard_serial_v2';
 	}
 
 	private function legacy_migration_conflicts($asset, $incoming_identities)

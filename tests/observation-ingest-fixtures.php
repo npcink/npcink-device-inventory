@@ -226,6 +226,17 @@ class Npcink_Multiple_Device_Identity_Service extends Npcink_Device_Inventory_De
 	{
 		return array(
 			$this->primary_identity(),
+			array('type' => 'pci_permanent_mac_v2', 'value' => 'pci-v2-fixture', 'confidence' => 80, 'source' => 'server_recomputed'),
+		);
+	}
+}
+
+class Npcink_Repeated_Board_Identity_Service extends Npcink_Device_Inventory_Device_Identity_Service
+{
+	public function identities()
+	{
+		return array(
+			$this->primary_identity(),
 			array('type' => 'baseboard_serial_v2', 'value' => 'board-v2-fixture', 'confidence' => 100, 'source' => 'server_recomputed'),
 		);
 	}
@@ -412,7 +423,7 @@ $assets = new Npcink_Device_Inventory_Asset_Repository(
 $identities = new Npcink_Device_Inventory_Identity_Repository();
 $identities->matched_asset_ids = array(
 	'system_uuid_v2:system-v2-fixture' => 11,
-	'baseboard_serial_v2:board-v2-fixture' => 22,
+	'pci_permanent_mac_v2:pci-v2-fixture' => 22,
 );
 $service = new Npcink_Device_Inventory_Observation_Ingest_Service(
 	$assets,
@@ -424,6 +435,30 @@ $service = new Npcink_Device_Inventory_Observation_Ingest_Service(
 $result = $service->ingest(npcink_ingest_payload());
 npcink_ingest_assert($result instanceof WP_Error && $result->code === 'identity_evidence_conflict', 'conflicting strong identities must fail closed');
 npcink_ingest_assert($wpdb->commands === array(), 'identity evidence conflicts must fail before starting a transaction');
+
+$wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
+$assets = new Npcink_Device_Inventory_Asset_Repository(
+	array(
+		11 => npcink_ingest_asset_row(11, 'system-owner'),
+		22 => npcink_ingest_asset_row(22, 'board-owner'),
+	)
+);
+$identities = new Npcink_Device_Inventory_Identity_Repository();
+$identities->matched_asset_ids = array(
+	'system_uuid_v2:system-v2-fixture' => 11,
+	'baseboard_serial_v2:board-v2-fixture' => 22,
+);
+$service = new Npcink_Device_Inventory_Observation_Ingest_Service(
+	$assets,
+	$identities,
+	new Npcink_Device_Inventory_Observation_Repository(),
+	new Npcink_Device_Inventory_Event_Service(),
+	new Npcink_Repeated_Board_Identity_Service()
+);
+$result = $service->ingest(npcink_ingest_payload());
+npcink_ingest_assert(is_array($result) && $result['data']['mode'] === 'matched', 'a repeated board serial must not override a stronger identity owner');
+npcink_ingest_assert($identities->claimed_asset_ids === array(11), 'a repeated board serial must not be claimed by the stronger identity owner');
+npcink_ingest_assert(count($identities->claimed_identities[0]) === 1, 'a conflicting board serial must be skipped when a stronger identity is present');
 
 $wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
 $assets = new Npcink_Device_Inventory_Asset_Repository(array(11 => npcink_ingest_asset_row(11, 'legacy-owner')));
