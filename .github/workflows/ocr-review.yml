@@ -1,0 +1,107 @@
+# Canonical OpenCodeReview PR workflow template (AI Code Review Standard v1).
+# Owner: npcink-workflow-toolbox docs/platform/ai-code-review-standard-v1.md
+#
+# Enrollment per repository:
+#   1. Copy to .github/workflows/ocr-review.yml on a topic branch.
+#   2. Secrets: OCR_LLM_URL, OCR_LLM_AUTH_TOKEN (operator types them).
+#   3. Variables: OCR_LLM_MODEL, OCR_LLM_USE_ANTHROPIC
+#      (OpenAI-compatible providers such as GLM use 'false').
+#   4. Merge only after the secrets exist. Keep this workflow advisory:
+#      never add it to required checks.
+#
+# Derived from alibaba/open-code-review examples/github_actions/ocr-review.yml,
+# with the action pinned to a release tag and an explicit review language.
+
+name: OpenCodeReview PR Review
+
+# Per-PR concurrency: matching events (PR events + /open-code-review comments)
+# share one group so a new review cancels a stale one; unrelated comments land
+# in a unique noop group and are skipped without disrupting a running review.
+concurrency:
+  group: >-
+    ${{
+      (
+        github.event_name == 'pull_request_target'
+        || (
+          github.event_name == 'issue_comment'
+          && github.event.issue.pull_request
+          && github.event.comment.user.type != 'Bot'
+          && (
+            github.event.comment.author_association == 'MEMBER'
+            || github.event.comment.author_association == 'OWNER'
+            || github.event.comment.author_association == 'COLLABORATOR'
+          )
+          && (
+            startsWith(github.event.comment.body, '/open-code-review')
+            || startsWith(github.event.comment.body, '@open-code-review')
+          )
+        )
+      )
+      && format('ocr-{0}', github.event.pull_request.number || github.event.issue.number)
+      || format('noop-{0}', github.run_id)
+    }}
+  cancel-in-progress: true
+
+on:
+  # pull_request_target so secrets are available for fork PRs; safe because the
+  # action only reads the diff and runs no code from the PR.
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # PR events, or human-authored comments starting with the trigger keyword.
+    # Bot comments and non-MEMBER/OWNER/COLLABORATOR users cannot spend quota.
+    if: |
+      github.event_name == 'pull_request_target'
+      || (
+        github.event_name == 'issue_comment'
+        && github.event.issue.pull_request
+        && github.event.comment.user.type != 'Bot'
+        && (
+          github.event.comment.author_association == 'MEMBER'
+          || github.event.comment.author_association == 'OWNER'
+          || github.event.comment.author_association == 'COLLABORATOR'
+        )
+        && (
+          startsWith(github.event.comment.body, '/open-code-review')
+          || startsWith(github.event.comment.body, '@open-code-review')
+        )
+      )
+    steps:
+      - name: Get PR context
+        id: pr-context
+        if: github.event_name == 'issue_comment'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Resolve PR base/head for issue_comment events, which carry no
+            // top-level pull_request payload fields.
+            const prNumber = context.issue.number;
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            core.setOutput('base_ref', pullRequest.base.ref);
+            core.setOutput('head_sha', pullRequest.head.sha);
+
+      - name: Run OpenCodeReview
+        uses: alibaba/open-code-review@v1.12.10
+        with:
+          llm_url: ${{ secrets.OCR_LLM_URL }}
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: ${{ vars.OCR_LLM_MODEL }}
+          llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+          # Review-comment language; switch to Chinese if preferred.
+          language: English
+          base_ref: ${{ steps.pr-context.outputs.base_ref }}
+          head_sha: ${{ steps.pr-context.outputs.head_sha }}
