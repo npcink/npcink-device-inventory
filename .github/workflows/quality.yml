@@ -48,7 +48,14 @@ jobs:
           cache: npm
           cache-dependency-path: vite-admin/package-lock.json
       - run: npm ci
+      # Blocking gate: the production dependency tree (what ships). The
+      # full tree is audited separately below because braces (build-time
+      # only, via tailwindcss 3 -> chokidar) has NO patched release in any
+      # version; until the tailwind 4 migration the dev-tree residual is
+      # tracked there without blocking every pull request on it.
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm audit --audit-level=high
+        continue-on-error: true
       - run: npm run check:hardware-audit
       - run: npm run lint
       - run: npm run build
