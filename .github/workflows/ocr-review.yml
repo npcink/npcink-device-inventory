@@ -59,10 +59,12 @@ permissions:
 
 jobs:
   code-review:
-    # Pinned ahead of the 2026-10-19 ubuntu-latest -> Ubuntu 26 migration
-    # (actions/runner-images#14748). Bump deliberately after revalidating the
-    # review action on the newer image.
-    runs-on: ubuntu-24.04
+    # Pinned to the validated Ubuntu 26.04 image: the pilot's runner canary
+    # proved the review action end-to-end on ubuntu-26.04 on 2026-10-04
+    # (npcink-abilities-toolkit run 37258146682), ahead of the 2026-10-19
+    # ubuntu-latest migration (actions/runner-images#14748). Re-run the
+    # canary before bumping further.
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     # PR events, or human-authored comments starting with the trigger keyword.
     # Bot comments and non-MEMBER/OWNER/COLLABORATOR users cannot spend quota.
@@ -101,7 +103,10 @@ jobs:
             core.setOutput('head_sha', pullRequest.head.sha);
 
       - name: Run OpenCodeReview
-        uses: alibaba/open-code-review@v1.12.10
+        # alibaba/open-code-review v1.12.10 (tag object b465046, commit
+        # 579b931; pinned by commit SHA because the action receives the LLM
+        # auth token - bump deliberately and record the new tag->commit pair).
+        uses: alibaba/open-code-review@579b9319151aa734f2d25df6e59efa59eec5a577
         with:
           llm_url: ${{ secrets.OCR_LLM_URL }}
           llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
