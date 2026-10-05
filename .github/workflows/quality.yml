@@ -54,8 +54,11 @@ jobs:
       # version; until the tailwind 4 migration the dev-tree residual is
       # tracked there without blocking every pull request on it.
       - run: npm audit --omit=dev --audit-level=high
-      - run: npm audit --audit-level=high
-        continue-on-error: true
+      # Dev-tree audit is non-blocking but must stay visible: on findings it
+      # records a warning annotation on the run instead of hiding behind a
+      # green continue-on-error step.
+      - name: Dev dependency-tree audit (non-blocking)
+        run: npm audit --audit-level=high || echo "::warning::dev dependency tree has npm audit findings (non-blocking, see this step's log)"
       - run: npm run check:hardware-audit
       - run: npm run lint
       - run: npm run build
