@@ -25,6 +25,7 @@ This folder keeps the current product contracts, development guardrails, release
 - `local-acceptance-2026-10-27.md`: read-only acceptance of 180 existing computers, stored/REST fact equality, real detail samples, old snapshot coverage and the remaining Windows acceptance boundary.
 - `pre-release-review-2026-10-28.md`: Windows/release preflight findings, reused versions, stale ZIP evidence, smoke-script gaps, signed candidate publication and ordered acceptance gates.
 - `release-candidate-preparation-2026-10-28.md`: implemented Agent 0.4.5/plugin 3.2.4 release preparation, local package hash, regression evidence and unresolved Windows/network/Docker gates.
+- `windows-preview-build-2026-10-28.md`: subsequent authorized M5 Docker acceptance, online submission gates, Windows preview build fixes, and installer verification.
 - `decisions/ADR-018-accept-immutable-release-candidates.md`: immutable signed drafts, manual publication, exact artifact hashes and the post-publication official updater smoke boundary.
 - `device-upload-troubleshooting-and-operations.md`: production upload troubleshooting, evidence, and recovery runbook.
 - `decisions/ADR-003-pre-ga-scope-reset.md`: pre-GA scope reset; its analysis restriction is partially superseded by ADR-009.
