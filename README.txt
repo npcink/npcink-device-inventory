@@ -66,11 +66,6 @@ The project repository includes the built files and the corresponding React/Type
 
 Run `npm install && npm run build` inside `vite-admin` to rebuild the bundled assets.
 
-== Upgrade Notice ==
-
-= 3.2.4 =
-Requires Device Agent 0.4.5 and HTTPS. Older request signatures are rejected; existing authorization codes remain valid. Back up the database before upgrading.
-
 == Privacy ==
 
 Npcink Device Inventory stores device asset data in the local WordPress database. Depending on how the site owner configures and uses the plugin, stored data may include device names, assigned users or locations, departments, status values, IP addresses, hardware identifiers, hardware details, and event history.
@@ -207,6 +202,10 @@ The plugin does not transmit this data to Npcink or any third-party server durin
 * Moved desktop uploads to signed v3 device observations.
 
 == Upgrade Notice ==
+
+= 3.2.4 =
+Requires Device Agent 0.4.5 and HTTPS. Older request signatures are rejected; existing authorization codes remain valid. Back up the database before upgrading.
+
 
 = 3.1.0 =
 Upgrade the WordPress plugin before deploying Device Agent 0.3.0. Existing v1 assets are matched once and gain v2 identities on their next upload.

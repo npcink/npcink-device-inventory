@@ -12,8 +12,10 @@ try {
     $source = 'process.stdout.write(JSON.stringify(process.argv.slice(1))); process.stderr.write("normal native stderr");'
     $result = Invoke-SmokeCommand -FilePath "node" -Arguments (@("-e", $source, "--") + $values) -StdoutPath $outPath -StderrPath $errPath -TimeoutSeconds 10
     if ($result.exit_code -ne 0) { throw "Native stderr was treated as failure" }
-    $actual = @(Get-Content -Raw -Encoding UTF8 $outPath | ConvertFrom-Json)
-    if ($actual.Count -ne $values.Count) { throw "Argument count changed" }
+    # PS5.1 emits the JSON array as one pipeline object; PS7 enumerates it.
+    # Direct assignment works for both, unlike wrapping the pipeline in @().
+    $actual = Get-Content -Raw -Encoding UTF8 $outPath | ConvertFrom-Json
+    if ($actual.Count -ne $values.Count) { throw "Argument count changed: expected $($values.Count), received $($actual.Count)" }
     for ($i = 0; $i -lt $values.Count; $i++) {
         if ($actual[$i] -cne $values[$i]) { throw "UTF-8 or argument boundary changed at index $i" }
     }
