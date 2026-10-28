@@ -23,6 +23,13 @@ test("version gate rejects a Tauri API minor incompatible with the resolved Rust
     }
     const run = () => spawnSync(process.execPath, [path.join(dir, "scripts/check-version-contract.mjs")], { encoding: "utf8", env: { ...process.env, RELEASE_TAG: "" } });
     assert.equal(run().status, 0);
+    for (const file of files.filter((file) => file !== "scripts/check-version-contract.mjs")) {
+      const dest = path.join(dir, file);
+      const source = await readFile(dest, "utf8");
+      await writeFile(dest, source.replace(/\r?\n/g, "\r\n"));
+    }
+    const windowsResult = run();
+    assert.equal(windowsResult.status, 0, windowsResult.stderr);
     const lockPath = path.join(dir, "ele-rs/package-lock.json");
     const lock = JSON.parse(await readFile(lockPath, "utf8"));
     lock.packages["node_modules/@tauri-apps/api"].version = "2.11.1";

@@ -55,7 +55,7 @@ if (releaseTag) {
 console.log(`Version contract passed: plugin=${pluginVersion}, desktop=${desktopVersion}.`);
 
 async function read(relativePath) {
-  return readFile(path.join(repoRoot, relativePath), "utf8");
+  return (await readFile(path.join(repoRoot, relativePath), "utf8")).replace(/\r\n/g, "\n");
 }
 
 function tomlVersion(source) {
