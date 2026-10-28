@@ -69,7 +69,7 @@ Run `npm install && npm run build` inside `vite-admin` to rebuild the bundled as
 == Upgrade Notice ==
 
 = 3.2.4 =
-Upgrade with Device Agent 0.4.5. Request signatures v2 reject older clients; keep existing upload authorization codes. Use HTTPS without redirects. Back up the database before upgrading; restore previews report skipped retired v1 identities.
+Requires Device Agent 0.4.5 and HTTPS. Older request signatures are rejected; existing authorization codes remain valid. Back up the database before upgrading.
 
 == Privacy ==
 
