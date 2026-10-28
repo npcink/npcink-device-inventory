@@ -27,6 +27,12 @@ function Invoke-SmokeCommand {
         stderr = $StderrPath
         timeout_ms = $TimeoutSeconds * 1000
     } | ConvertTo-Json -Depth 5 -Compress
+    # Windows PowerShell 5.1 can retain the caller's native-pipeline code page.
+    # ASCII JSON escapes preserve Unicode even when that caller uses ASCII/OEM.
+    $request = [regex]::Replace($request, '[^\x00-\x7F]', [System.Text.RegularExpressions.MatchEvaluator]{
+        param($match)
+        '\u{0:x4}' -f [int][char]$match.Value
+    })
     # The runner emits only a short JSON result; native stderr is saved as bytes,
     # never reinterpreted as a PowerShell ErrorRecord under ErrorAction=Stop.
     $response = $request | & node $script:CommandRunner

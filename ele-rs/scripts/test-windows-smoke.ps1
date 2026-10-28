@@ -10,6 +10,8 @@ try {
     $label = [string][char]0x4e2d + [char]0x6587
     $values = @($label, "space & dollar`$()", "single'quote", 'double"quote', 'trailing\', '')
     $source = 'process.stdout.write(JSON.stringify(process.argv.slice(1))); process.stderr.write("normal native stderr");'
+    # Exercise the PS5.1 default code page as well as the UTF-8 host setup.
+    $OutputEncoding = [Text.Encoding]::ASCII
     $result = Invoke-SmokeCommand -FilePath "node" -Arguments (@("-e", $source, "--") + $values) -StdoutPath $outPath -StderrPath $errPath -TimeoutSeconds 10
     if ($result.exit_code -ne 0) { throw "Native stderr was treated as failure" }
     # PS5.1 emits the JSON array as one pipeline object; PS7 enumerates it.
