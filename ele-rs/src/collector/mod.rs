@@ -5,73 +5,38 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::IpAddr;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::{Mutex, OnceLock};
-use std::thread;
 use std::time::{Duration, Instant};
-use sysinfo::{Components, Disks, Networks, System};
+use sysinfo::{
+    Components, CpuRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System,
+};
 
 mod platform;
 
 const RUNTIME_HISTORY_MAX_SAMPLES: usize = 8_640;
 const ADVANCED_RUNTIME_CACHE_TTL: Duration = Duration::from_secs(15);
+pub const INVENTORY_SCHEMA: &str = "npcink-hardware-inventory-v3";
 static RUNTIME_HISTORY: OnceLock<Mutex<VecDeque<Value>>> = OnceLock::new();
 static ADVANCED_RUNTIME_CACHE: OnceLock<Mutex<Option<(Instant, Value)>>> = OnceLock::new();
 
+/// Both local inspection and normal uploads use the same complete hardware inventory.
 pub fn collect_static_data() -> Result<Value> {
-    let mut system = System::new_all();
-    system.refresh_all();
-
-    let disks = Disks::new_with_refreshed_list();
-    let networks = Networks::new_with_refreshed_list();
-    let network_ips = network_ip_map();
-    let macs = collect_macs(&networks, &network_ips);
-    let hardware_uuid = platform::hardware_uuid().unwrap_or_default();
-
-    let mut root = Map::new();
-    root.insert("os".to_string(), collect_os());
-    root.insert("cpu".to_string(), collect_cpu(&system));
-    root.insert("mem".to_string(), collect_memory(&system));
-    root.insert("memLayout".to_string(), collect_mem_layout(&system));
-    root.insert("system".to_string(), collect_system(&hardware_uuid));
-    root.insert("diskLayout".to_string(), collect_disks(&disks));
-    root.insert("fsSize".to_string(), collect_fs_size(&disks));
-    root.insert("net".to_string(), collect_networks(&networks, &network_ips));
-    root.insert(
-        "uuid".to_string(),
-        json!({
-            "hardware": hardware_uuid,
-            "macs": macs,
-        }),
-    );
-    root.insert(
-        "collector".to_string(),
-        json!({
-            "name": env!("CARGO_PKG_NAME"),
-            "version": env!("CARGO_PKG_VERSION"),
-            "runtime": "rust",
-            "schema": "systeminformation-staticdata-compatible-v1",
-            "collected_at": Utc::now().to_rfc3339(),
-        }),
-    );
-
-    platform::enrich(&mut root);
-
-    finish_identity_collection(root, |_| {})
+    platform::with_collection_budget(|| collect_inventory_with(platform::enrich))
 }
 
-/// Collect only the fields required for the normal upload flow. Expensive
-/// platform enrichment (system_profiler/CIM inventories and raw platform
-/// payloads) remains available through collect_static_data for diagnostics.
 pub fn collect_upload_data() -> Result<Value> {
-    collect_upload_data_with(platform::enrich_upload)
+    collect_static_data()
 }
 
-pub(crate) fn collect_upload_data_with(
+pub(crate) fn collect_inventory_with(
     enrich: impl FnOnce(&mut Map<String, Value>),
 ) -> Result<Value> {
-    let mut system = System::new_all();
-    system.refresh_all();
+    let system = System::new_with_specifics(
+        RefreshKind::new()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything()),
+    );
 
     let disks = Disks::new_with_refreshed_list();
     let networks = Networks::new_with_refreshed_list();
@@ -83,6 +48,8 @@ pub(crate) fn collect_upload_data_with(
     root.insert("os".to_string(), collect_os());
     root.insert("cpu".to_string(), collect_cpu(&system));
     root.insert("mem".to_string(), collect_memory(&system));
+    root.insert("memLayout".to_string(), json!([]));
+    root.insert("fsSize".to_string(), collect_fs_size(&disks));
     root.insert("system".to_string(), collect_system(&hardware_uuid));
     root.insert("diskLayout".to_string(), collect_disks(&disks));
     root.insert("net".to_string(), collect_networks(&networks, &network_ips));
@@ -96,7 +63,8 @@ pub(crate) fn collect_upload_data_with(
             "name": env!("CARGO_PKG_NAME"),
             "version": env!("CARGO_PKG_VERSION"),
             "runtime": "rust",
-            "schema": "npcink-upload-light-v3",
+            "schema": INVENTORY_SCHEMA,
+            "observation_id": new_observation_id(),
             "collected_at": Utc::now().to_rfc3339(),
         }),
     );
@@ -104,9 +72,39 @@ pub(crate) fn collect_upload_data_with(
     finish_identity_collection(root, enrich)
 }
 
+pub fn valid_observation_id(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(i, b)| match i {
+            8 | 13 | 18 | 23 => b == b'-',
+            14 => b == b'4',
+            19 => matches!(b, b'8' | b'9' | b'a' | b'b'),
+            _ => b.is_ascii_digit() || (b'a'..=b'f').contains(&b),
+        })
+}
+
+fn new_observation_id() -> String {
+    use rand::RngCore;
+    let mut bytes = [0_u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|value| format!("{value:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    )
+}
+
 pub fn collect_runtime_status() -> Result<Value> {
-    let mut system = System::new_all();
-    system.refresh_all();
+    let system = System::new_with_specifics(
+        RefreshKind::new()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything()),
+    );
 
     let disks = Disks::new_with_refreshed_list();
     let networks = Networks::new_with_refreshed_list();
@@ -510,31 +508,15 @@ fn command_output_with_timeout(
     args: &[&str],
     timeout: Duration,
 ) -> std::io::Result<CommandOutput> {
-    let mut child = new_command(program)
-        .args(args)
-        .env("PATH", command_search_path())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-
-    let start = Instant::now();
-    let mut timed_out = false;
-    loop {
-        if child.try_wait()?.is_some() {
-            break;
-        }
-        if start.elapsed() >= timeout {
-            timed_out = true;
-            let _ = child.kill();
-            break;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    let output = child.wait_with_output()?;
+    let output = crate::command::output_with_timeout(
+        new_command(program)
+            .args(args)
+            .env("PATH", command_search_path()),
+        timeout,
+    )?;
     Ok(CommandOutput {
-        success: output.status.success(),
-        timed_out,
+        success: output.status.success() && !output.stdout_truncated,
+        timed_out: output.timed_out,
         stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
     })
@@ -640,89 +622,6 @@ fn runtime_disk_usage(disks: &Disks) -> (u64, u64, String) {
         .sum::<u64>();
 
     (total, available, "all".to_string())
-}
-
-/// Fallback identity used only when the canonical motherboard identity cannot
-/// be computed. It combines one stable hardware fact with one physical MAC.
-pub fn fallback_device_v1(data: &Value) -> Option<String> {
-    let mac = data
-        .pointer("/uuid/macs")
-        .and_then(Value::as_array)
-        .and_then(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .find_map(normalize_identity_mac)
-        })?;
-    let candidates = [
-        (
-            "hardware_uuid",
-            data.pointer("/uuid/hardware").and_then(Value::as_str),
-        ),
-        (
-            "system_uuid",
-            data.pointer("/system/uuid").and_then(Value::as_str),
-        ),
-        (
-            "system_serial",
-            data.pointer("/system/serial").and_then(Value::as_str),
-        ),
-        (
-            "baseboard_serial",
-            data.pointer("/baseboard/serial").and_then(Value::as_str),
-        ),
-        (
-            "bios_serial",
-            data.pointer("/bios/serial").and_then(Value::as_str),
-        ),
-    ];
-    for (kind, value) in candidates {
-        if let Some(value) = value.and_then(normalize_identity_value) {
-            let source = format!("{kind}:{value}|primary_mac:{mac}");
-            let digest = Sha256::digest(source.as_bytes());
-            let full = format!("{:x}", digest);
-            return Some(format!("fallback-v1-{}", &full[..29]));
-        }
-    }
-    None
-}
-
-/// Canonical business identity: this represents the motherboard-backed device.
-/// Replacing the motherboard deliberately changes this value and creates a new
-/// managed computer; replaceable peripherals do not participate.
-pub fn device_uuid_v1(data: &Value) -> Option<String> {
-    let baseboard = data.pointer("/baseboard")?.as_object()?;
-    let serial = baseboard
-        .get("serial")
-        .or_else(|| baseboard.get("serialNumber"))
-        .and_then(Value::as_str)
-        .and_then(normalize_identity_value)?;
-    let manufacturer = baseboard
-        .get("manufacturer")
-        .and_then(Value::as_str)
-        .and_then(normalize_identity_value);
-    let model = baseboard
-        .get("product")
-        .or_else(|| baseboard.get("model"))
-        .and_then(Value::as_str)
-        .and_then(normalize_identity_value);
-    let hardware_uuid = data
-        .pointer("/uuid/hardware")
-        .and_then(Value::as_str)
-        .or_else(|| data.pointer("/system/uuid").and_then(Value::as_str))
-        .and_then(normalize_identity_value);
-    if hardware_uuid.is_none() && (manufacturer.is_none() || model.is_none()) {
-        return None;
-    }
-    let source = format!(
-        "baseboard_manufacturer={}|baseboard_model={}|baseboard_serial={serial}|hardware_uuid={}",
-        manufacturer.unwrap_or_default(),
-        model.unwrap_or_default(),
-        hardware_uuid.unwrap_or_default()
-    );
-    let digest = Sha256::digest(source.as_bytes());
-    let full = format!("{:x}", digest);
-    Some(format!("device-v1-{}", &full[..29]))
 }
 
 /// Server-compatible hardware identity v2 candidates, ordered from strongest
@@ -983,7 +882,7 @@ fn collect_os() -> Value {
         "arch": std::env::consts::ARCH,
         "platform": std::env::consts::OS,
         "hostname": System::host_name().unwrap_or_default(),
-        "fqdn": System::host_name().unwrap_or_default(),
+        "fqdn": Value::Null,
         "distro": System::long_os_version().or_else(System::name).unwrap_or_default(),
         "kernel": System::kernel_version().unwrap_or_default(),
         "release": System::os_version().unwrap_or_default(),
@@ -995,10 +894,10 @@ fn collect_cpu(system: &System) -> Value {
     json!({
         "brand": first.map(|cpu| cpu.brand()).unwrap_or_default(),
         "vendor": first.map(|cpu| cpu.vendor_id()).unwrap_or_default(),
-        "speed": first.map(|cpu| cpu.frequency()).unwrap_or_default(),
+        "currentFrequency": first.map(|cpu| cpu.frequency()).unwrap_or_default(),
         "cores": system.cpus().len(),
-        "physicalCores": system.physical_core_count().unwrap_or(system.cpus().len()),
-        "processors": 1,
+        "physicalCores": system.physical_core_count(),
+        "processors": Value::Null,
     })
 }
 
@@ -1016,24 +915,6 @@ fn collect_memory(system: &System) -> Value {
         "swapFree": system.free_swap(),
         "swapUsed": used_swap,
     })
-}
-
-fn collect_mem_layout(system: &System) -> Value {
-    let total = system.total_memory();
-    if total == 0 {
-        return Value::Array(Vec::new());
-    }
-
-    Value::Array(vec![json!({
-        "bank": if cfg!(target_os = "macos") { "Unified Memory" } else { "" },
-        "size": total,
-        "type": if cfg!(target_os = "macos") { "Unified" } else { "" },
-        "clockSpeed": 0,
-        "formFactor": "",
-        "manufacturer": if cfg!(target_os = "macos") { "Apple" } else { "" },
-        "serialNum": "",
-        "partNum": "",
-    })])
 }
 
 fn collect_system(hardware_uuid: &str) -> Value {
@@ -1074,8 +955,9 @@ fn collect_fs_size(disks: &Disks) -> Value {
             .iter()
             .map(|disk| {
                 json!({
-                    "fs": disk.mount_point().to_string_lossy(),
-                    "type": disk.file_system().to_string_lossy(),
+                    "name": disk.name().to_string_lossy(),
+                    "fsType": disk.file_system().to_string_lossy(),
+                    "type": format!("{:?}", disk.kind()),
                     "size": disk.total_space(),
                     "used": disk.total_space().saturating_sub(disk.available_space()),
                     "available": disk.available_space(),
@@ -1094,18 +976,18 @@ fn is_asset_disk_mount(mount: &str) -> bool {
 }
 
 fn collect_networks(networks: &Networks, ips: &BTreeMap<String, Vec<IpAddr>>) -> Value {
-    let mut default_assigned = false;
     let mut rows = Vec::new();
 
     for (iface, data) in networks.iter() {
         let (ip4, ip6) = iface_ips(iface, ips);
         let internal = is_internal_iface(iface, &ip4, &ip6);
         let virtual_iface = is_virtual_iface(iface);
-        let has_ip = has_routable_ip(&ip4, &ip6);
-        let default = !default_assigned && has_ip && !internal && !virtual_iface;
-        if default {
-            default_assigned = true;
-        }
+        let addresses: Vec<String> = ips
+            .get(iface)
+            .into_iter()
+            .flatten()
+            .map(ToString::to_string)
+            .collect();
 
         rows.push(json!({
             "iface": iface,
@@ -1113,10 +995,11 @@ fn collect_networks(networks: &Networks, ips: &BTreeMap<String, Vec<IpAddr>>) ->
             "ip4": ip4,
             "ip6": ip6,
             "mac": data.mac_address().to_string(),
-            "default": default,
+            "default": null,
+            "addresses": addresses,
             "internal": internal,
             "virtual": virtual_iface,
-            "operstate": if data.total_received() > 0 || data.total_transmitted() > 0 { "up" } else { "unknown" },
+            "operstate": "unknown",
         }));
     }
 
@@ -1213,91 +1096,8 @@ fn is_virtual_iface(iface: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{device_uuid_v1, fallback_device_v1, hardware_identities_v2, hardware_identity_v2};
+    use super::{hardware_identities_v2, hardware_identity_v2};
     use serde_json::{json, Value};
-
-    #[test]
-    fn fallback_identity_keeps_shared_uuid_devices_separate_by_mac() {
-        let first = json!({"uuid": {"hardware": "HW-SHARED", "macs": ["aa:bb:cc:dd:ee:01"]}});
-        let second = json!({"uuid": {"hardware": "HW-SHARED", "macs": ["aa:bb:cc:dd:ee:02"]}});
-        assert_eq!(
-            fallback_device_v1(&first).as_deref(),
-            Some("fallback-v1-a6987ef89bdc403942b084ff7ba72")
-        );
-        assert_ne!(fallback_device_v1(&first), fallback_device_v1(&second));
-    }
-
-    #[test]
-    fn fallback_identity_requires_a_usable_mac() {
-        let data = json!({"uuid": {"hardware": "HW-ONLY", "macs": ["00:00:00:00:00:00"]}});
-        assert_eq!(fallback_device_v1(&data), None);
-    }
-
-    #[test]
-    fn device_uuid_ignores_replaceable_hardware_but_changes_with_the_board() {
-        let first = json!({
-            "uuid": {"hardware": "HW-ONE"},
-            "baseboard": {"manufacturer": "Npcink", "product": "Board A", "serial": "BOARD-ONE"},
-            "diskLayout": [{"serialNum": "DISK-ONE"}],
-        });
-        let replaced_disk = json!({
-            "uuid": {"hardware": "HW-ONE"},
-            "baseboard": {"manufacturer": "Npcink", "product": "Board A", "serial": "BOARD-ONE"},
-            "diskLayout": [{"serialNum": "DISK-TWO"}],
-        });
-        let replaced_board = json!({
-            "uuid": {"hardware": "HW-TWO"},
-            "baseboard": {"manufacturer": "Npcink", "product": "Board B", "serial": "BOARD-TWO"},
-        });
-        assert_eq!(device_uuid_v1(&first), device_uuid_v1(&replaced_disk));
-        assert_ne!(device_uuid_v1(&first), device_uuid_v1(&replaced_board));
-    }
-
-    #[test]
-    fn device_uuid_matches_the_cross_end_contract_fixture() {
-        let data = json!({
-            "uuid": {"hardware": " BOARD-UUID "},
-            "baseboard": {"manufacturer": " Example  Inc ", "product": "Board Pro", "serial": "BOARD-001"},
-        });
-        assert_eq!(
-            device_uuid_v1(&data).as_deref(),
-            Some("device-v1-8c8a3dad23be3fc4e958ca4c94cea")
-        );
-    }
-
-    #[test]
-    fn current_identities_reject_the_shared_invalid_value_matrix() {
-        let fixture: Value = serde_json::from_str(include_str!(
-            "../../../tests/fixtures/device-identity-invalid-values.json"
-        ))
-        .expect("shared invalid identity fixture must be valid JSON");
-        let invalid_values = fixture["invalidValues"]
-            .as_array()
-            .expect("invalidValues must be an array");
-
-        for invalid_value in invalid_values {
-            let invalid_value = invalid_value
-                .as_str()
-                .expect("invalid identity fixture values must be strings");
-            let canonical = json!({
-                "uuid": {"hardware": "HW-VALID"},
-                "baseboard": {"manufacturer": "Npcink", "product": "Board", "serial": invalid_value},
-            });
-            let fallback = json!({
-                "uuid": {"hardware": invalid_value, "macs": ["aa:bb:cc:dd:ee:01"]},
-            });
-            assert_eq!(
-                device_uuid_v1(&canonical),
-                None,
-                "canonical identity accepted invalid value: {invalid_value}"
-            );
-            assert_eq!(
-                fallback_device_v1(&fallback),
-                None,
-                "fallback identity accepted invalid value: {invalid_value}"
-            );
-        }
-    }
 
     #[test]
     fn hardware_v2_keeps_independent_strong_signals_and_ignores_replaceable_parts() {

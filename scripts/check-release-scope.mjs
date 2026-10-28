@@ -36,6 +36,7 @@ const cases = [
 
 const detectEnv = { ...process.env, RELEASE_TAG: "v2.8.0" };
 delete detectEnv.GITHUB_OUTPUT;
+delete detectEnv.PREVIOUS_RELEASE_TAG;
 
 for (const testCase of cases) {
   const actual = needsDesktopRelease(testCase.paths);

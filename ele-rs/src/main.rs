@@ -49,7 +49,9 @@ fn upload_inspect(args: &[String]) -> Result<()> {
     let data = collector::collect_upload_data()?;
     let elapsed_ms = started_at.elapsed().as_millis();
     let payload_bytes = serde_json::to_vec(&data)?.len();
-    eprintln!("upload-light collection: elapsed_ms={elapsed_ms} payload_bytes={payload_bytes}");
+    eprintln!(
+        "hardware inventory collection: elapsed_ms={elapsed_ms} payload_bytes={payload_bytes}"
+    );
     if pretty {
         println!("{}", serde_json::to_string_pretty(&data)?);
     } else {
@@ -98,10 +100,10 @@ fn print_help() {
     println!(
         "Npcink Device Agent\n\n\
 Commands:\n\
-  inspect [--pretty]    Print compatible hardware JSON\n\
-  upload-inspect [--pretty]  Print the lightweight upload JSON and timing\n\
+  inspect [--pretty]    Print complete hardware JSON\n\
+  upload-inspect [--pretty]  Print complete upload inventory JSON and timing\n\
   runtime [--pretty]    Print runtime monitor JSON\n\
-  device-id             Print the canonical or fallback device identity\n\
+  device-id             Print the current hardware device identity\n\
   submit --site URL --token TOKEN [--note NOTE]            Submit to device observation endpoint\n"
     );
 }

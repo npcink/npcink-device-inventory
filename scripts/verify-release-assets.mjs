@@ -23,8 +23,8 @@ const windows = platformAsset(latest, "windows-x86_64", ".exe");
 
 downloadAsset(latestDesktop, "macosAarch64", ".dmg");
 downloadAsset(latestDesktop, "windowsX64", ".exe");
-assertManifestSignature(mac);
-assertManifestSignature(windows);
+await assertManifestSignature(mac);
+await assertManifestSignature(windows);
 
 execFileSync("unzip", ["-t", pluginZip], { stdio: "inherit" });
 

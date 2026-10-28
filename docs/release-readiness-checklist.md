@@ -4,6 +4,8 @@
 
 这份清单用于每次发布 `Npcink Device Inventory` 前做最后验收。它覆盖代码静态检查、前端构建、发布包结构、桌面更新清单和本地后台冒烟测试。
 
+tag 构建只创建不可覆盖的草稿候选；人工验收后发布同一批制品。完整流程及正式自动更新的后置验收边界见 `github-release.md`。
+
 ## 自动检查
 
 在仓库根目录运行：
@@ -15,11 +17,12 @@ npm run check:release
 
 该命令面向日常 GitHub release 包，只检查 `release/npcink-device-inventory.zip`，并要求仓库中不存在陈旧的 `sj/npcink-device-inventory.zip`。它会依次执行：
 
+- `npm run check:release-tools`：命令超时/子进程、版本递增及制品完整性回归。
 - `npm run check:versions`，确认插件、README、桌面 Node/Tauri/Cargo 版本契约一致；tag release 还要求 tag 与插件版本一致。
 - `npm run check:release-scope`，验证插件与桌面发布范围判定规则。
 - 后台硬件盘点 fixture、ESLint 和生产构建。
 - WordPress.org 人工审核规则检查。
-- `npm run check:fixtures`，集中执行备份恢复、搜索、资产写入、上传边界、迁移、当前身份契约、身份占用和采集事务等 PHP 回归夹具。
+- `npm run check:fixtures`，集中执行备份恢复、搜索、资产写入、上传边界、当前 schema、当前身份契约、身份占用和采集事务等 PHP 回归夹具。
 - PHPStan 与 PHPCS。
 - `npm run check:desktop-quality`，执行桌面前端构建、两个 Rust crate 的 fmt、Clippy、测试和 Cargo lockfile 漏洞审计。
 - `git diff --check`，检查空白字符问题。
@@ -96,7 +99,7 @@ release 中重新生成或手动修改这两个文件。
 
 正式桌面更新发布前，还要人工确认本机安装的是上一版正式 Release 包，而不是本地开发构建包；不要复用相同桌面版本号发布不同内容。
 
-在真实 GUI 更新 smoke 前，可以先用上一版 app bundle 和本次 release 资产做升级路径预检：
+以下预检仅支持 macOS，不代表 Windows 升级验收。在真实 GUI 更新 smoke 前，可以先用上一版 app bundle 和本次 release 资产做升级路径预检：
 
 ```bash
 npm run check:desktop-update-transition -- --previous-app="/path/to/Npcink Device Agent.app" --artifacts="/path/to/downloaded/release-assets"
@@ -109,7 +112,7 @@ npm run check:desktop-update-transition -- --previous-app="/path/to/Npcink Devic
 在本地 WordPress 后台打开：
 
 ```text
-http://npcink-device-manage.local/wp-admin/plugins.php?page=npcink_device_inventory_settings
+http://device.local/wp-admin/plugins.php?page=npcink_device_inventory_settings
 ```
 
 至少确认：
@@ -150,7 +153,12 @@ POST /wp-json/npcink-device-inventory/v1/device-observations    -> 401
 
 - GitHub Actions preview 能分别构建 `macos` 和 `windows` 桌面包。
 - macOS 安装包仍标注为内部测试；正式外部分发前必须补 Apple Developer ID 签名和公证。
-- Windows 安装包能在真实 Windows 机器安装、启动、采集并上传。
+- Windows 普通用户和管理员分别完成采集，源代码烟测明确列出 skipped/manual，不能当作安装包通过。
+- Windows 最终候选 exe 可在干净机器安装、启动、采集并向独立 HTTPS 站点上传；检查 WebView2、中文路径、配置与 Credential Manager 凭据保留、卸载保留策略。
+- 从正式 Agent 0.4.4 用候选安装包升级，核对版本递增、配置保留和失败恢复。
+- Tauri updater 签名与 Windows Authenticode 分别记录；当前无 Authenticode，只用于信任的内部环境。
+- 插件 3.2.4 与 Agent 0.4.5 配套使用签名v2；旧客户端会被拒绝，授权码无需重发。
+- 私有草稿不能被上一版固定 latest endpoint 发现。发布前验证签名/manifest及手动安装升级；人工发布已验草稿后，在测试安装上补真实自动更新 smoke，再向工作设备推广。
 - 设置页“软件更新”和原生菜单“检查更新”都能触发同一套更新检查。
 - 从上一版正式 Release 包升级到新版，版本号、下载地址和安装进度显示正常。
 
@@ -162,4 +170,6 @@ POST /wp-json/npcink-device-inventory/v1/device-observations    -> 401
 - 不提交临时截图；`sj/assets/screenshot-1.png` 到 `screenshot-5.png` 是明确标记为不得发布的历史对照文件，3.0 界面冻结后重新采集。
 - 不提交 `node_modules`、`vendor`、`.release-build` 或额外 zip。
 - 日常 GitHub release 使用 `release/npcink-device-inventory.zip`。
-- 上传 WordPress.org 前先运行 `npm run build:submission && npm run check:submission`，再使用 `sj/npcink-device-inventory.zip`。
+- 上传 WordPress.org 前运行 `npm run check:docker`（会构建最终双 ZIP）和 `npm run check:submission`；随后直接使用该哈希对应的 `sj/npcink-device-inventory.zip`，不再次构建。
+- 记录候选 commit、版本、ZIP/exe/manifest 哈希、Windows实机结果；未提交的源码不属于远端候选。
+- 正式发布只发布已验草稿，不覆盖现有版本资产；发布后检查 `Verify published candidate` 并完成官方更新入口 smoke。

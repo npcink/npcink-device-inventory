@@ -1,6 +1,6 @@
 [package]
 name = "npcink-device-agent"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2021"
 description = "Rust hardware collector and uploader for Npcink Device Inventory"
 license = "GPL-3.0-or-later"
@@ -17,3 +17,6 @@ serde_json = "1.0"
 sha2 = "0.10"
 sysinfo = "0.30"
 url = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -87,7 +87,9 @@ require_once __DIR__ . '/../includes/v3/repositories/class-npcink-device-invento
 $wpdb = new Npcink_Asset_Search_Wpdb();
 $repository = new Npcink_Device_Inventory_Asset_Repository();
 $method = new ReflectionMethod($repository, 'should_search_extended_asset_data');
-$method->setAccessible(true);
+if (PHP_VERSION_ID < 80100) {
+	$method->setAccessible(true);
+}
 
 npcink_asset_search_assert($method->invoke($repository, '') === false, 'empty search should not trigger extended search');
 npcink_asset_search_assert($method->invoke($repository, 'it') === false, 'short keyword should not trigger extended search');

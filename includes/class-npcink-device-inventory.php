@@ -67,15 +67,10 @@ class Npcink_Device_Inventory
 	 */
 	public function __construct()
 	{
-		if (defined('NPCINK_DEVICE_INVENTORY_VERSION')) {
-			$this->version = NPCINK_DEVICE_INVENTORY_VERSION;
-		} else {
-			$this->version = '1.0.0';
-		}
+		$this->version = NPCINK_DEVICE_INVENTORY_VERSION;
 		$this->plugin_name = 'npcink-device-inventory';
 
 		$this->load_dependencies();
-		$this->set_locale();
 		$this->define_admin_hooks();
 	}
 
@@ -85,7 +80,6 @@ class Npcink_Device_Inventory
 	 * Include the following files that make up the plugin:
 	 *
 	 * - Npcink_Device_Inventory_Loader. Orchestrates the hooks of the plugin.
-	 * - Npcink_Device_Inventory_I18n. Defines internationalization functionality.
 	 * - Npcink_Device_Inventory_Admin. Defines all hooks for the admin area.
 	 *
 	 * Create an instance of the loader which will be used to register the hooks
@@ -104,31 +98,11 @@ class Npcink_Device_Inventory
 		require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-npcink-device-inventory-loader.php';
 
 		/**
-		 * The class responsible for defining internationalization functionality
-		 * of the plugin.
-		 */
-		require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-npcink-device-inventory-i18n.php';
-
-		/**
 		 * The class responsible for defining all actions that occur in the admin area.
 		 */
 		require_once plugin_dir_path(dirname(__FILE__)) . 'admin/class-npcink-device-inventory-admin.php';
 
 		$this->loader = new Npcink_Device_Inventory_Loader();
-	}
-
-	/**
-	 * Define the locale for this plugin for internationalization.
-	 *
-	 * Uses the Npcink_Device_Inventory_I18n class in order to set the domain and to register the hook
-	 * with WordPress.
-	 *
-	 * @since    1.0.0
-	 * @access   private
-	 */
-	private function set_locale()
-	{
-		// WordPress.org loads plugin translations automatically for this text domain.
 	}
 
 	/**

@@ -1,7 +1,3 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
 #root {
   max-width: 100%;
   box-sizing: border-box;
@@ -1179,6 +1175,12 @@
 
 .npcink-v3-spec-nav {
   display: grid;
+  position: sticky;
+  top: 0;
+  max-height: 65vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
   gap: 2px;
   padding: 8px 0;
   border-right: 1px solid #d9dee7;
@@ -1195,6 +1197,8 @@
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .npcink-v3-spec-nav button::after {
@@ -1231,6 +1235,13 @@
   padding: 11px 14px;
   color: #1f2328;
   font-size: 14px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.npcink-v3-spec-table .ant-table-tbody > tr.npcink-v3-spec-group > td {
+  background: #f5f7fa;
+  color: #45546b;
 }
 
 .npcink-v3-auto-search {
@@ -2591,8 +2602,11 @@
 
   .npcink-v3-spec-nav {
     display: flex;
+    flex-wrap: wrap;
     gap: 12px;
-    overflow-x: auto;
+    overflow-x: hidden;
+    position: static;
+    max-height: none;
     padding: 0 0 8px;
     border-right: 0;
     border-bottom: 1px solid #d9dee7;

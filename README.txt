@@ -4,7 +4,7 @@ Tags: inventory, assets, device management, rest api, admin
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 3.2.3
+Stable tag: 3.2.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,11 @@ The project repository includes the built files and the corresponding React/Type
 
 Run `npm install && npm run build` inside `vite-admin` to rebuild the bundled assets.
 
+== Upgrade Notice ==
+
+= 3.2.4 =
+Upgrade with Device Agent 0.4.5. Request signatures v2 reject older clients; keep existing upload authorization codes. Use HTTPS without redirects. Back up the database before upgrading; restore previews report skipped retired v1 identities.
+
 == Privacy ==
 
 Npcink Device Inventory stores device asset data in the local WordPress database. Depending on how the site owner configures and uses the plugin, stored data may include device names, assigned users or locations, departments, status values, IP addresses, hardware identifiers, hardware details, and event history.
@@ -74,8 +79,15 @@ The plugin does not transmit this data to Npcink or any third-party server durin
 
 == Changelog ==
 
+= 3.2.4 =
+* Pair with Device Agent 0.4.5: collect detailed memory, 64-bit DXGI graphics memory, physical storage relationships and query diagnostics within bounded budgets.
+* Preserve successfully collected records when a query partially fails or times out; show collected fields in eight detail groups and hide empty fields by default.
+* Require request signatures v2; upgrade the plugin and Agent together. Existing upload authorization codes remain valid, but older Agent signatures are rejected.
+* Strengthen upload validation, idempotent receipts, identity ownership, backup restore and uninstall cleanup; remove obsolete compatibility paths.
+* Build immutable draft release candidates with version, checksum and signing verification before manual acceptance and publication.
+
 = 3.2.3 =
-* Bundle Device Agent 0.4.3: restore motherboard and permanent PCI network identity collection in ordinary Windows uploads.
+* Bundle Device Agent 0.4.4: restore motherboard and permanent PCI network identity collection in ordinary Windows uploads.
 * Improve Windows query fallbacks, invalidate incomplete cached snapshots, and explain missing identity before upload.
 * Keep existing server identity matching and conflict protection; update desktop TLS dependencies.
 

@@ -1,7 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 //配置路径
-import path from "path";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const projectDir = fileURLToPath(new URL(".", import.meta.url));
 // https://vitejs.dev/config/
 
 const site = "/wp-content/plugins/npcink-device-inventory/";
@@ -13,6 +15,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     build: {
+      manifest: true,
       rollupOptions: {
         output: {
           // 指定 chunk 文件名（含导出的代码）
@@ -21,11 +24,10 @@ export default defineConfig(({ mode }) => {
           //assetFileNames: 'assets/[name].[ext]',
           entryFileNames: "index.js",
           assetFileNames: "[name][extname]",
-          chunkFileNames: "[name].js",
+          chunkFileNames: "[name]-[hash].js",
         },
       },
-      // The admin app is intentionally loaded as one module in WordPress admin.
-      // Splitting Ant Design into manual chunks introduced runtime cycles in WP.
+      // Lazy-load business workspaces; keep Ant Design splitting automatic to avoid vendor cycles.
       chunkSizeWarningLimit: 1300,
       //sourcemap: true,//保留映射关系，方便调试
     },
@@ -37,13 +39,13 @@ export default defineConfig(({ mode }) => {
               {
                 find: "@/utils/demoConfig",
                 replacement: path.resolve(
-                  __dirname,
+                  projectDir,
                   "src/utils/demoConfig.prod.ts"
                 ),
               },
             ]
           : []),
-        { find: "@", replacement: path.resolve(__dirname, "src") },
+        { find: "@", replacement: path.resolve(projectDir, "src") },
       ],
     },
 

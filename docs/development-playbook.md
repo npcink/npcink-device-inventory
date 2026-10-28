@@ -16,7 +16,7 @@
 - 服务端根据上传事实计算身份，不信任客户端传入的身份哈希；身份冲突必须失败关闭，绝不自动合并资产。
 - 资产编号是可变管理字段，不是硬件身份；编号复用前必须先处理旧资产并核对身份、观测和 latest 指针。
 - 已归档资产是保留历史的非业务记录：仍占用原编号，但不参与普通列表、统计、分析、采集趋势、更新候选或资产表格导出；设备上传命中归档资产时返回 `409 asset_archived`。完整备份仍保留其资产、身份、观测和事件。具体边界见 ADR-012。
-- 已报废资产仍参与历史台账与审计并保留采购价，但二手市场价和当前账面净值必须为零；该不变量由服务端覆盖单台、批量、导入和恢复写入，历史数据通过幂等迁移修正。归档不会触发这项清零规则。
+- 已报废资产仍参与历史台账与审计并保留采购价，但二手市场价和当前账面净值必须为零；该不变量由服务端覆盖单台、批量、导入和恢复写入，历史数据在接入当前基线前离线核对，不再自动重放旧修正迁移。归档不会触发这项清零规则。
 - 磁盘、内存、显卡、USB 网卡、当前 MAC 和 CPU `ProcessorId` 是快照或辅助核对信息，不进入自动身份摘要。
 - 显示器、物理硬盘、网络路由和电池等新增字段默认进入观测层；采集失败允许部分为空，不阻断其他硬件事实上传。
 
@@ -34,9 +34,7 @@
 
 身份事实可以多条并存，但每条都有名称、来源和置信度。当前 v2 身份为：有效系统 UUID、有效主板序列号，以及仅限物理非虚拟 PCI 网卡的永久 MAC。服务端一次计算全部证据；证据属于不同资产时返回 `409 identity_evidence_conflict`。这让“为何匹配、为何拒绝”都可追溯。
 
-兼容代码必须有退出条件。v1 仅在 v2 首次上传找不到拥有者时用于查找旧资产，并在同一事务中补写 v2；新资产不再写 v1。观察完已有资产升级后，应单独决定删除这条过渡查询的版本和条件。
-
-旧身份迁移不能只验证“旧哈希命中”。目标资产最近观测和本次上传都能计算出 v2 身份时，至少要共享一个证据；完全不相交必须在事务前返回 409。32/35 串号事件证明，迁移兼容层比新算法本身更容易固化历史错误。
+兼容代码必须有退出条件。用户确认项目仅本人使用，已按 ADR-017 删除 v1 过渡查询、历史数据库迁移链和旧字段别名。运行时只使用三种 v2 身份及当前备份结构；3.2.3 备份附带的冗余旧价格字段被忽略，旧 v1 身份在恢复预览中明确计数并跳过。其他旧数据先备份、离线核对和转换，不在上传路径自动纠正。32/35 串号事件仍是保留当前冲突保护、禁止编号猜测归属的历史依据。
 
 ### 控制复杂度：删除未证实的承诺
 
@@ -73,7 +71,7 @@
 
 - 上一阶段发布候选为 WordPress 插件 3.1.4 与 Device Agent 0.3.3，历史记录见 [`release-verification-2026-08-10-v3.1.4.md`](release-verification-2026-08-10-v3.1.4.md)。
 - 部署顺序必须是先升级插件，再部署 Agent；否则新 Agent 的身份事实和错误语义可能无法按当前契约处理。
-- 观察已有 v1 资产首次上传是否唯一命中并补写 v2；在实际覆盖完成前，不删除 v1 过渡查询。
+- 当前工作区已移除 v1 过渡路径，见 ADR-017；历史发布记录中的兼容规则不再约束当前实现。部署含旧数据的其他站点前先离线转换，并核对身份、观测和 latest 指针。
 - 对 133 这类只依赖 PCI 永久 MAC 的设备，网卡更换后需要人工确认资产关系，不能自动把新身份并入旧资产。
 - 正式环境采用轻量诊断：Agent 反馈 JSON + 稳定错误码 + WordPress 身份/观测/事件；不常驻完整请求与命令输出面板。
 - 未出现重复、可量化的真实使用需求前，不扩张功能范围；出现后从本手册第一步重新开始。
@@ -85,8 +83,9 @@
 - [`asset-data-model.md`](asset-data-model.md)：运行时数据模型。
 - [`identity-contract.md`](identity-contract.md)：身份算法、请求 schema 与错误语义。
 - [`decisions/ADR-003-pre-ga-scope-reset.md`](decisions/ADR-003-pre-ga-scope-reset.md)：产品范围。
-- [`decisions/ADR-004-hardware-identity-v2.md`](decisions/ADR-004-hardware-identity-v2.md)：v2 身份选择与迁移理由。
-- [`decisions/ADR-006-guard-legacy-identity-migration.md`](decisions/ADR-006-guard-legacy-identity-migration.md)：旧 v1 → v2 迁移的证据连续性保护。
+- [`decisions/ADR-004-hardware-identity-v2.md`](decisions/ADR-004-hardware-identity-v2.md)：v2 身份选择；迁移部分已由 ADR-017 替代。
+- [`decisions/ADR-006-guard-legacy-identity-migration.md`](decisions/ADR-006-guard-legacy-identity-migration.md)：旧迁移保护的历史记录，已由 ADR-017 替代。
+- [`decisions/ADR-017-remove-historical-compatibility.md`](decisions/ADR-017-remove-historical-compatibility.md)：删除历史兼容层，采用当前结构、字段和身份契约。
 - [`decisions/ADR-007-keep-production-diagnostics-lightweight.md`](decisions/ADR-007-keep-production-diagnostics-lightweight.md)：正式环境保持轻量诊断的决定。
 - [`decisions/ADR-008-separate-asset-number-identity-and-observation.md`](decisions/ADR-008-separate-asset-number-identity-and-observation.md)：资产编号、设备身份和硬件观测的责任边界。
 - [`decisions/ADR-009-restore-read-only-analysis.md`](decisions/ADR-009-restore-read-only-analysis.md)：只读分析、组合查询、价值口径和被排除的可写工作流。
@@ -100,3 +99,24 @@
 - [`windows-identity-and-asset-reconciliation-incident-2026-08-05.md`](windows-identity-and-asset-reconciliation-incident-2026-08-05.md)：133 采集故障与 32/35 串号的完整复盘和修复规范。
 - [`release-readiness-checklist.md`](release-readiness-checklist.md)：发布门禁。
 - [`windows-hardware-identity-pilot.md`](windows-hardware-identity-pilot.md)：实机试点方法与原始结论。
+
+
+## 管理端模块与加载约束
+
+- `vite-admin/src/pages/index.tsx` 只负责工作区导航；资产、分析、事件、数据工具和设置分别放在对应目录。
+- 共享数据/财务、展示、表格导入导出、缓存和详情转换位于 `pages/shared`；共享层不得反向依赖业务工作区，避免循环依赖。
+- 工作区使用 `React.lazy`；低频弹窗通过 `DeferredPanel` 首次打开时加载，此后保留挂载以运行原有关闭动画及重置逻辑。
+- 不手工拆分 Ant Design vendor chunk。内容哈希 chunk 与 Vite manifest 一起打包；`check:bundle-budget` 同时约束入口、外壳、默认资产页和全部 JS 体积。
+- 整改依据、测试证据及剩余依赖提示见 [2026-10-26 整改记录](project-remediation-2026-10-26.md)。
+
+## 写事务与缓存边界
+
+- 数据库成功 COMMIT 或 ROLLBACK 后，再失效受影响仓库的缓存；事务中的提前失效不能替代提交后的失效，其他连接可能已把旧提交态填入新版本。
+- 按 ID 查询与列表查询均须遵循同一失效契约，不得留下不带版本的对象缓存键。
+- 关联 UPDATE 的 false 必须向上传递，使调用方回滚；0 行变更是否成功应按业务语义判断，不能统一当作失败。
+- 本轮回归证据见 [2026-10-27 本地复查](local-project-review-2026-10-27.md)。
+
+## 备份查询失败边界
+
+- wpdb 的空数组／null 同时可能表示空结果或 SQL 错误。导出分区和恢复查重须立即检查 `last_error`，不得把错误转换为成功的空备份、记录不存在或跳过关联。
+- 恢复预览失败应返回结构化 REST 错误；实际导入在后续查询失败时也须撤销此前已完成的更新。独立 fixture 之外，应在隔离 MariaDB 中验证真实返回值与回滚。

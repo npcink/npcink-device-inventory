@@ -7,10 +7,11 @@ if (!defined('ABSPATH')) {
 class Npcink_Device_Inventory_Device_Observations_Controller
 {
 	const MAX_BODY_BYTES = 2097152;
-	const MAX_DEPTH = 12;
+	const MAX_DEPTH = 24;
 	const MAX_ARRAY_ITEMS = 512;
-	const MAX_TOTAL_NODES = 5000;
+	const MAX_TOTAL_NODES = 20000;
 	const MAX_STRING_BYTES = 10000;
+	const MAX_KEY_BYTES = 128;
 
 	private $ingest;
 	private $auth;
@@ -80,24 +81,28 @@ class Npcink_Device_Inventory_Device_Observations_Controller
 		return rest_ensure_response($this->ingest->ingest($params));
 	}
 
-	private function validate_payload_shape($value, $depth, &$nodes)
+	private function validate_payload_shape($value, $depth, &$nodes, $path = '')
 	{
 		$nodes++;
 		if ($nodes > self::MAX_TOTAL_NODES || $depth > self::MAX_DEPTH) {
-			return Npcink_Device_Inventory_V3_Response::error('observation_too_complex', 'Observation structure is too large or deeply nested.', 413);
+			return Npcink_Device_Inventory_V3_Response::error('observation_too_complex', 'Observation structure is too large or deeply nested.', 413, array('path' => $path));
 		}
 		if (is_array($value)) {
 			if (count($value) > self::MAX_ARRAY_ITEMS) {
 				return Npcink_Device_Inventory_V3_Response::error('observation_too_complex', 'Observation array contains too many items.', 413);
 			}
-			foreach ($value as $item) {
-				$result = $this->validate_payload_shape($item, $depth + 1, $nodes);
+			foreach ($value as $key => $item) {
+				if (is_string($key) && strlen($key) > self::MAX_KEY_BYTES) {
+					return Npcink_Device_Inventory_V3_Response::error('observation_key_too_large', 'Observation field name exceeds 128 bytes.', 413, array('path' => $path));
+				}
+				$child_path = $path . '/' . str_replace(array('~', '/'), array('~0', '~1'), (string) $key);
+				$result = $this->validate_payload_shape($item, $depth + 1, $nodes, $child_path);
 				if (is_wp_error($result)) {
 					return $result;
 				}
 			}
 		} elseif (is_string($value) && strlen($value) > self::MAX_STRING_BYTES) {
-			return Npcink_Device_Inventory_V3_Response::error('observation_string_too_large', 'Observation contains an oversized string.', 413);
+			return Npcink_Device_Inventory_V3_Response::error('observation_string_too_large', 'Observation contains an oversized string.', 413, array('path' => $path));
 		}
 		return true;
 	}

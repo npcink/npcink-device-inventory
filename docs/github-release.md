@@ -1,125 +1,143 @@
-# GitHub release packaging
+# GitHub release candidates and publication
 
-This repository builds three release artifacts through GitHub Actions:
+Tag builds create **draft candidates**, never a public Release. Existing draft or
+published versions are immutable: the workflow fails rather than replacing their
+assets. Preview builds remain unsigned packaging checks, not updater acceptance.
 
-- `npcink-device-inventory.zip`: installable Npcink Device Inventory WordPress plugin package.
-- `Npcink Device Agent_*.dmg`: macOS hardware information uploader for Apple Silicon internal testing.
-- `Npcink Device Agent_*_x64-setup.exe`: Windows hardware information uploader.
-- `latest-desktop.json`: desktop update metadata used by the app's manual update check.
-- `latest.json`: signed Tauri updater metadata used by automatic desktop updates.
+## Versions and source
 
-macOS DMG artifacts are currently unsigned and not notarized. They are attached
-to tagged releases for internal testing only; public distribution must add Apple
-Developer ID signing and notarization first.
+Current development candidate: plugin **3.2.4**, Device Agent **0.4.5**. The previous
+formal release is plugin 3.2.3 with Agent 0.4.4. Do not reuse either old version.
 
-Tauri updater signatures are separate from Apple Developer ID signing. The
-updater signature verifies that downloaded update packages were produced by this
-project, but it does not remove macOS Gatekeeper warnings for unsigned apps.
+Commit all intended source and record the candidate commit before tagging. The
+workflow reads the latest published release as its baseline, checks strictly
+increasing plugin/desktop versions, and compares changed paths against that
+published tag. Unpublished candidate tags do not become the release baseline.
+
+This release changes both ends of the upload contract: request signature v2 is
+mandatory. Install the matching Agent and plugin together; old Agent signatures
+are rejected, while existing authorization codes remain valid. Use HTTPS without
+redirects. Back up the actual database before updating, and rehearse restore and
+upgrade using a copy of the previous site's data in an isolated environment.
+
+## Local checks
+
+```bash
+npm run build:release
+npm run check:release
+```
+
+For the final isolated WordPress/MariaDB and WordPress.org submission gate:
+
+```bash
+npm run check:docker
+npm run check:submission
+```
+
+Docker builds the final synchronized release/submission ZIPs. Do not rebuild
+after these checks without verifying the new hashes and rerunning the affected
+gates. Record `sj/package-manifest.json` and the final package SHA-256. The local
+package is not automatically byte-identical to a later CI build: each candidate
+must be identified and accepted by its own hash.
 
 ## Preview build
 
-Open GitHub Actions and run `Build preview packages`.
+`Build preview packages` supports `plugin`, `macos`, `windows`, `desktop`, and
+`all`; artifacts expire after seven days. It uses Node 24, plugin PHP checks,
+admin lint/build and package checks, and both Rust crates' fmt/Clippy/tests before
+building desktop installers. Preview does not enable Tauri updater artifacts or
+produce the signed update manifests. It cannot certify automatic updates.
 
-Choose one package target:
+## Signed draft candidate
 
-- `plugin`: WordPress plugin zip only.
-- `macos`: macOS DMG only.
-- `windows`: Windows installer only.
-- `desktop`: macOS and Windows desktop installers.
-- `all`: plugin zip plus both desktop installers.
+Only after source and local gates are ready, create the new plugin version tag
+(for example `v3.2.4`) and push it. Tag creation/push is a separate release action;
+these documentation commands are not automatically executed by local checks.
 
-Preview artifacts are attached to the workflow run and expire after 7 days.
-Use this workflow while iterating on UI, icons, copy, and packaging checks.
+`Build release packages` selects plugin-only or full desktop scope. Desktop
+source/release-tool changes require a full build with a higher desktop version.
+Pure plugin releases keep the previously published desktop manifests unchanged.
 
-The preview workflow uses Node 24, runs PHP syntax checks for plugin PHP files,
-builds the `vite-admin` app with `npm ci`, audits the WordPress plugin zip boundary,
-and runs `cargo check` before building the macOS/Windows Tauri installers.
-The CI packaging script also unpacks the generated WordPress zip back into
-`release/npcink-device-inventory/` so WordPress Plugin Check can scan the same
-files that are shipped in the zip.
+Desktop tag builds require `TAURI_SIGNING_PRIVATE_KEY`; the password secret is
+optional for an unencrypted key. Never print keys or commit them. The generated
+`.sig` files must verify against the updater public key in Tauri configuration.
+Tauri signatures do not provide Windows Authenticode or Apple Developer ID
+signing/notarization. Unsigned platform packages are for trusted internal testing.
+Public external distribution requires the relevant platform signing first.
 
-## Local end-to-end verification
+Candidate assets include the plugin ZIP, desktop installers/updater packages and
+signatures when applicable, `latest.json`, `latest-desktop.json`, `candidate.json`
+(source tag, commit, versions and scope), and `SHA256SUMS`. The workflow downloads
+the uploaded draft with authenticated `gh`, checks the complete file set and
+hashes, and verifies desktop updater signatures. Drafts are not served by the
+public `releases/latest/download/` endpoint.
 
-Before creating a tag, run the local end-to-end smoke test against a Local WP
-site. `WP_PATH` and `SITE_URL` are required so the script does not assume a
-machine-specific local site name.
+The build also saves `candidate.json` and `SHA256SUMS` as an independent Actions
+artifact for 90 days. The post-publication verifier requires the original
+successful tag build and compares both files with that proof, so replacing both
+a Release asset and its own checksum does not satisfy verification. Complete
+acceptance within that retention window and archive the evidence; an expired
+candidate needs a new version/build. Local download verification requires `gh`
+authentication with repository/actions read access.
+
+To inspect a draft locally, use an empty output directory and a checkout of the
+candidate tag:
 
 ```bash
-WP_PATH="/path/to/wordpress" \
-SITE_URL="https://example.local" \
+TAG_NAME=v3.2.4 npm run check:published-release -- candidate-assets --draft
+npm run check:desktop-manifests -- candidate-assets
+npm run check:release-assets -- candidate-assets
+```
+
+The last two commands apply to full desktop candidates. Copy the verification
+template, record candidate commit, hashes, run links, Windows collection and
+installer/upgrade evidence. Do not replace draft assets after acceptance; source
+or artifact changes require a new candidate version/tag.
+
+## Windows acceptance and final publication
+
+Run the [Windows collection matrix](windows-collection-acceptance-2026-10-27.md),
+then install the exact candidate exe on a clean machine. Test ordinary/admin
+permissions, WebView2, Chinese paths, Credential Manager/configuration retention,
+previous Agent 0.4.4 installation → candidate installer upgrade, failure recovery,
+and uninstall retention policy. Verify plugin upgrade/backup restoration and
+signature-v2 uploads on an isolated HTTPS site, never on `device.local`.
+
+The installed 0.4.4 Agent has a fixed official latest endpoint. A private draft
+cannot complete its real in-app automatic update. Before publication, verify the
+signed bytes/manifests and manual installer upgrade; an isolated updater harness
+may provide additional evidence, but is not the old official GUI. Keep the real
+settings/menu automatic-update smoke explicitly pending until the accepted draft
+is published. Since the project has one user, run that smoke on the designated
+test installation before announcing the release or upgrading the working device.
+
+Once pre-publication blockers are closed, the operator reviews the evidence and
+publishes the **existing** draft in GitHub (no rebuild/reupload). Publication is a
+manual action. `Verify published candidate` runs afterward and independently
+downloads/checks public assets and desktop signatures. Then finish the official
+GUI update smoke and record the result. Failure holds rollout; retain previous
+installers/database backups and restore the previous latest release selection if
+needed under an explicit release recovery action, rather than replacing signed
+assets under an existing version.
+
+## Local end-to-end script
+
+`.github/scripts/verify-local-e2e.sh` writes a temporary token and an asset,
+submits a signature-v2/schema-5 observation, verifies storage, and cleans up its
+own test data. Run only against an **isolated HTTPS acceptance site** with a
+backup, not an existing working inventory:
+
+```bash
+WP_PATH="/path/to/isolated/wordpress" \
+SITE_URL="https://acceptance.example.test" \
 DEVICE_NOTE="验收设备" \
 bash .github/scripts/verify-local-e2e.sh
 ```
 
-The script generates a temporary upload authorization code in WordPress, submits
-a signed v3 observation through the Rust CLI, verifies that the stored row has
-`_npcink_device`, `asset`, and `raw`, then disables the temporary authorization
-code.
+## WordPress package boundary
 
-## Tagged release
-
-Create and push a version tag:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The `Build release packages` workflow runs only for `v*` tags. It compares the
-tag with the previous release tag before selecting its scope:
-
-- plugin-only changes build and publish `npcink-device-inventory.zip`, then
-  reuse the previous desktop `latest.json` and `latest-desktop.json` unchanged;
-- desktop source, desktop manifest, release-scope, or release-workflow changes
-  build the full plugin and desktop artifact set, then generate new desktop
-  manifests.
-
-The first tag after a release-workflow change takes the full desktop path. Do
-not use a tag until the applicable preview artifacts have been checked. The
-macOS DMG is intentionally present in full desktop releases for Apple Silicon
-internal testing even before Developer ID signing and notarization.
-
-For ordinary plugin-only patch releases, the product policy is plugin-first:
-reuse the latest known-good desktop artifacts when the desktop uploader has no
-functional change. The workflow preserves desktop updater availability by
-carrying forward the existing update manifests on each plugin-only Release. See
-`plugin-first-release-strategy-2026-07-09.md`.
-
-The tagged release workflow also builds Tauri updater artifacts and signs them.
-Before running a release, configure this GitHub Actions secret:
-
-- `TAURI_SIGNING_PRIVATE_KEY`: the private key generated by
-  `npm run tauri -- signer generate --ci -w "$HOME/.tauri/npcink-device-agent-updater.key"`.
-
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is optional when the key was generated
-without a password. If the private key is lost, existing installed agents cannot
-verify future automatic updates with the committed public key.
-
-The desktop app checks:
-
-- `latest-desktop.json` for manual download links.
-- `latest.json` for signed automatic update installation through Tauri updater.
-
-## Packaging boundaries
-
-The plugin zip intentionally includes only WordPress runtime files and built web
-assets:
-
-- `admin/`
-- `includes/`
-- `languages/`
-- `vite-admin/dist/`
-- plugin bootstrap/readme/license files
-
-The old Electron client, the new Rust/Tauri source, docs, local caches,
-`node_modules`, and Rust `target` directories are not included in the WordPress
-plugin zip.
-
-## Distribution notes
-
-macOS DMG is currently unsigned and not notarized. It is included in tagged
-releases for internal testing, but public distribution must add Apple Developer
-ID signing and notarization first.
-
-The Windows package currently uses Tauri NSIS output. Add code signing before
-distributing outside a trusted internal environment.
+The plugin ZIP includes `admin/`, `includes/`, `languages/`, `vite-admin/dist/`,
+the corresponding `vite-admin/src/` and build configuration/lockfile required for
+source review, and plugin bootstrap/readme/license files. It excludes Rust/Tauri
+source, docs, local caches, `node_modules`, `vendor` and Rust targets. Do not remove
+the reviewable frontend source merely to shrink the ZIP.

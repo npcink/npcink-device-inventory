@@ -4,8 +4,9 @@
 
 Accepted direction for new development.
 
-This model is the runtime contract for v3. Old export files are treated as
-one-time migration inputs, not as runtime compatibility storage.
+This model is the current runtime contract. Historical exports require offline
+conversion before import; the runtime contains no legacy importer or identity
+transition path. See [ADR-017](decisions/ADR-017-remove-historical-compatibility.md).
 
 ## Core Concepts
 
@@ -33,9 +34,10 @@ Important fields:
 - `name`, `owner_name`, `department`, `status`, `category`: normal list and
   filter fields.
 - `purchase_price`: original purchase cost.
-- `residual_value`: second-hand market value. The legacy column name is kept to
-  avoid a destructive database rename; new REST consumers use
-  `secondHandMarketValue`.
+- `residual_value`: canonical storage for second-hand market value. REST and
+  backup consumers use `secondHandMarketValue`. Direct asset writes reject the
+  old `residualValue` alias; backup restore ignores it when the canonical field
+  is present, as in exports produced by 3.2.3.
 - `financial_residual_value`: accounting residual value used for depreciation,
   residual-rate thresholds, and financial summaries.
 - `metadata_json`: JSON-encoded asset-type-specific fields that do not justify
@@ -56,9 +58,10 @@ Current automatic identity types are defined in
 One upload may claim multiple v2 signals. The server recomputes every claim
 from the observation facts; client-provided hashes have no authority. If the
 signals resolve to different assets, ingestion fails with 409 instead of
-guessing or merging. `device_uuid_v1` and `fallback_device_v1` remain stored
-only for the one-time upgrade lookup described by the identity contract; new
-assets never receive them.
+guessing or merging. Only these three v2 types are accepted for identity writes
+and backup writes. Restore counts and skips the two obsolete v1 types with a
+warning, preserving current data from 3.2.3 exports. Historical v1 identity lookup
+and algorithms have been removed.
 
 `identity_type + identity_value` is globally unique so one physical identity
 cannot silently point to two different assets.
@@ -139,5 +142,6 @@ to `auto`.
 When an asset has the `retired` status, its historical `purchase_price` remains
 unchanged while `residual_value` and `financial_residual_value` are both forced
 to zero. This invariant applies to individual edits, batch edits, spreadsheet
-imports, backup restores, and existing records normalized during upgrade.
+imports, and backup restores. Historical normalization migrations are no longer
+replayed; historical data must be reviewed offline before adopting this baseline.
 Archiving an asset with the `deleted` status does not change any of these values.

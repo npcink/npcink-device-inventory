@@ -4,36 +4,25 @@
   "plugin": {
     "name": "Npcink Device Inventory",
     "slug": "npcink-device-inventory",
-    "version": "3.2.0",
+    "version": "3.2.4",
     "requires_at_least": "6.5",
-    "tested_up_to": "7.0",
+    "tested_up_to": "7.1",
     "requires_php": "7.4",
-    "license": "GPLv2 or later"
+    "license": "GPL-2.0+"
   },
   "package": {
     "upload_file": "sj/npcink-device-inventory.zip",
     "source_file": "release/npcink-device-inventory.zip",
     "zip_root": "npcink-device-inventory/",
-    "sha256": "8efadab87292c7bb4bca17aed8b6b6f47ce528f8350737e28a2811cea3140186",
-    "entry_count": 90,
-    "file_count": 71,
-    "uncompressed_bytes": 3291672,
-    "compressed_bytes": 942412
+    "sha256": "badbf936c2468ed371df13e78327e39acf2bd7ce1fa909d708e9fadda6f4d4dc",
+    "entry_count": 155,
+    "file_count": 129,
+    "uncompressed_bytes": 3364808,
+    "compressed_bytes": 1025794
   },
   "verification": {
-    "plugin_check": "passed_official_2.0.0_wordpress_7.0.2_php_8.3",
-    "phpcs": "passed",
-    "phpstan": "passed",
-    "vite_admin_build": "passed",
-    "all_php_regression_fixtures": "passed",
-    "desktop_fmt_clippy_tests_and_rustsec_audit": "passed_with_18_allowed_transitive_warnings",
-    "version_contract": "passed",
-    "release_package_check": "passed",
-    "wordpress_org_review_rules": "passed",
-    "activation_smoke": "passed_wordpress_7_0_php_8_3_mariadb_11",
-    "unsigned_upload_fixture_status": 401,
-    "screenshots": "stale_do_not_publish_until_recaptured",
-    "i18n_pot": "updated"
+    "status": "requires_verification",
+    "package_sha256": "badbf936c2468ed371df13e78327e39acf2bd7ce1fa909d708e9fadda6f4d4dc"
   },
   "official_references": [
     "https://wordpress.org/plugins/developers/add/",

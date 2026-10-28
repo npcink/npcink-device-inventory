@@ -13,7 +13,8 @@
     "build": "tsc && vite build",
     "check:hardware-audit": "node scripts/check-hardware-audit-fixture.mjs",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:analysis-pagination": "node scripts/check-analysis-pagination.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^4.36.1",
@@ -41,7 +42,6 @@
     "globals": "^17.7.0",
     "less": "^4.8.1",
     "postcss": "^8.5.26",
-    "tailwindcss": "^3.3.3",
     "typescript": "^5.0.2",
     "typescript-eslint": "^8.62.1",
     "vite": "^8.2.1"

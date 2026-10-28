@@ -16,6 +16,7 @@ import type {
   BackupRestoreResult,
   ClientToken,
   CollectionTrends,
+  ComparisonObservationPage,
   CreatedClientToken,
   EventListParams,
   InventorySettings,
@@ -29,6 +30,13 @@ interface DataEnvelope<T> {
 }
 
 const unwrapData = <T>(payload: DataEnvelope<T>): T => payload.data;
+
+export const getComparisonObservations = async (afterAssetId = 0, throughAssetId = 0, signal?: AbortSignal): Promise<ComparisonObservationPage> => {
+  const response = await restInstance.get<ComparisonObservationPage>("/analysis/hardware-observations", {
+    params: { afterAssetId, throughAssetId, pageSize: 25 }, signal, showSuccessMessage: false,
+  } as RequestConfig);
+  return response.data;
+};
 
 export const getAssets = async (
   params: AssetListParams

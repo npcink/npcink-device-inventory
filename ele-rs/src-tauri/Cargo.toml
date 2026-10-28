@@ -1,6 +1,6 @@
 [package]
 name = "npcink-device-agent-desktop"
-version = "0.4.4"
+version = "0.4.5"
 description = "Npcink Device Agent desktop shell"
 authors = ["Npcink"]
 edition = "2021"
@@ -19,11 +19,13 @@ dirs = "5.0"
 npcink-device-agent = { path = ".." }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tauri = { version = "2.11.2", features = [] }
+tauri = { version = "2.12.5", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
-tauri-plugin-updater = "2"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+# Releases use signed Windows .exe installers and macOS .tar.gz bundles.
+# Disable optional Windows ZIP extraction, which still depends on vulnerable zip 4.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 url = "2"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]

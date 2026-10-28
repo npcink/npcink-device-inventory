@@ -6,6 +6,7 @@ if (!defined('ABSPATH')) {
 
 class Npcink_Device_Inventory_Observation_Ingest_Service
 {
+	const MAX_CLOCK_SKEW_SECONDS = 300;
 	private $assets;
 	private $identities;
 	private $observations;
@@ -28,13 +29,15 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 
 	public function ingest($payload)
 	{
-		if (!is_array($payload)) {
-			return Npcink_Device_Inventory_V3_Response::error('invalid_payload', 'Request body must be a JSON object.', 400);
+		if (!is_array($payload) || count($payload) !== 1 || !isset($payload['observation']) || !is_array($payload['observation'])) {
+			return Npcink_Device_Inventory_V3_Response::error('invalid_payload', 'Request body must contain exactly one observation object.', 422);
 		}
 
-		$observation_payload = isset($payload['observation']) && is_array($payload['observation'])
-			? $payload['observation']
-			: $payload;
+		$observation_payload = $payload['observation'];
+		$observation_input = $this->build_observation_input($observation_payload);
+		if (is_wp_error($observation_input)) {
+			return $observation_input;
+		}
 		$identities = $this->device_identity->identities($observation_payload);
 		$primary_identity = !empty($identities) ? $identities[0] : $this->device_identity->primary_identity($observation_payload);
 		if (empty($identities) || empty($primary_identity['type']) || empty($primary_identity['value'])) {
@@ -50,14 +53,6 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			return Npcink_Device_Inventory_V3_Response::error('identity_evidence_conflict', 'Hardware identity signals belong to different assets.', 409);
 		}
 		$asset_id = !empty($owner_ids) ? $owner_ids[0] : null;
-		$matched_by_legacy_identity = false;
-		if (!$asset_id) {
-			$legacy_identity = $this->device_identity->legacy_primary_identity($observation_payload);
-			if (!empty($legacy_identity['type']) && !empty($legacy_identity['value'])) {
-				$asset_id = $this->identities->find_asset_id_by_identity($legacy_identity['type'], $legacy_identity['value']);
-				$matched_by_legacy_identity = !empty($asset_id);
-			}
-		}
 		$mode = 'matched';
 		$asset = $asset_id ? $this->assets->find_by_id($asset_id) : null;
 		if ($asset && isset($asset['status']) && $asset['status'] === 'deleted') {
@@ -67,19 +62,19 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 				409
 			);
 		}
-		if ($matched_by_legacy_identity && $asset && $this->legacy_migration_conflicts($asset, $identities)) {
-			return Npcink_Device_Inventory_V3_Response::error(
-				'legacy_identity_migration_conflict',
-				'Legacy identity matched an asset whose latest hardware evidence conflicts with this upload.',
-				409
-			);
-		}
 
 		if (!$this->begin_transaction()) {
 			return Npcink_Device_Inventory_V3_Response::error('transaction_start_failed', 'Failed to start observation transaction.', 500);
 		}
 
 		$created = false;
+		if ($asset) {
+			$asset = $this->lock_upload_asset($asset);
+			if (is_wp_error($asset)) {
+				$this->rollback_transaction();
+				return $asset;
+			}
+		}
 		if (!$asset) {
 			$asset = $this->assets->create($this->build_asset_input($observation_payload));
 			if (!$asset) {
@@ -118,6 +113,11 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			}
 			$created = false;
 			$mode = 'matched_after_concurrent_claim';
+			$asset = $this->lock_upload_asset($asset);
+			if (is_wp_error($asset)) {
+				$this->rollback_transaction();
+				return $asset;
+			}
 			$claim_results = $this->identities->claim_many(
 				intval($asset['id']),
 				$this->claimable_identities(intval($asset['id']), $identities)
@@ -130,6 +130,22 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			if (!empty($this->claim_conflict_owner_ids($claim_results))) {
 				return $this->rollback_error('identity_claim_conflict', 'Authoritative identity could not be claimed.', 409);
 			}
+		}
+
+		$previous = $this->observations->find_by_upload_id($observation_input['observation_uuid']);
+		if (is_wp_error($previous)) {
+			$this->rollback_transaction();
+			return $previous;
+		}
+		if ($previous) {
+			if (intval($previous['asset_id']) !== intval($asset['id']) || !hash_equals((string) $previous['payload_hash'], $observation_input['payload_hash'])) {
+				$this->rollback_transaction();
+				return Npcink_Device_Inventory_V3_Response::error('observation_id_conflict', 'Observation ID already belongs to different submitted facts.', 409);
+			}
+			if (!$this->commit_transaction()) {
+				return $this->rollback_error('transaction_commit_failed', 'Failed to commit observation transaction.');
+			}
+			return $this->receipt($asset, $previous, 'duplicate');
 		}
 
 		if ($created && !$this->events->record(intval($asset['id']), 'upload', 'created', 'Asset created from first observation.', array('identity' => $primary_identity))) {
@@ -154,9 +170,21 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			$asset = $updated_asset;
 		}
 
-		$observation = $this->observations->create(intval($asset['id']), $this->build_observation_input($observation_payload));
+		$observation = $this->observations->create(intval($asset['id']), $observation_input);
 		if (!$observation) {
-			return $this->rollback_error('observation_create_failed', 'Failed to store observation.');
+			// Roll back first: a failed pointer update must never find its own uncommitted row as a receipt.
+			$this->rollback_transaction();
+			$competing = $this->observations->find_by_upload_id($observation_input['observation_uuid']);
+			if (is_wp_error($competing)) {
+				return $competing;
+			}
+			if ($competing) {
+				if (intval($competing['asset_id']) === intval($asset['id']) && hash_equals((string) $competing['payload_hash'], $observation_input['payload_hash'])) {
+					return $this->receipt($asset, $competing, 'duplicate');
+				}
+				return Npcink_Device_Inventory_V3_Response::error('observation_id_conflict', 'Observation ID is already in use.', 409);
+			}
+			return Npcink_Device_Inventory_V3_Response::error('observation_create_failed', 'Failed to store observation.', 500);
 		}
 
 		if (!$this->events->record(
@@ -173,14 +201,7 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 			return $this->rollback_error('transaction_commit_failed', 'Failed to commit observation transaction.');
 		}
 
-		return array(
-			'data' => array(
-				'mode' => $mode,
-				'asset' => $this->format_asset($asset),
-				'observation' => $this->format_observation($observation),
-				'identities' => array_map(array($this, 'format_identity'), $this->identities->list_for_asset(intval($asset['id']))),
-			),
-		);
+		return $this->receipt($asset, $observation, $mode);
 	}
 
 	private function claim_error($claim_results)
@@ -196,6 +217,18 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 		return null;
 	}
 
+	private function lock_upload_asset($asset)
+	{
+		$asset = $this->assets->find_by_id_for_update(intval($asset['id']));
+		if (!$asset) {
+			return Npcink_Device_Inventory_V3_Response::error('identity_owner_unavailable', 'Identity owner could not be locked.', 409);
+		}
+		if ($asset['status'] === 'deleted') {
+			return Npcink_Device_Inventory_V3_Response::error('asset_archived', 'Archived assets cannot receive device observations.', 409);
+		}
+		return $asset;
+	}
+
 	private function begin_transaction()
 	{
 		global $wpdb;
@@ -207,7 +240,11 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 	{
 		global $wpdb;
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- The ingest write set must be committed atomically.
-		return $wpdb->query('COMMIT') !== false;
+		if ($wpdb->query('COMMIT') === false) {
+			return false;
+		}
+		$this->invalidate_transaction_caches();
+		return true;
 	}
 
 	private function rollback_transaction()
@@ -215,8 +252,16 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 		global $wpdb;
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Roll back every partial ingest write on failure.
 		$wpdb->query('ROLLBACK');
+		$this->invalidate_transaction_caches();
+	}
+
+	private function invalidate_transaction_caches()
+	{
+		// A separate connection may have cached old committed state during the write.
 		$this->assets->invalidate_cache();
+		$this->identities->invalidate_cache();
 		$this->observations->invalidate_cache();
+		$this->events->invalidate_cache();
 	}
 
 	private function rollback_error($code, $message, $status = 500)
@@ -280,42 +325,6 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 		return isset($identity['type']) && $identity['type'] === 'baseboard_serial_v2';
 	}
 
-	private function legacy_migration_conflicts($asset, $incoming_identities)
-	{
-		$latest_observation_id = isset($asset['latest_observation_id']) ? intval($asset['latest_observation_id']) : 0;
-		if ($latest_observation_id <= 0) {
-			return false;
-		}
-
-		$observation = $this->observations->find_by_id($latest_observation_id);
-		if (!$observation || empty($observation['hardware_json'])) {
-			return false;
-		}
-		$hardware = json_decode((string) $observation['hardware_json'], true);
-		if (!is_array($hardware) || empty($hardware)) {
-			return false;
-		}
-
-		$existing_identities = $this->device_identity->identities(array('asset' => array('hardware' => $hardware)));
-		if (empty($existing_identities)) {
-			return false;
-		}
-
-		$existing_keys = array();
-		foreach ($existing_identities as $identity) {
-			if (!empty($identity['type']) && !empty($identity['value'])) {
-				$existing_keys[$identity['type'] . "\0" . $identity['value']] = true;
-			}
-		}
-		foreach ($incoming_identities as $identity) {
-			$key = isset($identity['type'], $identity['value']) ? $identity['type'] . "\0" . $identity['value'] : '';
-			if ($key !== '' && isset($existing_keys[$key])) {
-				return false;
-			}
-		}
-		return true;
-	}
-
 	private function claim_conflict_owner_ids($claim_results)
 	{
 		$owner_ids = array();
@@ -361,28 +370,109 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 
 	private function build_observation_input($payload)
 	{
-		$asset = isset($payload['asset']) && is_array($payload['asset']) ? $payload['asset'] : array();
-		$meta = isset($payload['_npcink_device']) && is_array($payload['_npcink_device']) ? $payload['_npcink_device'] : array();
+		foreach (array('_npcink_device', 'asset') as $key) {
+			if (!isset($payload[$key]) || !is_array($payload[$key])) {
+				return $this->invalid_field('/observation/' . $key);
+			}
+		}
+		$asset = $payload['asset'];
+		$meta = $payload['_npcink_device'];
+		if (!isset($meta['schema_version']) || $meta['schema_version'] !== 5) {
+			return Npcink_Device_Inventory_V3_Response::error('unsupported_observation_schema', 'Only observation schema 5 is supported.', 422);
+		}
+		if (!isset($meta['observation_id']) || !is_string($meta['observation_id']) || !preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/D', $meta['observation_id'])) {
+			return $this->invalid_field('/observation/_npcink_device/observation_id');
+		}
 		$collector = isset($meta['collector']) && is_array($meta['collector']) ? $meta['collector'] : array();
-		$observed_at = !empty($collector['collected_at']) ? sanitize_text_field($collector['collected_at']) : current_time('mysql', true);
+		foreach (array('name', 'collected_at') as $key) {
+			if (!isset($collector[$key]) || !is_string($collector[$key]) || $collector[$key] === '') {
+				return $this->invalid_field('/observation/_npcink_device/collector/' . $key);
+			}
+		}
+		foreach (array('hardware', 'summary') as $key) {
+			if (!isset($asset[$key]) || !is_array($asset[$key]) || ($asset[$key] && array_keys($asset[$key]) === range(0, count($asset[$key]) - 1))) {
+				return $this->invalid_field('/observation/asset/' . $key);
+			}
+		}
+		foreach (array('device_model', 'hostname', 'os', 'platform', 'cpu', 'graphics', 'primary_ip') as $key) {
+			if (array_key_exists($key, $asset['summary']) && !is_string($asset['summary'][$key])) {
+				return $this->invalid_field('/observation/asset/summary/' . $key);
+			}
+		}
+		foreach (array('memory_bytes', 'disk_bytes') as $key) {
+			if (isset($asset['summary'][$key]) && (!is_int($asset['summary'][$key]) || $asset['summary'][$key] < 0)) {
+				return $this->invalid_field('/observation/asset/summary/' . $key);
+			}
+		}
+		if (isset($asset['upload']) && !is_array($asset['upload'])) {
+			return $this->invalid_field('/observation/asset/upload');
+		}
+		foreach (array('note', 'reported_user', 'uploaded_at') as $key) {
+			if (isset($asset['upload'][$key]) && !is_string($asset['upload'][$key])) {
+				return $this->invalid_field('/observation/asset/upload/' . $key);
+			}
+		}
+		$observed_at = $this->normalize_datetime($collector['collected_at']);
+		if (is_wp_error($observed_at)) {
+			return $observed_at;
+		}
 
+		$hash_payload = $payload;
+		unset($hash_payload['asset']['upload']['uploaded_at']);
 		return array(
-			'source' => !empty($collector['name']) ? sanitize_key($collector['name']) : 'uploader',
-			'schema_version' => !empty($meta['schema_version']) ? intval($meta['schema_version']) : 1,
-			'observed_at' => $this->normalize_datetime($observed_at),
-			'summary' => isset($asset['summary']) && is_array($asset['summary']) ? $asset['summary'] : array(),
-			'hardware' => isset($asset['hardware']) && is_array($asset['hardware']) ? $asset['hardware'] : array(),
-			'raw' => $payload,
+			'source' => sanitize_key($collector['name']),
+			'schema_version' => 5,
+			'observation_uuid' => $meta['observation_id'],
+			'payload_hash' => hash('sha256', wp_json_encode($this->canonical_value($hash_payload))),
+			'observed_at' => $observed_at,
+			'summary' => $asset['summary'],
+			'hardware' => $asset['hardware'],
+			// The complete source facts already live in hardware.platformData; do not store hardware twice.
+			'raw' => array('_npcink_device' => $meta, 'upload' => isset($asset['upload']) ? $asset['upload'] : array(), 'source' => isset($payload['raw']) ? $payload['raw'] : array()),
 		);
+	}
+
+	private function invalid_field($path)
+	{
+		return Npcink_Device_Inventory_V3_Response::error('invalid_observation_field', 'Observation field has an invalid type or value.', 422, array('path' => $path));
+	}
+
+	private function canonical_value($value)
+	{
+		if (is_array($value)) {
+			if ($value && array_keys($value) !== range(0, count($value) - 1)) {
+				ksort($value, SORT_STRING);
+			}
+			foreach ($value as $key => $child) {
+				$value[$key] = $this->canonical_value($child);
+			}
+		}
+		return $value;
+	}
+
+	private function receipt($asset, $observation, $mode)
+	{
+		return array('data' => array(
+			'mode' => $mode,
+			'asset' => array('id' => intval($asset['id']), 'uuid' => (string) $asset['uuid'], 'assetNumber' => (string) $asset['asset_number'], 'name' => (string) $asset['name']),
+			'observation' => array('id' => intval($observation['id']), 'observationId' => (string) $observation['observation_uuid'], 'observedAt' => $this->format_utc_datetime($observation['observed_at']), 'receivedAt' => (string) $observation['received_at']),
+		));
 	}
 
 	private function normalize_datetime($value)
 	{
-		$timestamp = strtotime($value);
-		if (!$timestamp) {
-			return current_time('mysql', true);
+		if (preg_match('/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/', $value)) {
+			try {
+				$date = new DateTimeImmutable($value, new DateTimeZone('UTC'));
+				$errors = DateTimeImmutable::getLastErrors();
+				if ((!$errors || (!$errors['warning_count'] && !$errors['error_count'])) && $date->getTimestamp() <= time() + self::MAX_CLOCK_SKEW_SECONDS && intval($date->format('Y')) >= 1000) {
+					return gmdate('Y-m-d H:i:s', $date->getTimestamp());
+				}
+			} catch (Exception $exception) {
+				// Invalid dates fail closed below; missing dates are filled before validation.
+			}
 		}
-		return gmdate('Y-m-d H:i:s', $timestamp);
+		return Npcink_Device_Inventory_V3_Response::error('invalid_observation_time', 'Collection time is invalid or more than five minutes in the future.', 422);
 	}
 
 	private function format_utc_datetime($value)
@@ -394,68 +484,4 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 		return str_replace(' ', 'T', $value) . 'Z';
 	}
 
-	private function format_asset($row)
-	{
-		return array(
-			'id' => intval($row['id']),
-			'uuid' => (string) $row['uuid'],
-			'assetType' => (string) $row['asset_type'],
-			'assetNumber' => (string) $row['asset_number'],
-			'name' => (string) $row['name'],
-			'ownerName' => (string) $row['owner_name'],
-			'department' => (string) $row['department'],
-			'status' => (string) $row['status'],
-			'category' => (string) $row['category'],
-			'purchasePrice' => floatval($row['purchase_price']),
-			'secondHandMarketValue' => floatval($row['residual_value']),
-			'financialResidualValue' => floatval(isset($row['financial_residual_value']) ? $row['financial_residual_value'] : 0),
-			'residualValue' => floatval($row['residual_value']),
-			'metadata' => $this->decode_json(isset($row['metadata_json']) ? $row['metadata_json'] : '', array()),
-			'createdAt' => (string) $row['created_at'],
-			'updatedAt' => (string) $row['updated_at'],
-		);
-	}
-
-	private function format_identity($row)
-	{
-		return array(
-			'id' => intval($row['id']),
-			'assetId' => intval($row['asset_id']),
-			'identityType' => (string) $row['identity_type'],
-			'identityValue' => (string) $row['identity_value'],
-			'confidence' => floatval($row['confidence']),
-			'isPrimary' => intval($row['is_primary']) === 1,
-			'source' => (string) $row['source'],
-			'createdAt' => (string) $row['created_at'],
-		);
-	}
-
-	private function format_observation($row)
-	{
-		return array(
-			'id' => intval($row['id']),
-			'assetId' => intval($row['asset_id']),
-			'source' => (string) $row['source'],
-			'schemaVersion' => intval($row['schema_version']),
-			'observedAt' => $this->format_utc_datetime(isset($row['observed_at']) ? $row['observed_at'] : ''),
-			'receivedAt' => (string) $row['received_at'],
-			'summary' => $this->decode_json(isset($row['summary_json']) ? $row['summary_json'] : '', array()),
-			'hardware' => $this->decode_json(isset($row['hardware_json']) ? $row['hardware_json'] : '', array()),
-			'raw' => $this->decode_json(isset($row['raw_json']) ? $row['raw_json'] : '', array()),
-		);
-	}
-
-	private function decode_json($value, $fallback)
-	{
-		if (!is_string($value) || $value === '') {
-			return $fallback;
-		}
-
-		$decoded = json_decode($value, true);
-		if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
-			return $fallback;
-		}
-
-		return $decoded;
-	}
 }

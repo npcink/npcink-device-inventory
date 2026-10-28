@@ -1,20 +1,74 @@
 use serde_json::{json, Map, Value};
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(any(target_os = "windows", test))]
+#[path = "storage_topology.rs"]
+mod storage_topology;
+#[cfg(any(target_os = "windows", test))]
+#[path = "windows_batch.rs"]
+mod windows_batch;
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 use std::process::Command;
+
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
+use std::time::{Duration, Instant};
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
+thread_local! {
+    static COLLECTION_DEADLINE: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
+}
+
+pub(crate) fn with_collection_budget<T>(collect: impl FnOnce() -> T) -> T {
+    #[cfg(any(target_os = "windows", target_os = "macos", test))]
+    {
+        struct Reset(Option<Instant>);
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                COLLECTION_DEADLINE.set(self.0);
+            }
+        }
+        let _reset =
+            Reset(COLLECTION_DEADLINE.replace(Some(Instant::now() + Duration::from_secs(60))));
+        collect()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", test)))]
+    collect()
+}
+
+#[cfg(target_os = "macos")]
+fn command_output(command: &mut Command) -> Result<crate::command::TimedCommandOutput, String> {
+    let timeout = COLLECTION_DEADLINE
+        .get()
+        .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+        .unwrap_or(Duration::from_secs(12))
+        .min(Duration::from_secs(12));
+    if timeout.is_zero() {
+        return Err("budget_exhausted".into());
+    }
+    let output = crate::command::output_with_timeout(command, timeout)
+        .map_err(|error| format!("command_failed: {error}"))?;
+    if output.timed_out {
+        return Err("query_timeout".into());
+    }
+    if output.stdout_truncated {
+        return Err("output_too_large".into());
+    }
+    Ok(output)
+}
 
 // Some Windows NIC drivers fail when hidden adapters are enumerated. Retry
 // without hidden adapters so a usable physical PCI NIC is not lost merely
 // because an unrelated virtual adapter reports an error.
 #[cfg(any(target_os = "windows", test))]
 const WINDOWS_NETWORK_HARDWARE_COMMANDS: [&str; 4] = [
-    "Get-NetAdapter -Physical -IncludeHidden -ErrorAction Stop | Where-Object { $_.Virtual -ne $true } | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual",
-    "Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Virtual -ne $true } | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual",
-    "Get-NetAdapter -IncludeHidden -ErrorAction Stop | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual",
-    "Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetAdapter -ErrorAction Stop | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual",
+    "Get-NetAdapter -Physical -IncludeHidden -ErrorAction Stop | Where-Object { $_.Virtual -ne $true } | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual,LinkSpeed,DriverVersion,DriverDescription,MediaConnectionState",
+    "Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.Virtual -ne $true } | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual,LinkSpeed,DriverVersion,DriverDescription,MediaConnectionState",
+    "Get-NetAdapter -IncludeHidden -ErrorAction Stop | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual,LinkSpeed,DriverVersion,DriverDescription,MediaConnectionState",
+    "Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetAdapter -ErrorAction Stop | Select-Object Name,InterfaceDescription,InterfaceIndex,InterfaceGuid,PnPDeviceID,MacAddress,PermanentAddress,Status,ConnectorPresent,HardwareInterface,Virtual,LinkSpeed,DriverVersion,DriverDescription,MediaConnectionState",
 ];
 
 #[cfg(any(target_os = "windows", test))]
 const WINDOWS_POWERSHELL_UTF8_PREAMBLE: &str = "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; ";
+
+#[cfg(any(target_os = "windows", test))]
+const WINDOWS_DXGI_QUERY: &str = include_str!("windows-graphics.ps1");
 
 pub(crate) fn enrich(root: &mut Map<String, Value>) {
     enrich_impl(root);
@@ -28,32 +82,7 @@ pub(crate) fn hardware_uuid() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn enrich_impl(root: &mut Map<String, Value>) {
-    enrich_identity(root);
-    if let Some(value) = powershell_json("Get-NetIPConfiguration -All -ErrorAction SilentlyContinue | Select-Object InterfaceAlias,InterfaceIndex,@{Name='IPv4DefaultGateway';Expression={$_.IPv4DefaultGateway.NextHop}},@{Name='IPv6DefaultGateway';Expression={$_.IPv6DefaultGateway.NextHop}},@{Name='DnsServers';Expression={$_.DNSServer.ServerAddresses}},@{Name='Dhcp';Expression={$_.NetIPv4Interface.Dhcp}}") {
-        enrich_windows_network_configuration(root, &value);
-    }
-    if let Some(value) = powershell_json("Get-CimInstance Win32_SystemEnclosure | Select-Object Manufacturer,SerialNumber,ChassisTypes") {
-        root.insert("chassis".to_string(), normalize_windows_chassis(&value));
-    }
-    if let Some(value) = powershell_json("Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer,Model,SystemType,SystemFamily,SystemSKUNumber") {
-        root.insert(
-            "system".to_string(),
-            normalize_windows_system(&value, root.get("system")),
-        );
-    }
-    if let Some(value) = powershell_json("Get-CimInstance Win32_PhysicalMemory | Select-Object Manufacturer,PartNumber,SerialNumber,Capacity,Speed,ConfiguredClockSpeed,SMBIOSMemoryType,FormFactor,DeviceLocator,BankLabel") {
-        let modules = normalize_windows_memory_modules(&value);
-        if modules.as_array().is_some_and(|items| !items.is_empty()) {
-            root.insert("memLayout".to_string(), modules);
-        }
-    }
-    if let Some(value) = powershell_json("Get-CimInstance Win32_DiskDrive | Select-Object Model,SerialNumber,Size,MediaType,InterfaceType,DeviceID,FirmwareRevision,PNPDeviceID") {
-        let disks = normalize_windows_physical_disks(&value);
-        if disks.as_array().is_some_and(|items| !items.is_empty()) {
-            root.insert("diskLayout".to_string(), disks);
-        }
-    }
-    enrich_windows_summary_with(root, powershell_identity_json);
+    windows_batch::enrich(root);
     insert_empty_if_missing(root, "bios");
     insert_empty_if_missing(root, "baseboard");
     insert_empty_if_missing(root, "chassis");
@@ -62,45 +91,15 @@ fn enrich_impl(root: &mut Map<String, Value>) {
     insert_array_if_missing(root, "networkHardware");
 }
 
-// Ordinary uploads include the hardware that the local summary promises to show.
-pub(crate) fn enrich_upload(root: &mut Map<String, Value>) {
-    enrich_identity(root);
-    #[cfg(target_os = "windows")]
-    enrich_windows_summary_with(root, powershell_identity_json);
-    #[cfg(target_os = "macos")]
-    {
-        let started = std::time::Instant::now();
-        let value = command_json(
-            "system_profiler",
-            &[
-                "-json",
-                "SPHardwareDataType",
-                "SPDisplaysDataType",
-                "SPPowerDataType",
-            ],
-        );
-        if let Some(value) = &value {
-            enrich_macos_bios(root, value);
-            enrich_macos_media(root, value);
-        }
-        root.insert(
-            "hardwareProbeAttempts".into(),
-            json!([{
-                "source": "system_profiler_hardware_displays_power",
-                "status": if value.is_some() { "ok" } else { "failed" },
-                "elapsedMs": started.elapsed().as_millis() as u64,
-            }]),
-        );
-    }
-}
-
 #[cfg(any(target_os = "windows", test))]
 fn enrich_windows_summary_with(
     root: &mut Map<String, Value>,
     mut query: impl FnMut(&str) -> Result<Value, String>,
 ) {
     let mut attempts = Vec::new();
-    let mut read = |source: &str, command: &str| {
+    let mut platform_data = Map::new();
+    let mut read = |source: &str| {
+        let command = windows_batch::probe(source).command;
         let started = std::time::Instant::now();
         let result = query(command);
         let mut attempt =
@@ -120,34 +119,116 @@ fn enrich_windows_summary_with(
                 json!([])
             }
         };
+        platform_data.insert(source.into(), value.clone());
         attempts.push(attempt);
         value
     };
-    let controllers = read("video_controllers", "Get-CimInstance Win32_VideoController -ErrorAction Stop | Select-Object Name,AdapterRAM,VideoProcessor,DriverVersion,CurrentHorizontalResolution,CurrentVerticalResolution,CurrentRefreshRate");
-    let monitors = read("monitor_edid", "Get-CimInstance -Namespace root\\wmi -ClassName WmiMonitorID -ErrorAction Stop | Select-Object InstanceName,Active,ManufacturerName,UserFriendlyName,SerialNumberID,YearOfManufacture,WeekOfManufacture");
-    let desktop = read("desktop_monitors", "Get-CimInstance Win32_DesktopMonitor -ErrorAction Stop | Select-Object PNPDeviceID,Name,MonitorManufacturer,MonitorType,ScreenWidth,ScreenHeight,Status");
-    let batteries = read("batteries", "Get-CimInstance Win32_Battery -ErrorAction Stop | Select-Object Name,DeviceID,Status,BatteryStatus,Chemistry,DesignCapacity,FullChargeCapacity,EstimatedChargeRemaining,EstimatedRunTime,DesignVoltage");
-    let bios = read("bios", "Get-CimInstance Win32_BIOS -ErrorAction Stop | Select-Object Manufacturer,SMBIOSBIOSVersion,SerialNumber,ReleaseDate,Version");
+    let controllers = read("video_controllers");
+    let monitors = read("monitor_edid");
+    let desktop = read("desktop_monitors");
+    let batteries = read("batteries");
+    let bios = read("bios");
+    let memory = read("memory_modules");
+    let disks = read("physical_disks");
+    let dxgi = read("graphics_memory");
+    let memory_arrays = read("memory_arrays");
+    let system = read("system");
+    let chassis = read("chassis");
+    let network = read("network_configuration");
+    let operating_system = read("operating_system");
+    let audio = read("audio");
+    let cameras = read("cameras");
+    let usb = read("usb");
+    let printers = read("printers");
+    let product = read("system_product");
+    let storage_devices = read("storage_devices");
+    let storage_health = read("storage_health");
+    let secure_boot = read("secure_boot");
+    let tpm = read("tpm");
+    read("disk_partitions");
+    read("disk_partition_links");
+    read("partition_volume_links");
+    root.insert(
+        "storage".into(),
+        json!({"devices": storage_devices, "health": storage_health}),
+    );
+    root.insert(
+        "security".into(),
+        json!({"secureBoot": secure_boot, "tpm": tpm}),
+    );
+    root.insert("memoryArrays".into(), Value::Array(value_items(&memory_arrays).into_iter().map(|item| json!({
+        "slots": value_u64_at(item, "MemoryDevices"),
+        "maxCapacityBytes": value_u64_at(item, "MaxCapacityEx").filter(|v| *v > 0).or_else(|| value_u64_at(item, "MaxCapacity").map(|v| v.saturating_mul(1024))),
+        "errorCorrection": value_u64_at(item, "MemoryErrorCorrection"),
+        "location": value_u64_at(item, "Location"),
+    })).collect()));
+    root.insert("memoryKind".into(), json!("dimm"));
+    if let Some(item) = value_items(&system).first() {
+        root.insert(
+            "system".into(),
+            normalize_windows_system(item, root.get("system")),
+        );
+    }
+    if let Some(item) = value_items(&product).first() {
+        let uuid = value_text(item, "UUID");
+        if !uuid.is_empty() {
+            root.entry("uuid").or_insert_with(|| json!({}))["hardware"] = json!(uuid);
+            root.entry("system").or_insert_with(|| json!({}))["uuid"] = json!(uuid);
+        }
+        if let Some(system) = root.get_mut("system").and_then(Value::as_object_mut) {
+            system.insert(
+                "serial".into(),
+                json!(value_text(item, "IdentifyingNumber")),
+            );
+            system.insert("productVersion".into(), json!(value_text(item, "Version")));
+        }
+    }
+    if !value_items(&chassis).is_empty() {
+        root.insert("chassis".into(), normalize_windows_chassis(&chassis));
+    }
+    enrich_windows_network_configuration(root, &network);
+    if let Some(item) = value_items(&operating_system).first() {
+        if let Some(os) = root.get_mut("os").and_then(Value::as_object_mut) {
+            os.insert("build".into(), json!(value_text(item, "BuildNumber")));
+            os.insert("edition".into(), json!(value_text(item, "Caption")));
+            os.insert("installDate".into(), json!(value_text(item, "InstallDate")));
+            os.insert(
+                "lastBootTime".into(),
+                json!(value_text(item, "LastBootUpTime")),
+            );
+        }
+    }
+    root.insert(
+        "peripherals".into(),
+        json!({"audio": audio, "cameras": cameras, "usb": usb, "printers": printers}),
+    );
+    root.entry("platformData")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .expect("platform data is an object")
+        .extend(platform_data);
+    let modules = normalize_windows_memory_modules(&memory);
+    if modules.as_array().is_some_and(|items| !items.is_empty()) {
+        root.insert("memLayout".into(), modules);
+    }
+    let disks = normalize_windows_physical_disks(&disks);
+    if disks.as_array().is_some_and(|items| !items.is_empty()) {
+        root.insert("diskLayout".into(), disks);
+    }
     if let Some(bios) = value_items(&bios).first() {
         root.insert("bios".into(), normalize_windows_bios(bios));
     }
     root.insert(
         "graphics".into(),
         json!({
-            "controllers": normalize_windows_graphics_controllers(&controllers),
+            "controllers": normalize_windows_graphics_controllers(&controllers, &dxgi),
+            "adapters": dxgi,
             "displays": normalize_windows_displays(&monitors, &desktop, &controllers),
         }),
     );
     root.insert("battery".into(), normalize_windows_batteries(&batteries));
     root.insert("hardwareProbeAttempts".into(), json!(attempts));
-}
-
-// Identity facts are required even when upload-light skips other inventories.
-pub(crate) fn enrich_identity(root: &mut Map<String, Value>) {
-    #[cfg(target_os = "windows")]
-    enrich_windows_identity_with(root, powershell_identity_json);
-    #[cfg(not(target_os = "windows"))]
-    let _ = root;
+    storage_topology::enrich(root);
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -156,23 +237,30 @@ fn enrich_windows_identity_with(
     mut query: impl FnMut(&str) -> Result<Value, String>,
 ) {
     let mut attempts = Vec::new();
-    for (source, command) in [
-        ("baseboard", "Get-CimInstance Win32_BaseBoard -ErrorAction Stop | Select-Object Manufacturer,Product,SerialNumber,Version"),
-        ("processors", "Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object Name,Manufacturer,ProcessorId,UniqueId,SerialNumber,SocketDesignation,NumberOfCores,NumberOfLogicalProcessors,CurrentClockSpeed,MaxClockSpeed,ExtClock"),
-    ] {
-        match query(command) {
+    for source in ["baseboard", "processors"] {
+        match query(windows_batch::probe(source).command) {
             Ok(value) => {
+                root.entry("platformData")
+                    .or_insert_with(|| json!({}))
+                    .as_object_mut()
+                    .unwrap()
+                    .insert(source.into(), value.clone());
                 attempts.push(json!({"source": source, "status": if value_items(&value).is_empty() { "empty" } else { "ok" }}));
                 if source == "baseboard" {
                     if let Some(board) = value_items(&value).first() {
                         root.insert("baseboard".into(), normalize_windows_baseboard(board));
                     }
                 } else {
-                    root.insert("processorIdentity".into(), normalize_windows_processor_identity(&value));
+                    root.insert(
+                        "processorIdentity".into(),
+                        normalize_windows_processor_identity(&value),
+                    );
                     enrich_windows_cpu(root, &value);
                 }
             }
-            Err(error) => attempts.push(json!({"source": source, "status": "failed", "error": error})),
+            Err(error) => {
+                attempts.push(json!({"source": source, "status": "failed", "error": error}))
+            }
         }
     }
     let mut interfaces = Vec::new();
@@ -213,15 +301,28 @@ fn enrich_windows_identity_with(
     root.insert("identityProbeAttempts".into(), json!(attempts));
 }
 
-#[cfg(target_os = "windows")]
-fn powershell_identity_json(command: &str) -> Result<Value, String> {
+#[cfg(any(target_os = "windows", test))]
+fn powershell_identity_json_with_timeout(
+    command: &str,
+    timeout: Duration,
+) -> Result<Value, String> {
+    if timeout.is_zero() {
+        return Err("budget_exhausted".into());
+    }
     let wrapped = powershell_utf8_command(&format!(
-        "$ErrorActionPreference='Stop'; {command} | ConvertTo-Json -Compress -Depth 4"
+        "$ErrorActionPreference='Stop'; {command} | ConvertTo-Json -Compress -Depth 8"
     ));
-    let output = new_command("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &wrapped])
-        .output()
-        .map_err(|error| format!("spawn_failed: {error}"))?;
+    let output = crate::command::output_with_timeout(
+        new_command("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &wrapped]),
+        timeout,
+    )
+    .map_err(|_| "command_failed".to_string())?;
+    if output.timed_out {
+        return Err("query_timeout".into());
+    }
+    if output.stdout_truncated {
+        return Err("output_too_large".into());
+    }
     if !output.status.success() {
         // Do not put raw command output or private identifiers into diagnostics.
         return Err(format!(
@@ -251,20 +352,50 @@ fn parse_identity_query_output(stdout: &[u8]) -> Result<Value, String> {
 
 #[cfg(target_os = "macos")]
 fn enrich_impl(root: &mut Map<String, Value>) {
-    if let Some(value) = command_json(
-        "system_profiler",
-        &[
-            "-json",
-            "SPHardwareDataType",
-            "SPDisplaysDataType",
-            "SPNVMeDataType",
-            "SPSerialATADataType",
-            "SPPowerDataType",
-        ],
-    ) {
-        enrich_macos_system_profiler(root, &value);
-        root.insert("platformData".to_string(), value);
+    let mut attempts = Vec::new();
+    let mut platform_data = Map::new();
+    for (source, types) in [
+        (
+            "system_profiler_core",
+            vec![
+                "SPHardwareDataType",
+                "SPDisplaysDataType",
+                "SPPowerDataType",
+                "SPMemoryDataType",
+            ],
+        ),
+        (
+            "system_profiler_storage",
+            vec!["SPNVMeDataType", "SPSerialATADataType"],
+        ),
+        (
+            "system_profiler_peripherals",
+            vec![
+                "SPUSBDataType",
+                "SPAudioDataType",
+                "SPCameraDataType",
+                "SPPrintersDataType",
+            ],
+        ),
+    ] {
+        let started = Instant::now();
+        let mut args = vec!["-json", "-timeout", "8"];
+        args.extend(types.iter().copied());
+        match command_json_result("system_profiler", &args) {
+            Ok(value) => {
+                enrich_macos_system_profiler(root, &value);
+                if let Some(map) = value.as_object() { platform_data.extend(map.clone()); }
+                for data_type in &types {
+                    let present = value.get(data_type).and_then(Value::as_array);
+                    attempts.push(json!({"source": data_type, "status": match present { Some(items) if !items.is_empty() => "ok", Some(_) => "empty", None => "failed" }, "reason": match present { Some(items) if !items.is_empty() => Value::Null, Some(_) => json!("no_records"), None => json!("missing_result") }}));
+                }
+                attempts.push(json!({"source": source, "status": "ok", "elapsedMs": started.elapsed().as_millis() as u64}));
+            }
+            Err(error) => attempts.push(json!({"source": source, "status": "failed", "error": error, "elapsedMs": started.elapsed().as_millis() as u64})),
+        }
     }
+    root.insert("platformData".into(), Value::Object(platform_data));
+    root.insert("hardwareProbeAttempts".into(), json!(attempts));
     enrich_macos_network_configuration(root);
     enrich_macos_cpu(root);
     insert_empty_if_missing(root, "bios");
@@ -277,61 +408,152 @@ fn enrich_impl(root: &mut Map<String, Value>) {
 
 #[cfg(target_os = "macos")]
 fn enrich_macos_cpu(root: &mut Map<String, Value>) {
-    let sysctl_u64 = |name: &str| {
-        command_text("sysctl", &["-n", name]).and_then(|value| value.trim().parse::<u64>().ok())
-    };
-    let Some(cpu) = root.get_mut("cpu").and_then(Value::as_object_mut) else {
-        return;
-    };
-    let frequency_mhz = |name: &str| sysctl_u64(name).map(|hz| hz / 1_000_000);
-    if let Some(value) = frequency_mhz("hw.cpufrequency") {
-        cpu.insert("baseFrequency".to_string(), json!(value));
+    let mut facts = Vec::new();
+    for (field, name, divisor) in [
+        ("baseFrequency", "hw.cpufrequency", 1_000_000),
+        ("minFrequency", "hw.cpufrequency_min", 1_000_000),
+        ("maxFrequency", "hw.cpufrequency_max", 1_000_000),
+        ("performanceCores", "hw.perflevel0.physicalcpu", 1),
+        ("efficiencyCores", "hw.perflevel1.physicalcpu", 1),
+    ] {
+        if let Some(value) = macos_text_probe(root, name, "sysctl", &["-n", name])
+            .and_then(|text| text.trim().parse::<u64>().ok())
+            .filter(|value| *value > 0)
+        {
+            facts.push((field, value / divisor));
+        }
     }
-    if let Some(value) = frequency_mhz("hw.cpufrequency_min") {
-        cpu.insert("minFrequency".to_string(), json!(value));
-    }
-    if let Some(value) = frequency_mhz("hw.cpufrequency_max") {
-        cpu.insert("maxFrequency".to_string(), json!(value));
-    }
-    if let Some(value) = sysctl_u64("hw.perflevel0.physicalcpu") {
-        cpu.insert("performanceCores".to_string(), json!(value));
-    }
-    if let Some(value) = sysctl_u64("hw.perflevel1.physicalcpu") {
-        cpu.insert("efficiencyCores".to_string(), json!(value));
+    if let Some(cpu) = root.get_mut("cpu").and_then(Value::as_object_mut) {
+        for (field, value) in facts {
+            cpu.insert(field.into(), json!(value));
+        }
     }
 }
 
 #[cfg(target_os = "macos")]
 fn enrich_macos_network_configuration(root: &mut Map<String, Value>) {
-    let Some(route) = command_text("route", &["-n", "get", "default"]) else {
-        return;
-    };
-    let Some((interface, gateway)) = parse_macos_default_route(&route) else {
-        return;
-    };
-    let dns_servers = command_text("scutil", &["--dns"])
+    let route = macos_text_probe(
+        root,
+        "default_route_ipv4",
+        "route",
+        &["-n", "get", "default"],
+    )
+    .and_then(|value| parse_macos_default_route(&value));
+    let route6 = macos_text_probe(
+        root,
+        "default_route_ipv6",
+        "route",
+        &["-n", "get", "-inet6", "default"],
+    )
+    .and_then(|value| parse_macos_default_route(&value));
+    let links = macos_text_probe(root, "interface_link_states", "ifconfig", &["-a"])
+        .map(|value| macos_link_states(&value))
+        .unwrap_or_default();
+    let dns_servers = macos_text_probe(root, "dns_configuration", "scutil", &["--dns"])
         .map(|value| parse_macos_dns_servers(&value))
         .unwrap_or_default();
-    let dhcp =
-        command_text("ipconfig", &["getpacket", &interface]).map(|value| !value.trim().is_empty());
+    let dhcp = route
+        .as_ref()
+        .and_then(|(interface, _)| {
+            macos_text_probe(
+                root,
+                "dhcp_configuration",
+                "ipconfig",
+                &["getpacket", interface],
+            )
+        })
+        .map(|value| !value.trim().is_empty());
+    let preferred = route.as_ref().or(route6.as_ref());
     let Some(rows) = root.get_mut("net").and_then(Value::as_array_mut) else {
         return;
     };
     for row in rows {
-        let is_default = [value_text(row, "iface"), value_text(row, "ifaceName")]
-            .iter()
-            .any(|value| value == &interface);
+        let iface = value_text(row, "iface");
         let Some(map) = row.as_object_mut() else {
             continue;
         };
-        map.insert("default".to_string(), json!(is_default));
-        if is_default {
-            map.insert("defaultGateway".to_string(), json!(gateway));
-            map.insert("gateway".to_string(), json!(gateway));
-            map.insert("dnsServers".to_string(), json!(dns_servers));
-            map.insert("dhcp".to_string(), json!(dhcp));
+        map.insert(
+            "defaultIpv4".into(),
+            json!(route.as_ref().map(|(name, _)| name == &iface)),
+        );
+        map.insert(
+            "defaultIpv6".into(),
+            json!(route6.as_ref().map(|(name, _)| name == &iface)),
+        );
+        map.insert(
+            "default".into(),
+            json!(preferred.map(|(name, _)| name == &iface)),
+        );
+        map.insert(
+            "operstate".into(),
+            json!(links.get(&iface).map(String::as_str).unwrap_or("unknown")),
+        );
+        if let Some((name, gateway)) = preferred {
+            if name == &iface {
+                map.insert("defaultGateway".into(), json!(gateway));
+                map.insert("gateway".into(), json!(gateway));
+                map.insert("dnsServers".into(), json!(dns_servers));
+                map.insert("dnsSource".into(), json!("scutil.system_resolvers"));
+                map.insert("dhcp".into(), json!(dhcp));
+            }
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_text_probe(
+    root: &mut Map<String, Value>,
+    source: &str,
+    program: &str,
+    args: &[&str],
+) -> Option<String> {
+    let started = Instant::now();
+    let result = command_text_result(program, args);
+    let mut diagnostic =
+        json!({"source": source, "elapsedMs": started.elapsed().as_millis() as u64});
+    match &result {
+        Ok(text) => {
+            diagnostic["status"] = json!(if text.trim().is_empty() {
+                "empty"
+            } else {
+                "ok"
+            })
+        }
+        Err(error) => {
+            diagnostic["status"] = json!("failed");
+            diagnostic["error"] = json!(error);
+        }
+    }
+    root.entry("hardwareProbeAttempts")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .unwrap()
+        .push(diagnostic);
+    result.ok()
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_link_states(text: &str) -> std::collections::BTreeMap<String, String> {
+    let mut states = std::collections::BTreeMap::new();
+    let mut iface = None;
+    for line in text.lines() {
+        if !line.starts_with(char::is_whitespace) {
+            iface = line.split_once(':').map(|(name, _)| name.to_string());
+        } else if let Some(status) = line.trim().strip_prefix("status:") {
+            if let Some(name) = &iface {
+                states.insert(
+                    name.clone(),
+                    match status.trim() {
+                        "active" => "up",
+                        "inactive" => "down",
+                        _ => "unknown",
+                    }
+                    .into(),
+                );
+            }
+        }
+    }
+    states
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -363,7 +585,7 @@ fn parse_macos_dns_servers(value: &str) -> Vec<String> {
         .collect()
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn enrich_macos_system_profiler(root: &mut Map<String, Value>, value: &Value) {
     let hardware = value
         .get("SPHardwareDataType")
@@ -376,9 +598,13 @@ fn enrich_macos_system_profiler(root: &mut Map<String, Value>, value: &Value) {
         let machine_model = string_field(hardware, "machine_model");
         let model_number = string_field(hardware, "model_number");
         let serial_number = string_field(hardware, "serial_number");
-        let platform_uuid = string_field(hardware, "platform_UUID");
+        let platform_uuid = first_non_empty(&[
+            string_field(hardware, "platform_UUID"),
+            root.get("uuid")
+                .map(|v| string_value(v, "hardware"))
+                .unwrap_or_default(),
+        ]);
         let chip_type = string_field(hardware, "chip_type");
-        let physical_memory = string_field(hardware, "physical_memory");
 
         root.insert(
             "system".to_string(),
@@ -399,9 +625,19 @@ fn enrich_macos_system_profiler(root: &mut Map<String, Value>, value: &Value) {
                 "product": machine_name,
                 "version": model_number,
                 "serial": serial_number,
-                "memMax": physical_memory,
                 "chip": chip_type,
             }),
+        );
+    }
+    if let Some(items) = value.get("SPMemoryDataType") {
+        let modules = normalize_macos_memory_modules(items);
+        root.insert("memLayout".into(), modules);
+    }
+    if let Some(hardware) = hardware {
+        let unified = string_field(hardware, "chip_type").starts_with("Apple");
+        root.insert(
+            "memoryKind".into(),
+            json!(if unified { "unified" } else { "dimm" }),
         );
     }
     enrich_macos_bios(root, value);
@@ -426,7 +662,7 @@ fn enrich_macos_bios(root: &mut Map<String, Value>, value: &Value) {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn enrich_macos_media(root: &mut Map<String, Value>, value: &Value) {
     if let Some(displays) = value.get("SPDisplaysDataType").and_then(Value::as_array) {
         let controllers = displays
@@ -477,6 +713,20 @@ fn enrich_macos_media(root: &mut Map<String, Value>, value: &Value) {
         );
     }
 
+    for (source, category) in [
+        ("SPUSBDataType", "usb"),
+        ("SPAudioDataType", "audio"),
+        ("SPCameraDataType", "cameras"),
+        ("SPPrintersDataType", "printers"),
+    ] {
+        if let Some(items) = value.get(source) {
+            root.entry("peripherals")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .unwrap()
+                .insert(category.into(), items.clone());
+        }
+    }
     let physical_disks = normalize_macos_physical_disks(value);
     if physical_disks
         .as_array()
@@ -503,7 +753,8 @@ fn enrich_impl(root: &mut Map<String, Value>) {
 
 #[cfg(target_os = "windows")]
 fn hardware_uuid_impl() -> Option<String> {
-    powershell_scalar("(Get-CimInstance Win32_ComputerSystemProduct).UUID")
+    // Obtained once by the core system_product batch.
+    None
 }
 
 #[cfg(target_os = "macos")]
@@ -523,18 +774,6 @@ fn hardware_uuid_impl() -> Option<String> {
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn hardware_uuid_impl() -> Option<String> {
     None
-}
-
-#[cfg(target_os = "windows")]
-fn powershell_json(command: &str) -> Option<Value> {
-    let wrapped = powershell_utf8_command(&format!("{command} | ConvertTo-Json -Compress"));
-    command_json("powershell", &["-NoProfile", "-Command", &wrapped])
-}
-
-#[cfg(target_os = "windows")]
-fn powershell_scalar(command: &str) -> Option<String> {
-    let wrapped = powershell_utf8_command(command);
-    command_text("powershell", &["-NoProfile", "-Command", &wrapped])
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -592,7 +831,13 @@ fn normalize_windows_processor_identity(value: &Value) -> Value {
 
 #[cfg(any(target_os = "windows", test))]
 fn enrich_windows_cpu(root: &mut Map<String, Value>, value: &Value) {
-    let processors = value_items(value);
+    let processors: Vec<_> = value_items(value)
+        .into_iter()
+        .filter(|item| item.is_object())
+        .collect();
+    if processors.is_empty() {
+        return;
+    }
     let Some(cpu) = root.get_mut("cpu").and_then(Value::as_object_mut) else {
         return;
     };
@@ -614,10 +859,16 @@ fn enrich_windows_cpu(root: &mut Map<String, Value>, value: &Value) {
         .iter()
         .filter_map(|item| value_u64_at(item, "NumberOfLogicalProcessors"))
         .sum::<u64>();
-    cpu.insert("frequency".to_string(), json!(current_frequency));
-    cpu.insert("maxFrequency".to_string(), json!(max_frequency));
-    cpu.insert("physicalCores".to_string(), json!(physical_cores));
-    cpu.insert("cores".to_string(), json!(logical_cores));
+    for (field, number) in [
+        ("currentFrequency", current_frequency),
+        ("maxFrequency", max_frequency),
+        ("physicalCores", physical_cores),
+        ("cores", logical_cores),
+    ] {
+        if number > 0 {
+            cpu.insert(field.into(), json!(number));
+        }
+    }
     cpu.insert("processors".to_string(), json!(processors.len()));
 }
 
@@ -637,6 +888,10 @@ fn normalize_windows_network_hardware(value: &Value) -> Value {
                     "permanentAddress": value_text(item, "PermanentAddress"),
                     "status": value_text(item, "Status"),
                     "connectorPresent": item.get("ConnectorPresent").and_then(Value::as_bool),
+                    "linkSpeed": item.get("LinkSpeed"),
+                    "driverVersion": item.get("DriverVersion"),
+                    "driverDescription": item.get("DriverDescription"),
+                    "mediaConnectionState": item.get("MediaConnectionState"),
                     "hardwareInterface": item.get("HardwareInterface").and_then(Value::as_bool),
                     "virtual": item.get("Virtual").and_then(Value::as_bool),
                 })
@@ -647,23 +902,63 @@ fn normalize_windows_network_hardware(value: &Value) -> Value {
 
 #[cfg(any(target_os = "windows", test))]
 fn enrich_windows_network_configuration(root: &mut Map<String, Value>, value: &Value) {
+    let configurations = value_items(value);
+    let preferred = configurations
+        .iter()
+        .flat_map(|config| {
+            config
+                .get("DefaultRoutes")
+                .map(value_items)
+                .unwrap_or_default()
+        })
+        .filter_map(|route| {
+            let prefix = value_text(route, "DestinationPrefix");
+            if prefix != "0.0.0.0/0" && prefix != "::/0" {
+                return None;
+            }
+            let metric = value_u64_at(route, "RouteMetric")?
+                .checked_add(value_u64_at(route, "InterfaceMetric")?)?;
+            Some((
+                prefix != "0.0.0.0/0",
+                metric,
+                value_u64_at(route, "InterfaceIndex")?,
+            ))
+        })
+        .min()
+        .map(|(_, _, index)| index);
     let Some(rows) = root.get_mut("net").and_then(Value::as_array_mut) else {
         return;
     };
-    let configurations = value_items(value);
+    let guid = |text: &str| text.trim_matches(['{', '}']).to_ascii_lowercase();
     for row in rows {
         let iface = first_non_empty(&[value_text(row, "iface"), value_text(row, "ifaceName")]);
-        let Some(configuration) = configurations.iter().copied().find(|configuration| {
-            value_text(configuration, "InterfaceAlias").eq_ignore_ascii_case(&iface)
-        }) else {
+        let configuration = configurations.iter().copied().find(|configuration| {
+            let index_matches = value_u64_at(row, "interfaceIndex")
+                .zip(value_u64_at(configuration, "InterfaceIndex"))
+                .is_some_and(|(a, b)| a == b);
+            let interface_guid = value_text(configuration, "InterfaceGuid");
+            index_matches
+                || (!interface_guid.is_empty() && guid(&interface_guid) == guid(&iface))
+                || value_text(configuration, "InterfaceAlias").eq_ignore_ascii_case(&iface)
+        });
+        let Some(configuration) = configuration else {
             continue;
         };
-        let gateway = first_non_empty(&[
-            value_text(configuration, "IPv4DefaultGateway"),
-            value_text(configuration, "IPv6DefaultGateway"),
-        ]);
+        let gateway = string_array_at(configuration, "IPv4DefaultGateway")
+            .into_iter()
+            .chain(string_array_at(configuration, "IPv6DefaultGateway"))
+            .next()
+            .unwrap_or_default();
         let dns_servers = string_array_at(configuration, "DnsServers");
         if let Some(map) = row.as_object_mut() {
+            map.insert(
+                "interfaceIndex".into(),
+                json!(value_u64_at(configuration, "InterfaceIndex")),
+            );
+            map.insert(
+                "interfaceGuid".into(),
+                json!(value_text(configuration, "InterfaceGuid")),
+            );
             map.insert("defaultGateway".to_string(), json!(gateway));
             map.insert("gateway".to_string(), json!(gateway));
             map.insert("dnsServers".to_string(), json!(dns_servers));
@@ -671,7 +966,36 @@ fn enrich_windows_network_configuration(root: &mut Map<String, Value>, value: &V
                 "dhcp".to_string(),
                 json!(configuration.get("Dhcp").and_then(parse_windows_enabled)),
             );
-            map.insert("default".to_string(), json!(!gateway.is_empty()));
+            map.insert(
+                "default".to_string(),
+                json!(
+                    preferred.is_some()
+                        && preferred == value_u64_at(configuration, "InterfaceIndex")
+                ),
+            );
+            map.insert(
+                "defaultRoutes".into(),
+                configuration
+                    .get("DefaultRoutes")
+                    .cloned()
+                    .unwrap_or_else(|| json!([])),
+            );
+            let status = value_text(configuration, "Status").to_ascii_lowercase();
+            map.insert(
+                "operstate".into(),
+                json!(match status.as_str() {
+                    "up" => "up",
+                    "disconnected" | "disabled" | "down" => "down",
+                    _ => "unknown",
+                }),
+            );
+            map.insert(
+                "linkSpeed".into(),
+                configuration
+                    .get("LinkSpeed")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            );
         }
     }
 }
@@ -739,7 +1063,7 @@ fn normalize_windows_chassis(value: &Value) -> Value {
     })
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn normalize_windows_system(value: &Value, current: Option<&Value>) -> Value {
     json!({
         "manufacturer": value_text(value, "Manufacturer"),
@@ -753,16 +1077,40 @@ fn normalize_windows_system(value: &Value, current: Option<&Value>) -> Value {
 }
 
 #[cfg(any(target_os = "windows", test))]
-fn normalize_windows_graphics_controllers(value: &Value) -> Value {
+fn normalize_windows_graphics_controllers(value: &Value, dxgi: &Value) -> Value {
     Value::Array(
         value_items(value)
             .into_iter()
             .filter(|item| item.is_object())
             .map(|item| {
+                let identity = windows_gpu_pci_identity(item);
+                let matches: Vec<_> = value_items(dxgi).into_iter().filter(|adapter| {
+                    identity.is_some_and(|(vendor, device, subsystem)| {
+                        value_u64_at(adapter, "VendorId") == Some(vendor)
+                            && value_u64_at(adapter, "DeviceId") == Some(device)
+                            && value_u64_at(adapter, "SubSysId") == Some(subsystem)
+                            && value_u64_at(adapter, "Flags").is_some_and(|flags| flags & 2 == 0)
+                    })
+                }).collect();
+                // Identical adapters need a stronger instance match; never assign by array order.
+                let unique_controller = identity.is_some() && value_items(value).into_iter().filter(|other| windows_gpu_pci_identity(other) == identity).count() == 1;
+                let adapter = (unique_controller && matches.len() == 1).then(|| matches[0]);
+                let dedicated = adapter.and_then(|row| value_u64_at(row, "DedicatedVideoMemory"));
+                let ambiguous = matches.len() > 1 || (!unique_controller && !matches.is_empty());
                 json!({
                     "model": value_text(item, "Name"),
                     "vendor": graphics_vendor(item),
-                    "vram": item.get("AdapterRAM").and_then(Value::as_u64),
+                    "vram": dedicated,
+                    "vramSource": dedicated.map(|_| "DXGI_ADAPTER_DESC1.DedicatedVideoMemory"),
+                    "vramReportedBytes": value_u64_at(item, "AdapterRAM"),
+                    "vramReportedSource": "Win32_VideoController.AdapterRAM (32-bit)",
+                    "vramStatus": if dedicated.is_some() { "verified_source" } else { "unverified_32bit" },
+                    "dxgiMatchStatus": if ambiguous { "ambiguous" } else if adapter.is_some() { "matched" } else { "unmapped" },
+                    "dxgiMatchReason": if ambiguous { Some("ambiguous_instance_match") } else if identity.is_none() { Some("non_pci_device") } else if adapter.is_none() { Some("no_instance_match") } else { None },
+                    "dxgiLuid": adapter.map(|row| value_text(row, "Luid")),
+                    "dxgiMatchSource": "unique PCI vendor/device/subsystem signature",
+                    "sharedSystemMemoryBytes": adapter.and_then(|row| value_u64_at(row, "SharedSystemMemory")),
+                    "pnpDeviceId": value_text(item, "PNPDeviceID"),
                     "videoProcessor": value_text(item, "VideoProcessor"),
                     "driverVersion": value_text(item, "DriverVersion"),
                     "currentResX": value_u64_at(item, "CurrentHorizontalResolution"),
@@ -772,6 +1120,22 @@ fn normalize_windows_graphics_controllers(value: &Value) -> Value {
             })
             .collect(),
     )
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_gpu_pci_identity(value: &Value) -> Option<(u64, u64, u64)> {
+    let pnp = value_text(value, "PNPDeviceID").to_ascii_uppercase();
+    if !pnp.starts_with("PCI\\") {
+        return None;
+    }
+    let parts: Vec<_> = pnp.get(4..)?.split('\\').next()?.split('&').collect();
+    let read = |prefix: &str| {
+        parts.iter().find_map(|part| {
+            part.strip_prefix(prefix)
+                .and_then(|hex| u64::from_str_radix(hex, 16).ok())
+        })
+    };
+    Some((read("VEN_")?, read("DEV_")?, read("SUBSYS_")?))
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -803,12 +1167,21 @@ fn normalize_windows_displays(
     // Win32_VideoController reports a controller mode rather than a monitor-specific
     // mode. It is safe as a fallback for one monitor, but would be misleading if
     // copied onto every row of a multi-monitor setup.
-    let current_mode = (monitor_items.len() == 1)
+    let current_mode = (monitor_items.len() == 1
+        && value_items(controllers)
+            .into_iter()
+            .filter(|item| item.is_object())
+            .count()
+            == 1)
         .then(|| {
             value_items(controllers).into_iter().find_map(|item| {
-                let x = value_u64_at(item, "CurrentHorizontalResolution")?;
-                let y = value_u64_at(item, "CurrentVerticalResolution")?;
-                Some((x, y, value_u64_at(item, "CurrentRefreshRate")))
+                let x = value_u64_at(item, "CurrentHorizontalResolution").filter(|v| *v > 0)?;
+                let y = value_u64_at(item, "CurrentVerticalResolution").filter(|v| *v > 0)?;
+                Some((
+                    x,
+                    y,
+                    value_u64_at(item, "CurrentRefreshRate").filter(|v| *v > 1),
+                ))
             })
         })
         .flatten();
@@ -818,16 +1191,18 @@ fn normalize_windows_displays(
             .into_iter()
             .map(|item| {
                 let instance_name = value_text(item, "InstanceName");
-                let desktop = value_items(desktop_monitors).into_iter().find(|desktop| {
+                let desktop_matches: Vec<_> = value_items(desktop_monitors).into_iter().filter(|desktop| {
                     same_display_instance(
                         &instance_name,
                         &value_text(desktop, "PNPDeviceID"),
                     )
-                });
-                let desktop_x = desktop.and_then(|value| value_u64_at(value, "ScreenWidth"));
-                let desktop_y = desktop.and_then(|value| value_u64_at(value, "ScreenHeight"));
-                let (fallback_x, fallback_y, current_refresh_rate) =
-                    current_mode.unwrap_or((0, 0, None));
+                }).collect();
+                let desktop = (desktop_matches.len() == 1).then(|| desktop_matches[0]);
+                let desktop_x = desktop.and_then(|value| value_u64_at(value, "ScreenWidth")).filter(|v| *v > 0);
+                let desktop_y = desktop.and_then(|value| value_u64_at(value, "ScreenHeight")).filter(|v| *v > 0);
+                let compatible_mode = current_mode.filter(|(x,y,_)| desktop_matches.len() <= 1 && desktop_x.is_none_or(|dx| dx == *x) && desktop_y.is_none_or(|dy| dy == *y));
+                let width = desktop_x.or_else(|| compatible_mode.map(|(x,_,_)| x));
+                let height = desktop_y.or_else(|| compatible_mode.map(|(_,y,_)| y));
                 json!({
                     "model": first_non_empty(&[
                         wmi_char_array_text(item.get("UserFriendlyName")),
@@ -845,9 +1220,13 @@ fn normalize_windows_displays(
                     "type": desktop.map(|value| value_text(value, "MonitorType")).unwrap_or_default(),
                     "yearOfManufacture": value_u64_at(item, "YearOfManufacture"),
                     "weekOfManufacture": value_u64_at(item, "WeekOfManufacture"),
-                    "currentResX": desktop_x.unwrap_or(fallback_x),
-                    "currentResY": desktop_y.unwrap_or(fallback_y),
-                    "currentRefreshRate": current_refresh_rate,
+                    "currentResX": width,
+                    "currentResY": height,
+                    "currentRefreshRate": compatible_mode.and_then(|(_,_,hz)| hz),
+                    "desktopMatchStatus": if desktop_matches.len() > 1 { "ambiguous" } else if desktop.is_some() { "matched" } else { "unmapped" },
+                    "resolutionSource": if desktop_x.is_some() && desktop_y.is_some() { Some("Win32_DesktopMonitor.ScreenWidth/ScreenHeight") } else if compatible_mode.is_some() { Some("Win32_VideoController (single adapter/display fallback)") } else { None },
+                    "refreshRateSource": compatible_mode.and_then(|(_,_,hz)| hz.map(|_| "Win32_VideoController (single adapter/display fallback)")),
+                    "modeMatchStatus": if desktop_matches.len() > 1 { "ambiguous" } else if compatible_mode.is_some() { "single_pair_fallback" } else if desktop_x.is_some() && desktop_y.is_some() { "reported" } else { "unmapped" },
                 })
             })
             .collect(),
@@ -856,19 +1235,14 @@ fn normalize_windows_displays(
 
 #[cfg(any(target_os = "windows", test))]
 fn same_display_instance(wmi_instance: &str, pnp_device_id: &str) -> bool {
-    let normalize = |value: &str| {
-        let value = value.trim().to_ascii_uppercase();
-        value
-            .rsplit_once('_')
-            .filter(|(_, suffix)| suffix.chars().all(|character| character.is_ascii_digit()))
-            .map(|(prefix, _)| prefix.to_string())
-            .unwrap_or(value)
-    };
-    let wmi = normalize(wmi_instance);
-    let pnp = normalize(pnp_device_id);
+    let wmi = wmi_instance.trim().to_ascii_uppercase();
+    let pnp = pnp_device_id.trim().to_ascii_uppercase();
     !wmi.is_empty()
         && !pnp.is_empty()
-        && (wmi == pnp || wmi.starts_with(&pnp) || pnp.starts_with(&wmi))
+        && (wmi == pnp
+            || wmi.rsplit_once('_').is_some_and(|(prefix, suffix)| {
+                !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()) && prefix == pnp
+            }))
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -889,6 +1263,8 @@ fn normalize_windows_physical_disks(value: &Value) -> Value {
                     "name": model,
                     "model": model,
                     "device": device,
+                    "index": value_u64_at(item, "Index"),
+                    "source": "Win32_DiskDrive",
                     "serialNum": serial,
                     "serial": serial,
                     "size": size,
@@ -896,6 +1272,9 @@ fn normalize_windows_physical_disks(value: &Value) -> Value {
                     "mediaType": value_text(item, "MediaType"),
                     "interfaceType": value_text(item, "InterfaceType"),
                     "firmwareRevision": value_text(item, "FirmwareRevision"),
+                    "manufacturer": value_text(item, "Manufacturer"),
+                    "status": value_text(item, "Status"),
+                    "bytesPerSector": value_u64_at(item, "BytesPerSector"),
                     "pnpDeviceId": value_text(item, "PNPDeviceID"),
                 }))
             })
@@ -915,9 +1294,8 @@ fn normalize_windows_batteries(value: &Value) -> Value {
                 if name.is_empty() && device_id.is_empty() {
                     return None;
                 }
-                let design_capacity = value_u64_at(item, "DesignCapacity").unwrap_or_default();
-                let full_charge_capacity =
-                    value_u64_at(item, "FullChargeCapacity").unwrap_or_default();
+                let design_capacity = value_u64_at(item, "DesignCapacity").filter(|value| *value > 0);
+                let full_charge_capacity = value_u64_at(item, "FullChargeCapacity").filter(|value| *value > 0);
                 Some(json!({
                     "name": name,
                     "deviceId": device_id,
@@ -926,9 +1304,9 @@ fn normalize_windows_batteries(value: &Value) -> Value {
                     "chemistry": value_u64_at(item, "Chemistry"),
                     "designCapacity": design_capacity,
                     "fullChargeCapacity": full_charge_capacity,
-                    "healthPercent": capacity_health_percent(full_charge_capacity, design_capacity),
+                    "healthPercent": full_charge_capacity.zip(design_capacity).and_then(|(full, design)| capacity_health_percent(full, design)),
                     "chargePercent": value_u64_at(item, "EstimatedChargeRemaining"),
-                    "estimatedRunTimeMinutes": value_u64_at(item, "EstimatedRunTime"),
+                    "estimatedRunTimeMinutes": value_u64_at(item, "EstimatedRunTime").filter(|value| *value != 71582788 && *value != u32::MAX as u64),
                     "designVoltageMv": value_u64_at(item, "DesignVoltage"),
                 }))
             })
@@ -947,8 +1325,10 @@ fn normalize_disk_media_type(media_type: &str, model: &str) -> String {
     let combined = format!("{media_type} {model}").to_ascii_lowercase();
     if combined.contains("nvme") || combined.contains("ssd") || combined.contains("solid state") {
         "SSD".to_string()
-    } else if combined.contains("fixed hard disk") || combined.contains("hdd") {
+    } else if combined.contains("hdd") {
         "HDD".to_string()
+    } else if combined.contains("fixed hard disk") {
+        "Unknown".to_string()
     } else if combined.contains("removable") {
         "Removable".to_string()
     } else {
@@ -978,6 +1358,60 @@ fn normalize_macos_physical_disks(value: &Value) -> Value {
         }
     }
     Value::Array(rows)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn normalize_macos_memory_modules(value: &Value) -> Value {
+    fn visit(value: &Value, rows: &mut Vec<Value>) {
+        match value {
+            Value::Array(items) => items.iter().for_each(|item| visit(item, rows)),
+            Value::Object(item) => {
+                if let Some(size) = item
+                    .get("dimm_size")
+                    .and_then(Value::as_str)
+                    .and_then(profiler_memory_bytes)
+                {
+                    rows.push(json!({
+                        "size": size, "bank": value_text(value, "_name"),
+                        "type": value_text(value, "dimm_type"),
+                        "manufacturer": value_text(value, "dimm_manufacturer"),
+                        "partNum": value_text(value, "dimm_part_number"),
+                        "serialNum": value_text(value, "dimm_serial_number"),
+                        "clockSpeed": value_text(value, "dimm_speed").split_whitespace().next().and_then(|v| v.parse::<u64>().ok()),
+                        "speedUnit": value_text(value, "dimm_speed").split_whitespace().nth(1),
+                        "speedReported": value_text(value, "dimm_speed"),
+                        "speedSource": "system_profiler.dimm_speed",
+                        "status": value_text(value, "dimm_status"),
+                    }));
+                }
+                for child in item.values() {
+                    if child.is_object() || child.is_array() {
+                        visit(child, rows);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut rows = Vec::new();
+    visit(value, &mut rows);
+    Value::Array(rows)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn profiler_memory_bytes(text: &str) -> Option<u64> {
+    if let Some(bytes) = bytes_from_profiler_text(text) {
+        return (bytes > 0).then_some(bytes);
+    }
+    let mut words = text.split_whitespace();
+    let amount = words.next()?.parse::<u64>().ok()?;
+    let multiplier = match words.next()?.to_ascii_uppercase().as_str() {
+        "TB" => 1024_u64.pow(4),
+        "GB" => 1024_u64.pow(3),
+        "MB" => 1024_u64.pow(2),
+        _ => return None,
+    };
+    amount.checked_mul(multiplier).filter(|bytes| *bytes > 0)
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -1105,28 +1539,36 @@ fn collect_macos_disk_rows(items: &[Value], data_type: &str, rows: &mut Vec<Valu
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn normalize_windows_memory_modules(value: &Value) -> Value {
     Value::Array(
         value_items(value)
             .into_iter()
             .filter_map(|item| {
-                let size = value_u64_at(item, "Capacity")?;
+                let size = value_u64_at(item, "Capacity").filter(|size| *size > 0)?;
                 let clock_speed = value_u64_at(item, "ConfiguredClockSpeed")
-                    .or_else(|| value_u64_at(item, "Speed"));
+                    .filter(|speed| *speed > 0)
+                    .or_else(|| value_u64_at(item, "Speed").filter(|speed| *speed > 0));
                 let smbios_type = value_u64_at(item, "SMBIOSMemoryType");
                 let form_factor = value_u64_at(item, "FormFactor");
                 Some(json!({
-                    "bank": first_non_empty(&[
-                        value_text(item, "BankLabel"),
-                        value_text(item, "DeviceLocator"),
-                    ]),
+                    "bank": first_non_empty(&[value_text(item, "DeviceLocator"), value_text(item, "BankLabel")]),
+                    "bankLabel": value_text(item, "BankLabel"),
                     "size": size,
                     "type": smbios_type
                         .map(memory_type_label)
                         .filter(|label| !label.is_empty())
                         .unwrap_or_default(),
-                    "clockSpeed": clock_speed.unwrap_or_default(),
+                    "clockSpeed": clock_speed,
+                    "speedUnit": "MT/s",
+                    "speedSource": "Win32_PhysicalMemory (SMBIOS configured/rated transfer rate)",
+                    "configuredSpeed": value_u64_at(item, "ConfiguredClockSpeed").filter(|speed| *speed > 0),
+                    "ratedSpeed": value_u64_at(item, "Speed").filter(|speed| *speed > 0),
+                    "dataWidth": value_u64_at(item, "DataWidth"),
+                    "totalWidth": value_u64_at(item, "TotalWidth"),
+                    "configuredVoltageMv": value_u64_at(item, "ConfiguredVoltage"),
+                    "minVoltageMv": value_u64_at(item, "MinVoltage"),
+                    "maxVoltageMv": value_u64_at(item, "MaxVoltage"),
                     "formFactor": form_factor
                         .map(memory_form_factor_label)
                         .filter(|label| !label.is_empty())
@@ -1140,29 +1582,29 @@ fn normalize_windows_memory_modules(value: &Value) -> Value {
     )
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn memory_type_label(code: u64) -> String {
     match code {
         20 => "DDR",
         21 => "DDR2",
         24 => "DDR3",
         26 => "DDR4",
+        27 => "LPDDR",
+        28 => "LPDDR2",
+        29 => "LPDDR3",
+        30 => "LPDDR4",
+        31 => "Logical non-volatile device",
+        32 => "HBM",
+        33 => "HBM2",
         34 => "DDR5",
-        35 => "LPDDR",
-        36 => "LPDDR2",
-        37 => "LPDDR3",
-        38 => "LPDDR4",
-        39 => "Logical non-volatile device",
-        40 => "HBM",
-        41 => "HBM2",
-        42 => "DDR5",
-        43 => "LPDDR5",
+        35 => "LPDDR5",
+        36 => "HBM3",
         _ => "",
     }
     .to_string()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn memory_form_factor_label(code: u64) -> String {
     match code {
         8 => "DIMM",
@@ -1276,22 +1718,30 @@ fn chassis_type_label(code: u64) -> String {
     .to_string()
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-fn command_json(program: &str, args: &[&str]) -> Option<Value> {
-    let text = command_text(program, args)?;
-    serde_json::from_str(&text).ok()
-}
-
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-fn command_text(program: &str, args: &[&str]) -> Option<String> {
-    let output = new_command(program).args(args).output().ok()?;
+#[cfg(target_os = "macos")]
+fn command_json_result(program: &str, args: &[&str]) -> Result<Value, String> {
+    let output = command_output(new_command(program).args(args))?;
     if !output.status.success() {
-        return None;
+        return Err("query_failed".into());
     }
-    String::from_utf8(output.stdout).ok()
+    serde_json::from_slice(&output.stdout).map_err(|_| "invalid_json".into())
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(target_os = "macos")]
+fn command_text(program: &str, args: &[&str]) -> Option<String> {
+    command_text_result(program, args).ok()
+}
+
+#[cfg(target_os = "macos")]
+fn command_text_result(program: &str, args: &[&str]) -> Result<String, String> {
+    let output = command_output(new_command(program).args(args))?;
+    if !output.status.success() {
+        return Err("query_failed".into());
+    }
+    String::from_utf8(output.stdout).map_err(|_| "invalid_utf8".into())
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 fn new_command(program: &str) -> Command {
     let mut command = Command::new(program);
     configure_command_window(&mut command);
@@ -1321,7 +1771,7 @@ fn insert_array_if_missing(root: &mut Map<String, Value>, key: &str) {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn string_field(map: &Map<String, Value>, key: &str) -> String {
     map.get(key)
         .and_then(Value::as_str)
@@ -1352,8 +1802,208 @@ mod tests {
     use super::*;
 
     #[test]
+    fn missing_hardware_facts_do_not_become_zero_or_supported_capacity() {
+        let mut root = json!({"cpu": {"cores": 16, "physicalCores": 8, "currentFrequency": 2400}})
+            .as_object()
+            .unwrap()
+            .clone();
+        enrich_windows_cpu(&mut root, &json!([]));
+        enrich_windows_cpu(&mut root, &json!([{"Name": "CPU"}]));
+        assert_eq!(root["cpu"]["cores"], 16);
+        assert_eq!(root["cpu"]["physicalCores"], 8);
+        assert_eq!(root["cpu"]["currentFrequency"], 2400);
+        let battery =
+            normalize_windows_batteries(&json!([{"Name":"Battery", "EstimatedRunTime":71582788}]));
+        assert!(battery[0]["designCapacity"].is_null());
+        assert!(battery[0]["fullChargeCapacity"].is_null());
+        assert!(battery[0]["estimatedRunTimeMinutes"].is_null());
+        enrich_macos_system_profiler(
+            &mut root,
+            &json!({"SPHardwareDataType":[{"physical_memory":"16 GB", "chip_type":"Intel"}]}),
+        );
+        assert!(root["baseboard"].get("memMax").is_none());
+    }
+
+    #[test]
+    fn dxgi_memory_is_64bit_and_matches_unique_pci_adapters_not_array_order() {
+        let wmi = json!([
+            {"Name": "RTX 5060", "PNPDeviceID": "PCI\\VEN_10DE&DEV_2D05&SUBSYS_123410DE&REV_A1\\4&AAA", "AdapterRAM": 4293918720_u64},
+            {"Name": "Integrated", "PNPDeviceID": "PCI\\VEN_8086&DEV_4680&SUBSYS_00018086\\3&BBB", "AdapterRAM": 1073741824_u64}
+        ]);
+        let dxgi = json!([
+            {"VendorId": 0x8086, "DeviceId": 0x4680, "SubSysId": 0x00018086, "Flags": 0, "DedicatedVideoMemory": 134217728, "SharedSystemMemory": 17179869184_u64},
+            {"VendorId": 0x10de, "DeviceId": 0x2d05, "SubSysId": 0x123410de, "Flags": 0, "DedicatedVideoMemory": 8589934592_u64, "SharedSystemMemory": 17179869184_u64}
+        ]);
+        let rows = normalize_windows_graphics_controllers(&wmi, &dxgi);
+        assert_eq!(rows[0]["vram"], 8589934592_u64);
+        assert_eq!(rows[0]["vramReportedBytes"], 4293918720_u64);
+        assert_eq!(
+            rows[0]["vramSource"],
+            "DXGI_ADAPTER_DESC1.DedicatedVideoMemory"
+        );
+        assert_eq!(rows[1]["vram"], 134217728);
+        assert_eq!(rows[0]["sharedSystemMemoryBytes"], 17179869184_u64);
+        let mut root = Map::new();
+        root.insert(
+            "collector".into(),
+            json!({"observation_id": super::super::new_observation_id()}),
+        );
+        root.insert(
+            "uuid".into(),
+            json!({"hardware": "ca64e029-40ba-7f2c-27dd-b082e209a3d2"}),
+        );
+        enrich_windows_summary_with(&mut root, |command| {
+            if command.contains("Win32_VideoController") {
+                Ok(wmi.clone())
+            } else if command.contains("NpcinkDxgiInventory") {
+                Ok(dxgi.clone())
+            } else {
+                Ok(json!([]))
+            }
+        });
+        let upload = crate::upload::build_observation_v3("test", &Value::Object(root)).unwrap();
+        assert_eq!(
+            upload["asset"]["hardware"]["graphics"]["controllers"][0]["vram"],
+            8589934592_u64
+        );
+        assert_eq!(
+            upload["asset"]["hardware"]["platformData"]["graphics_memory"],
+            dxgi
+        );
+        let missing = normalize_windows_graphics_controllers(&wmi, &json!([]));
+        assert!(
+            missing[0]["vram"].is_null(),
+            "Never promote a truncated WMI value to actual VRAM"
+        );
+        assert_eq!(missing[0]["vramStatus"], "unverified_32bit");
+        let duplicates = json!([wmi[0].clone(), wmi[0].clone()]);
+        assert!(normalize_windows_graphics_controllers(&duplicates, &dxgi)[0]["vram"].is_null());
+        assert_eq!(
+            normalize_windows_graphics_controllers(&duplicates, &dxgi)[0]["dxgiMatchStatus"],
+            "ambiguous"
+        );
+        let duplicate_dxgi = json!([dxgi[1].clone(), dxgi[1].clone()]);
+        assert!(normalize_windows_graphics_controllers(&wmi, &duplicate_dxgi)[0]["vram"].is_null());
+        let mut software_adapter = dxgi[1].clone();
+        software_adapter["Flags"] = json!(2);
+        let software = json!([software_adapter]);
+        assert!(normalize_windows_graphics_controllers(&wmi, &software)[0]["vram"].is_null());
+        let no_pci = json!({"Name": "RTX 5060", "PNPDeviceID": "ROOT\\DISPLAY\\1", "AdapterRAM": 4293918720_u64});
+        assert!(normalize_windows_graphics_controllers(&no_pci, &dxgi)[0]["vram"].is_null());
+    }
+
+    #[test]
+    fn windows_memory_uses_smbios_type_codes_and_explicit_voltage_units() {
+        let raw = json!([
+            {"Capacity": 17179869184_u64, "SMBIOSMemoryType": 30, "ConfiguredVoltage": 1100},
+            {"Capacity": 17179869184_u64, "SMBIOSMemoryType": 35, "MinVoltage": 500, "MaxVoltage": 1100},
+            {"Capacity": 8589934592_u64, "SMBIOSMemoryType": 34},
+            {"Capacity": 8589934592_u64, "SMBIOSMemoryType": 36}
+        ]);
+        let modules = normalize_windows_memory_modules(&raw);
+        assert_eq!(modules[0]["type"], "LPDDR4");
+        assert_eq!(modules[0]["configuredVoltageMv"], 1100);
+        assert_eq!(modules[1]["type"], "LPDDR5");
+        assert_eq!(modules[1]["minVoltageMv"], 500);
+        assert_eq!(modules[1]["maxVoltageMv"], 1100);
+        assert_eq!(modules[2]["type"], "DDR5");
+        assert_eq!(modules[3]["type"], "HBM3");
+        assert_eq!(memory_type_label(0), "");
+        assert_eq!(memory_type_label(255), "");
+    }
+
+    #[test]
+    fn complete_windows_inventory_keeps_raw_facts_slots_system_and_failed_queries() {
+        let mut root = Map::new();
+        root.insert("system".into(), json!({"uuid": "SYSTEM-1"}));
+        root.insert("os".into(), json!({"platform": "windows"}));
+        enrich_windows_summary_with(&mut root, |command| {
+            assert!(
+                !command.contains("\\\""),
+                "PowerShell filters must use real quotes, not backslash escapes"
+            );
+            if command.contains("Win32_PhysicalMemoryArray") {
+                return Ok(
+                    json!({"MemoryDevices": 4, "MaxCapacity": 134217728, "MemoryErrorCorrection": 3}),
+                );
+            }
+            if command.contains("Win32_ComputerSystemProduct") {
+                return Ok(json!({"IdentifyingNumber": "SYS-SERIAL", "Version": "P1"}));
+            }
+            if command.contains("Win32_ComputerSystem ") {
+                return Ok(
+                    json!({"Manufacturer": "Test", "Model": "Station", "SystemSKUNumber": "SKU1"}),
+                );
+            }
+            if command.contains("Win32_SystemEnclosure") {
+                return Ok(
+                    json!({"Manufacturer": "Test", "SerialNumber": "CASE", "ChassisTypes": [3]}),
+                );
+            }
+            if command.contains("Win32_VideoController") {
+                return Ok(json!({"Name": "GPU", "FutureFact": false, "ZeroFact": 0}));
+            }
+            if command.contains("Win32_SoundDevice") {
+                return Ok(json!({"Name": "Audio"}));
+            }
+            if command.contains("Get-StorageReliabilityCounter") {
+                return Err("query_failed".into());
+            }
+            Ok(json!([]))
+        });
+        assert_eq!(root["memoryArrays"][0]["slots"], 4);
+        assert_eq!(
+            root["memoryArrays"][0]["maxCapacityBytes"],
+            137438953472_u64
+        );
+        assert_eq!(root["system"]["model"], "Station");
+        assert_eq!(root["system"]["serial"], "SYS-SERIAL");
+        assert_eq!(root["system"]["uuid"], "SYSTEM-1");
+        assert_eq!(root["chassis"]["serial"], "CASE");
+        assert_eq!(
+            root["platformData"]["video_controllers"]["FutureFact"],
+            false
+        );
+        assert_eq!(root["platformData"]["video_controllers"]["ZeroFact"], 0);
+        assert_eq!(root["peripherals"]["audio"]["Name"], "Audio");
+        assert!(root["hardwareProbeAttempts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|probe| probe["source"] == "storage_health" && probe["status"] == "failed"));
+        assert_eq!(
+            normalize_disk_media_type("Fixed hard disk media", "Generic disk"),
+            "Unknown"
+        );
+    }
+
+    #[test]
+    fn macos_maps_dimm_details_and_unified_memory_without_inventing_sticks() {
+        let mut root = Map::new();
+        enrich_macos_system_profiler(
+            &mut root,
+            &json!({
+                "SPHardwareDataType": [{"machine_name": "Mac Pro", "machine_model": "MacPro7,1", "serial_number": "MAC-SERIAL"}],
+                "SPMemoryDataType": [{"_items": [{"_name": "DIMM 1", "dimm_size": "16 GB", "dimm_type": "DDR4", "dimm_speed": "2666 MHz", "dimm_manufacturer": "0x1234", "dimm_part_number": "PART-16"}, {"_name": "DIMM 2", "dimm_size": "Empty"}]}]
+            }),
+        );
+        assert_eq!(root["memoryKind"], "dimm");
+        assert_eq!(root["memLayout"].as_array().unwrap().len(), 1);
+        assert_eq!(root["memLayout"][0]["size"], 17179869184_u64);
+        assert_eq!(root["memLayout"][0]["clockSpeed"], 2666);
+        assert_eq!(root["memLayout"][0]["speedUnit"], "MHz");
+        assert_eq!(root["system"]["serial"], "MAC-SERIAL");
+        enrich_macos_system_profiler(
+            &mut root,
+            &json!({"SPHardwareDataType": [{"chip_type": "Apple M4"}], "SPMemoryDataType": [{"SPMemoryDataType": "24 GB", "dimm_manufacturer": "Apple"}]}),
+        );
+        assert_eq!(root["memoryKind"], "unified");
+        assert_eq!(root["memLayout"], json!([]));
+    }
+
+    #[test]
     fn ordinary_upload_keeps_bios_graphics_battery_and_identity_when_edid_fails() {
-        let data = super::super::collect_upload_data_with(|root| {
+        let data = super::super::collect_inventory_with(|root| {
             root.insert("uuid".into(), json!({"hardware": "9e9738c7-0418-fb17-af0e-345a601d798b"}));
             enrich_windows_summary_with(root, |command| {
                 if command.contains("Win32_BIOS") { return Ok(json!({"Manufacturer": "AMI", "SMBIOSBIOSVersion": "1.20", "SerialNumber": "Default string"})); }
@@ -1382,6 +2032,10 @@ mod tests {
     fn missing_optional_hardware_does_not_create_blank_devices_or_block_identity() {
         let mut root = Map::new();
         root.insert(
+            "collector".into(),
+            json!({"observation_id": super::super::new_observation_id()}),
+        );
+        root.insert(
             "uuid".into(),
             json!({"hardware": "9e9738c7-0418-fb17-af0e-345a601d798b"}),
         );
@@ -1393,7 +2047,10 @@ mod tests {
             }
         });
         let data = Value::Object(root);
-        assert_eq!(data["graphics"], json!({"controllers": [], "displays": []}));
+        assert_eq!(
+            data["graphics"],
+            json!({"controllers": [], "displays": [], "adapters": []})
+        );
         assert_eq!(data["battery"], json!([]));
         assert_eq!(data["hardwareProbeAttempts"][3]["status"], "empty");
         assert_eq!(data["hardwareProbeAttempts"][4]["status"], "failed");
@@ -1415,6 +2072,64 @@ mod tests {
         assert_eq!(root["bios"]["version"], "123.4");
         assert_eq!(root["system"]["uuid"], "existing-system");
         assert_eq!(root["baseboard"]["serial"], "existing-board");
+    }
+
+    #[test]
+    fn upload_light_collects_memory_modules_and_physical_disks() {
+        let data = super::super::collect_inventory_with(|root| {
+            root.insert("uuid".into(), json!({"hardware": "ca64e029-40ba-7f2c-27dd-b082e209a3d2"}));
+            enrich_windows_summary_with(root, |command| {
+                if command.contains("Win32_PhysicalMemory") {
+                    Ok(json!([
+                        {"Capacity": 8589934592_u64, "Manufacturer": "Kingston", "PartNumber": "DIMM-8-A", "SerialNumber": "MODULE-A", "ConfiguredClockSpeed": 3200, "SMBIOSMemoryType": 26, "DeviceLocator": "DIMM_A1"},
+                        {"Capacity": 8589934592_u64, "Manufacturer": "Crucial", "PartNumber": "DIMM-8-B", "SerialNumber": "MODULE-B", "ConfiguredClockSpeed": 0, "Speed": 2933, "SMBIOSMemoryType": 26, "DeviceLocator": "DIMM_B1"}
+                    ]))
+                } else if command.contains("Win32_DiskDrive") {
+                    Ok(json!({"Model": "Samsung SSD 980", "SerialNumber": "DISK-A", "Size": 512110190592_u64, "InterfaceType": "NVMe", "DeviceID": "PhysicalDrive0"}))
+                } else {
+                    Ok(json!([]))
+                }
+            });
+        }).unwrap();
+        let upload = crate::upload::build_observation_v3("TEST", &data).unwrap();
+        let modules = upload
+            .pointer("/asset/hardware/memory/modules")
+            .and_then(Value::as_array)
+            .expect("normal upload must include DIMM records");
+        assert_eq!(modules.len(), 2);
+        assert_eq!(modules[0]["partNum"], "DIMM-8-A");
+        assert_eq!(modules[1]["bank"], "DIMM_B1");
+        assert_eq!(modules[1]["clockSpeed"], 2933);
+        assert_eq!(modules[1]["speedUnit"], "MT/s");
+        assert_eq!(
+            upload.pointer("/asset/hardware/disks/0/model"),
+            Some(&json!("Samsung SSD 980"))
+        );
+        assert_eq!(
+            upload.pointer("/asset/hardware/disks/0/interfaceType"),
+            Some(&json!("NVMe"))
+        );
+        assert_eq!(data["hardwareProbeAttempts"].as_array().unwrap().len(), 25);
+    }
+
+    #[test]
+    fn failed_component_queries_preserve_partial_upload_and_report_diagnostics() {
+        let mut root = Map::new();
+        let volumes = json!([{"mount": "C:", "fsType": "NTFS", "size": 100}]);
+        root.insert("diskLayout".into(), volumes.clone());
+        enrich_windows_summary_with(&mut root, |_| Err("query_timeout".into()));
+        assert!(!root.contains_key("memLayout"));
+        assert_eq!(root["diskLayout"], volumes);
+        for source in ["memory_modules", "physical_disks"] {
+            let probe = root["hardwareProbeAttempts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|probe| probe["source"] == source)
+                .expect("component query must record its outcome");
+            assert_eq!(probe["status"], "failed");
+            assert_eq!(probe["error"], "query_timeout");
+        }
     }
 
     #[test]
@@ -1440,7 +2155,7 @@ mod tests {
         // Exercise normal success, visible-only, unfiltered, and direct CIM.
         for success_at in 0..4 {
             let mut network_calls = 0;
-            let data = super::super::collect_upload_data_with(|root| {
+            let data = super::super::collect_inventory_with(|root| {
                 root.insert("uuid".into(), json!({"hardware": fixture["systemUuid"]}));
                 root.insert("system".into(), json!({"uuid": fixture["systemUuid"]}));
                 enrich_windows_identity_with(root, |command| {
@@ -1496,8 +2211,8 @@ mod tests {
     }
 
     #[test]
-    fn upload_light_keeps_board_facts_for_legacy_transition() {
-        let data = super::super::collect_upload_data_with(|root| {
+    fn upload_light_preserves_current_board_identity() {
+        let data = super::super::collect_inventory_with(|root| {
             root.insert("uuid".into(), json!({"hardware": "ca64e029-40ba-7f2c-27dd-b082e209a3d2"}));
             enrich_windows_identity_with(root, |command| {
                 if command.contains("Win32_BaseBoard") {
@@ -1509,10 +2224,9 @@ mod tests {
             "uuid": {"hardware": "ca64e029-40ba-7f2c-27dd-b082e209a3d2"},
             "baseboard": {"manufacturer": "ASUSTeK COMPUTER INC.", "model": "TUF GAMING B760M-PLUS WIFI D4", "serial": "260270757501248"}
         });
-        assert!(super::super::device_uuid_v1(&data).is_some());
         assert_eq!(
-            super::super::device_uuid_v1(&data),
-            super::super::device_uuid_v1(&expected)
+            super::super::hardware_identities_v2(&data),
+            super::super::hardware_identities_v2(&expected)
         );
         assert_eq!(super::super::hardware_identities_v2(&data).len(), 2);
         assert_eq!(data["identityDiagnostics"]["decision"], "ready");
@@ -1520,7 +2234,7 @@ mod tests {
 
     #[test]
     fn all_identity_queries_fail_with_actionable_diagnostics_and_no_upload() {
-        let data = super::super::collect_upload_data_with(|root| {
+        let data = super::super::collect_inventory_with(|root| {
             root.insert(
                 "uuid".into(),
                 json!({"hardware": "03000200-0400-0500-0006-000700080009"}),
@@ -1638,7 +2352,10 @@ mod tests {
         assert_eq!(displays.pointer("/0/vendor"), Some(&json!("DEL")));
         assert_eq!(displays.pointer("/0/serial"), Some(&json!("ABC123")));
         assert_eq!(displays.pointer("/0/currentResX"), Some(&json!(2560)));
-        assert_eq!(displays.pointer("/0/currentRefreshRate"), Some(&json!(60)));
+        assert!(
+            displays[0]["currentRefreshRate"].is_null(),
+            "Mismatching desktop/controller resolution cannot establish screen refresh rate"
+        );
     }
 
     #[test]
@@ -1670,8 +2387,33 @@ mod tests {
         assert_eq!(displays.as_array().map(Vec::len), Some(2));
         assert_eq!(displays.pointer("/0/model"), Some(&json!("")));
         assert_eq!(displays.pointer("/1/model"), Some(&json!("LG HDR 4K")));
-        assert_eq!(displays.pointer("/0/currentResX"), Some(&json!(0)));
+        assert!(displays[0]["currentResX"].is_null());
         assert_eq!(displays.pointer("/1/currentResX"), Some(&json!(3840)));
+    }
+
+    #[test]
+    fn monitor_instances_and_modes_do_not_cross_similar_ids_or_multiple_gpus() {
+        assert!(!same_display_instance(
+            "DISPLAY\\ACME\\ABC123_0",
+            "DISPLAY\\ACME\\ABC12"
+        ));
+        assert!(!same_display_instance(
+            "DISPLAY\\ACME\\ABC_01_0",
+            "DISPLAY\\ACME\\ABC"
+        ));
+        assert!(same_display_instance(
+            "display\\acme\\abc_01_0",
+            "DISPLAY\\ACME\\ABC_01"
+        ));
+        let monitors = json!([{"InstanceName":"DISPLAY\\ACME\\ABC_0"}]);
+        let gpus = json!([{"CurrentHorizontalResolution":1920,"CurrentVerticalResolution":1080,"CurrentRefreshRate":60}, {"CurrentHorizontalResolution":3840,"CurrentVerticalResolution":2160,"CurrentRefreshRate":120}]);
+        let displays = normalize_windows_displays(&monitors, &json!([]), &gpus);
+        assert!(displays[0]["currentResX"].is_null());
+        assert!(displays[0]["currentRefreshRate"].is_null());
+        let desktops = json!([{"PNPDeviceID":"DISPLAY\\ACME\\ABC", "ScreenWidth":1000,"ScreenHeight":800}, {"PNPDeviceID":"DISPLAY\\ACME\\ABC", "ScreenWidth":2000,"ScreenHeight":1600}]);
+        let displays = normalize_windows_displays(&monitors, &desktops, &gpus);
+        assert_eq!(displays[0]["desktopMatchStatus"], "ambiguous");
+        assert!(displays[0]["currentResX"].is_null());
     }
 
     #[test]
@@ -1745,6 +2487,30 @@ mod tests {
     }
 
     #[test]
+    fn default_network_uses_route_cost_and_real_link_state() {
+        let mut root = Map::new();
+        root.insert(
+            "net".into(),
+            json!([{"iface": "Ethernet"}, {"iface": "{1234}"}]),
+        );
+        enrich_windows_network_configuration(
+            &mut root,
+            &json!([
+                {"InterfaceAlias": "Ethernet", "InterfaceIndex": 1, "Status": "Disconnected", "IPv4DefaultGateway": "10.0.0.1", "DefaultRoutes": [{"DestinationPrefix":"0.0.0.0/0", "InterfaceIndex":1, "RouteMetric":10, "InterfaceMetric":90}]},
+                {"InterfaceAlias": "Wi-Fi", "InterfaceGuid": "1234", "InterfaceIndex": 2, "Status": "Up", "IPv4DefaultGateway": "10.1.0.1", "DefaultRoutes": [{"DestinationPrefix":"0.0.0.0/0", "InterfaceIndex":2, "RouteMetric":50, "InterfaceMetric":10}]}
+            ]),
+        );
+        assert_eq!(root["net"][0]["default"], false);
+        assert_eq!(root["net"][0]["operstate"], "down");
+        assert_eq!(root["net"][1]["default"], true);
+        assert_eq!(root["net"][1]["operstate"], "up");
+        let states = macos_link_states("en0: flags=8863\n\tstatus: inactive\nen1: flags=8863\n\tstatus: active\nutun0: flags=8051\n");
+        assert_eq!(states["en0"], "down");
+        assert_eq!(states["en1"], "up");
+        assert!(!states.contains_key("utun0"));
+    }
+
+    #[test]
     fn enriches_windows_network_with_real_gateway_dns_and_dhcp() {
         let mut root = Map::new();
         root.insert(
@@ -1763,6 +2529,8 @@ mod tests {
             },
             {
                 "InterfaceAlias": "Wi-Fi",
+                "InterfaceIndex": 7, "Status": "Up",
+                "DefaultRoutes": [{"DestinationPrefix": "0.0.0.0/0", "InterfaceIndex": 7, "RouteMetric": 0, "InterfaceMetric": 25}],
                 "IPv4DefaultGateway": "192.168.1.1",
                 "DnsServers": ["192.168.1.1", "1.1.1.1"],
                 "Dhcp": "Enabled"
@@ -1828,7 +2596,7 @@ mod tests {
             }]),
         );
         let result = Value::Object(root);
-        assert_eq!(result.pointer("/cpu/frequency"), Some(&json!(2800)));
+        assert_eq!(result.pointer("/cpu/currentFrequency"), Some(&json!(2800)));
         assert_eq!(result.pointer("/cpu/maxFrequency"), Some(&json!(4600)));
         assert_eq!(result.pointer("/cpu/physicalCores"), Some(&json!(8)));
         assert_eq!(result.pointer("/cpu/cores"), Some(&json!(16)));

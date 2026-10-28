@@ -62,10 +62,6 @@ npcink_identity_assert($identities[1]['value'] === 'board-v2-13d1184332c87ed6ea9
 npcink_identity_assert($identities[2]['value'] === 'pci-v2-9cd7c81afd4a5c0f01e33532ec11a', 'PHP PCI identity must match the Rust contract');
 npcink_identity_assert($identities[0]['value'] !== 'client-value-must-not-be-trusted', 'client-declared identity must be ignored');
 
-$legacy = $service->legacy_primary_identity($canonical_observation);
-npcink_identity_assert($legacy['type'] === 'device_uuid_v1', 'the one-time transition lookup must retain the v1 canonical algorithm');
-npcink_identity_assert($legacy['value'] === 'device-v1-8c8a3dad23be3fc4e958ca4c94cea', 'the legacy lookup must remain byte-compatible');
-
 $fallback_observation = array(
 	'asset' => array(
 		'hardware' => array(

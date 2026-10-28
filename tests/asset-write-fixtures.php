@@ -63,7 +63,8 @@ class Npcink_Asset_Write_Request implements ArrayAccess
 		return isset($this->params[$offset]);
 	}
 
-	public function offsetGet($offset): mixed
+	#[\ReturnTypeWillChange]
+	public function offsetGet($offset)
 	{
 		return isset($this->params[$offset]) ? $this->params[$offset] : null;
 	}
@@ -107,6 +108,11 @@ class Npcink_Asset_Write_Wpdb
 class Npcink_Device_Inventory_V3_Tables
 {
 	const OPTION = 'npcink_device_inventory_v3_options';
+
+	public static function options()
+	{
+		return array_merge(array('departments' => array('未分配')), get_option(self::OPTION));
+	}
 
 	public static function assets()
 	{
@@ -191,6 +197,8 @@ class Npcink_Device_Inventory_Asset_Repository
 class Npcink_Device_Inventory_Identity_Repository
 {
 	const CLAIM_CONFLICT = 'conflict';
+	public $cache_invalidations = 0;
+	public function invalidate_cache() { $this->cache_invalidations++; }
 }
 
 class Npcink_Device_Inventory_Observation_Repository
@@ -213,6 +221,8 @@ class Npcink_Device_Inventory_Observation_Repository
 
 class Npcink_Device_Inventory_Event_Repository
 {
+	public $cache_invalidations = 0;
+	public function invalidate_cache() { $this->cache_invalidations++; }
 }
 
 class Npcink_Device_Inventory_Event_Service
@@ -309,14 +319,16 @@ function npcink_asset_write_controller($rows)
 	$assets = new Npcink_Device_Inventory_Asset_Repository($rows);
 	$events = new Npcink_Device_Inventory_Event_Service();
 	$observations = new Npcink_Device_Inventory_Observation_Repository();
+	$identities = new Npcink_Device_Inventory_Identity_Repository();
+	$event_repository = new Npcink_Device_Inventory_Event_Repository();
 	$controller = new Npcink_Device_Inventory_Assets_Controller(
 		$assets,
-		new Npcink_Device_Inventory_Identity_Repository(),
+		$identities,
 		$observations,
-		new Npcink_Device_Inventory_Event_Repository(),
+		$event_repository,
 		$events
 	);
-	return array($controller, $assets, $events, $observations);
+	return array($controller, $assets, $events, $observations, $identities, $event_repository);
 }
 
 $wpdb = new Npcink_Asset_Write_Wpdb();
@@ -416,7 +428,9 @@ npcink_asset_write_assert($financial_values instanceof WP_REST_Response, 'distin
 $financial_data = $financial_values->get_data()['data'];
 npcink_asset_write_assert($financial_data['secondHandMarketValue'] === 800.0, 'second-hand market value must round-trip independently');
 npcink_asset_write_assert($financial_data['financialResidualValue'] === 300.0, 'financial residual value must round-trip independently');
-npcink_asset_write_assert($financial_data['residualValue'] === 800.0, 'legacy residualValue response alias must remain compatible');
+npcink_asset_write_assert(!array_key_exists('residualValue', $financial_data), 'responses must expose only current financial fields');
+$removed_field = $controller->update_item(new Npcink_Asset_Write_Request(array('uuid' => $first_uuid, 'residualValue' => 12)));
+npcink_asset_write_assert(is_wp_error($removed_field) && $removed_field->get_error_code() === 'invalid_asset_field', 'historical financial aliases must be rejected');
 $wpdb->commands = array();
 
 $retirement_row = npcink_asset_row(1, $first_uuid);
@@ -600,5 +614,10 @@ $commit_failed = $controller->batch_items(
 npcink_asset_write_assert(is_wp_error($commit_failed) && $commit_failed->get_error_code() === 'transaction_commit_failed', 'commit failure must return an error');
 npcink_asset_write_assert($wpdb->commands === array('START TRANSACTION', 'COMMIT', 'ROLLBACK'), 'commit failure must close the transaction with rollback');
 npcink_asset_write_assert($assets->cache_invalidations === 1, 'commit failure rollback must invalidate transactional asset cache entries');
+
+$wpdb = new Npcink_Asset_Write_Wpdb();
+list($controller, $assets, $events, $observations, $identities, $event_repository) = npcink_asset_write_controller(array($first_uuid => npcink_asset_row(1, $first_uuid)));
+$controller->delete_item(new Npcink_Asset_Write_Request(array('uuid' => $first_uuid)));
+npcink_asset_write_assert($assets->cache_invalidations === 1 && $observations->cache_invalidations === 1 && $identities->cache_invalidations === 1 && $event_repository->cache_invalidations === 1, 'successful admin commits must invalidate all transactional read caches');
 
 echo "Asset write fixture checks passed.\n";

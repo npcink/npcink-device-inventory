@@ -16,8 +16,6 @@ export interface Asset {
   purchasePrice: number;
   secondHandMarketValue: number;
   financialResidualValue: number;
-  /** @deprecated Backward-compatible alias of secondHandMarketValue. */
-  residualValue: number;
   metadata: JsonRecord;
   latestObservation?: {
     summary: JsonRecord;
@@ -40,8 +38,6 @@ export interface AssetInput {
   purchasePrice?: number;
   secondHandMarketValue?: number;
   financialResidualValue?: number;
-  /** @deprecated Use secondHandMarketValue. */
-  residualValue?: number;
   metadata?: JsonRecord;
 }
 
@@ -140,6 +136,13 @@ export interface CollectionTrends {
   startDate: string;
   endDate: string;
   collection: Array<{ date: string; count: number }>;
+}
+
+export type ComparisonObservation = Pick<AssetObservation, "id" | "assetId" | "observedAt" | "summary" | "hardware">;
+
+export interface ComparisonObservationPage {
+  data: ComparisonObservation[];
+  pagination: { nextAfterAssetId: number | null; throughAssetId: number };
 }
 
 export interface AssetListParams {

@@ -13,7 +13,7 @@ class Npcink_Device_Inventory_Identity_Repository
 	const CLAIM_CONFLICT = 'conflict';
 	const CLAIM_INVALID = 'invalid';
 	const CLAIM_ERROR = 'error';
-	const ALLOWED_TYPES = array('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1');
+	const ALLOWED_TYPES = array('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2');
 
 	public function find_asset_id_by_identities($identities)
 	{
@@ -149,8 +149,8 @@ class Npcink_Device_Inventory_Identity_Repository
 		// so ownership must always be verified from the unique row itself.
 		$owner_asset_id = $this->find_owner_uncached($type, $value);
 		if ($owner_asset_id === $asset_id) {
-			if ($is_primary) {
-				$this->mark_primary($asset_id, $type, $value);
+			if ($is_primary && !$this->mark_primary($asset_id, $type, $value)) {
+				return $this->claim_result(self::CLAIM_ERROR, $owner_asset_id, $type, $value);
 			}
 			if ($result === 1) {
 				$this->bump_list_cache_version();
@@ -207,6 +207,7 @@ class Npcink_Device_Inventory_Identity_Repository
 		if ($result > 0) {
 			$this->bump_list_cache_version();
 		}
+		return $result !== false;
 	}
 
 	private function claim_result($status, $owner_asset_id, $type, $value)
@@ -223,6 +224,12 @@ class Npcink_Device_Inventory_Identity_Repository
 	{
 		$version = $this->get_list_cache_version();
 		wp_cache_set('list_version', $version + 1, self::CACHE_GROUP);
+	}
+
+	/** Invalidate reads populated before a transaction committed or rolled back. */
+	public function invalidate_cache()
+	{
+		$this->bump_list_cache_version();
 	}
 
 	private function build_cache_key($prefix, $parts)

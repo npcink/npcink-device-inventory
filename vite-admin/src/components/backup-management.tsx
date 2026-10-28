@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import axios from "axios";
 import { useMutation } from "@tanstack/react-query";
 import { Alert, Button, Checkbox, Empty, Input, Modal, Space, Table, Tag, Typography, message } from "antd";
 import { exportBackup, restoreBackup } from "@/services/v3";
@@ -56,7 +57,9 @@ export const BackupManagementPanels = ({ onOpenImport }: { onOpenImport: () => v
       downloadJsonFile(`npcink-device-inventory-backup-${Date.now()}.json`, result.backup);
       message.success(`JSON 备份已导出（${Math.ceil(result.meta.bytes / 1024)} KB）`);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "JSON 备份导出失败");
+      if (!axios.isAxiosError(error)) {
+        message.error(error instanceof Error ? error.message : "JSON 备份导出失败");
+      }
     } finally {
       setLoading(false);
     }
@@ -122,7 +125,9 @@ export const BackupRestoreModal = ({ open, onClose, onImported }: BackupRestoreM
         setBackup(null);
         setSummary(null);
         setRestoreConfirmed(false);
-        message.error(error instanceof Error ? error.message : "备份文件校验失败");
+        if (!axios.isAxiosError(error)) {
+          message.error(error instanceof SyntaxError ? "JSON 格式不正确，请检查备份文件是否完整" : error instanceof Error ? error.message : "备份文件校验失败");
+        }
       },
     }
   );
@@ -146,7 +151,9 @@ export const BackupRestoreModal = ({ open, onClose, onImported }: BackupRestoreM
       },
       onError: (error) => {
         setRestoreConfirmed(false);
-        message.error(error instanceof Error ? error.message : "JSON 备份导入失败");
+        if (!axios.isAxiosError(error)) {
+          message.error(error instanceof Error ? error.message : "JSON 备份导入失败");
+        }
       },
     }
   );

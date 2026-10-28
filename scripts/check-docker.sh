@@ -76,7 +76,7 @@ node --input-type=module --eval '
   console.log(`Submission package synchronized: ${actual.sha256}`);
 ' "${PLUGIN_ZIP}" "${SUBMISSION_ZIP}" "${SUBMISSION_MANIFEST}"
 
-echo "Starting isolated WordPress PHP 8.3 and MariaDB 11 services..."
+echo "Starting isolated WordPress and MariaDB services..."
 "${COMPOSE[@]}" up --detach --wait database wordpress
 
 run_wp() {
@@ -95,8 +95,9 @@ run_wp plugin install /workspace/release/npcink-device-inventory.zip --activate
 
 wordpress_version="$(run_wp core version)"
 php_version="$(run_wp eval 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')"
-if [ "${php_version}" != "8.3" ]; then
-  echo "Expected PHP 8.3, found ${php_version}." >&2
+expected_php="${NPCINK_DOCKER_PHP_VERSION:-8.3}"
+if [ "${php_version}" != "${expected_php}" ]; then
+  echo "Expected PHP ${expected_php}, found ${php_version}." >&2
   exit 1
 fi
 echo "WordPress ${wordpress_version}, PHP ${php_version}."
@@ -117,6 +118,9 @@ if ! grep -Fq "Checks complete. No errors found." <<<"${plugin_check_output}"; t
   exit 1
 fi
 
+echo "Running WordPress/MariaDB integration regressions..."
+run_wp eval-file /workspace/tests/wordpress-integration.php
+
 echo "Verifying real MariaDB nonce replay and rate-limit boundaries..."
 run_wp eval '
   $options = get_option("npcink_device_inventory_v3_options");
@@ -130,9 +134,10 @@ run_wp eval '
   $body = "{\"summary\":{\"hostname\":\"docker\"}}";
   $timestamp = (string) time();
   $verify = static function ($nonce) use ($auth, $body, $timestamp) {
-    $payload = $timestamp . "\n" . $nonce . "\n" . hash("sha256", $body);
-    $request = new WP_REST_Request("POST", "/");
+    $payload = "npcink-device-upload-v2\nPOST\n/npcink-device-inventory/v1/device-observations\ndocker-agent\n" . $timestamp . "\n" . $nonce . "\n" . hash("sha256", $body);
+    $request = new WP_REST_Request("POST", "/npcink-device-inventory/v1/device-observations");
     $request->set_body($body);
+    $request->set_header("x-npcink-device-signature-version", "2");
     $request->set_header("x-npcink-device-token-id", "docker-agent");
     $request->set_header("x-npcink-device-timestamp", $timestamp);
     $request->set_header("x-npcink-device-nonce", $nonce);

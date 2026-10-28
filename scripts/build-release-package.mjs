@@ -33,7 +33,6 @@ const adminSourceFiles = [
   "vite-admin/package-lock.json",
   "vite-admin/package.json",
   "vite-admin/postcss.config.js",
-  "vite-admin/tailwind.config.js",
   "vite-admin/tsconfig.json",
   "vite-admin/tsconfig.node.json",
   "vite-admin/vite.config.ts",
@@ -125,6 +124,21 @@ async function removeReleaseJunk(dir) {
 async function updateSubmissionManifest(zipPath) {
   const manifest = JSON.parse(await readFile(submissionManifest, "utf8"));
   const metadata = await zipMetadata(zipPath);
+  const pluginSource = await readFile(path.join(repoRoot, "npcink-device-inventory.php"), "utf8");
+  const header = (name) => pluginSource.match(new RegExp(`^[ \\t*]*${name}:\\s*(.+)$`, "m"))?.[1].trim() || "";
+  manifest.plugin = {
+    ...manifest.plugin,
+    name: header("Plugin Name"),
+    version: header("Version"),
+    requires_at_least: header("Requires at least"),
+    tested_up_to: header("Tested up to"),
+    requires_php: header("Requires PHP"),
+    license: header("License"),
+  };
+  if (manifest.package?.sha256 !== metadata.sha256) {
+    // A new ZIP must not inherit successful verification claims from a previous package.
+    manifest.verification = { status: "requires_verification", package_sha256: metadata.sha256 };
+  }
   manifest.package = {
     ...manifest.package,
     sha256: metadata.sha256,

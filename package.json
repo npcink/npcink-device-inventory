@@ -9,10 +9,10 @@
     "check:asset-search": "php tests/asset-search-fixtures.php",
     "check:asset-writes": "php tests/asset-write-fixtures.php",
     "check:device-upload": "php tests/device-upload-boundary-fixtures.php",
-    "check:schema-migrations": "php tests/schema-migration-fixtures.php",
+    "check:schema": "php tests/schema-fixtures.php",
     "check:identity": "php tests/identity-contract-fixtures.php && php tests/identity-claim-fixtures.php && php tests/observation-ingest-fixtures.php",
     "check:windows-identity-probe": "node scripts/check-windows-hardware-identity-probe.mjs --self-test",
-    "check:fixtures": "npm run check:backup-restore && npm run check:asset-search && npm run check:asset-writes && npm run check:device-upload && npm run check:schema-migrations && npm run check:identity && npm run check:windows-identity-probe",
+    "check:fixtures": "npm run check:backup-restore && npm run check:asset-search && npm run check:asset-writes && npm run check:device-upload && npm run check:schema && npm run check:identity && npm run check:windows-identity-probe && npm run check:lifecycle && npm run check:observation-repository",
     "check:versions": "node scripts/check-version-contract.mjs",
     "check:desktop-quality": "node scripts/check-desktop-quality.mjs",
     "check:release-scope": "node scripts/check-release-scope.mjs",
@@ -27,6 +27,9 @@
     "check:package": "node scripts/check-release-package.mjs release/npcink-device-inventory.zip && npm run check:wporg-review",
     "check:docker": "bash scripts/check-docker.sh",
     "check:release": "node scripts/check-release-readiness.mjs",
-    "check:submission": "node scripts/check-release-readiness.mjs --submission"
+    "check:submission": "node scripts/check-release-readiness.mjs --submission",
+    "check:lifecycle": "php tests/lifecycle-fixtures.php",
+    "check:observation-repository": "php tests/observation-repository-fixtures.php",
+    "check:release-tools": "node --test scripts/release-version-baseline.test.mjs scripts/release-checksums.test.mjs scripts/release-candidate.test.mjs ele-rs/scripts/windows-command-runner.test.mjs"
   }
 }

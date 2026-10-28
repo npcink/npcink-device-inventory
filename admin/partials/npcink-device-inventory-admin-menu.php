@@ -60,7 +60,7 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Menu')) {
 
         private static function admin_page_title()
         {
-            $locale = function_exists('determine_locale') ? determine_locale() : get_locale();
+            $locale = determine_locale();
             if (0 === strpos($locale, 'zh_')) {
                 return '设备资产管理';
             }
@@ -77,7 +77,7 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Menu')) {
          */
         private static function admin_labels()
         {
-            $locale = function_exists('determine_locale') ? determine_locale() : get_locale();
+            $locale = determine_locale();
             if (0 === strpos($locale, 'zh_')) {
                 return array(
                     'assets' => '资产台账',
@@ -121,7 +121,7 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Menu')) {
 	                    'rest_url' => esc_url_raw(rest_url('npcink-device-inventory/v1')),
 	                    'rest_nonce' => wp_create_nonce('wp_rest'),
 	                    'ajax_url' => esc_url_raw(admin_url('admin-ajax.php')),
-	                    'locale' => function_exists('determine_locale') ? determine_locale() : get_locale(),
+	                    'locale' => determine_locale(),
 	                    'labels' => self::admin_labels(),
 	                    'initial_assets' => self::initial_assets_payload(),
 	                )

@@ -786,7 +786,9 @@ const renderHumanDetail = (key: string, data: Record<string, unknown>) => {
         row("核心数", cpu.cores),
         row("物理核心", cpu.physicalCores),
         row("处理器数量", cpu.processors),
-        row("主频", cpu.speed, " GHz"),
+        row("当前频率（系统报告）", cpu.currentFrequency, " MHz"),
+        row("基准频率", cpu.baseFrequency, " MHz"),
+        row("最大频率（系统报告）", cpu.maxFrequency, " MHz"),
         row("厂商", cpu.vendor),
       ]);
     }
@@ -837,7 +839,10 @@ const renderHumanDetail = (key: string, data: Record<string, unknown>) => {
       const hasDisplays = listItems(graphics.displays).length > 0;
       const controllers = hasControllers ? listSections("显卡", graphics.controllers, (item) => [
         row("型号", modelWithVendor(firstPresent(item, ["vendor", "Vendor"]), firstPresent(item, ["model", "Name"]))),
-        row("显存", formatBytes(firstPresent(item, ["vram", "AdapterRAM"]))),
+        row("显存", formatBytes(item.vram)),
+        row("显存来源", item.vramSource),
+        row("旧接口显存（待核实）", item.vramReportedBytes == null ? "" : `${item.vramReportedBytes} 字节（32 位值，可能截断）`),
+        row("可共享系统内存（非独立显存）", formatBytes(item.sharedSystemMemoryBytes)),
         row("视频处理器", firstPresent(item, ["videoProcessor", "VideoProcessor"])),
         row("驱动版本", firstPresent(item, ["driverVersion", "DriverVersion"])),
         row("总线", firstPresent(item, ["bus", "Bus"])),
@@ -985,6 +990,8 @@ const formatSubmitResultMessage = (response: unknown) => {
       ? "已创建新资产，请管理员确认资产信息"
       : payload.mode === "matched"
         ? "已关联到现有资产"
+        : payload.mode === "duplicate"
+          ? "这次采集已成功上传，无需重复保存"
         : "设备信息已提交。";
   const rows = [
     ["编号", stringValue(asset.assetNumber)],

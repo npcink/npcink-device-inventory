@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-const workflows = ["quality.yml", "preview.yml", "release.yml"];
+const workflows = ["quality.yml", "preview.yml", "release.yml", "verify-published-release.yml"];
 const obsolete = [
   "actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955",
   "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",

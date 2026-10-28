@@ -29,261 +29,72 @@ if (!defined('ABSPATH')) {
  */
 class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_Interface
 {
-	const SCHEMA_REVISION = '20260807_retired_values_zero';
-	const SCHEMA_REVISIONS = array(
-		'20260706_latest_observed',
-		'20260715_atomic_identity',
-		'20260715_scope_reset',
-		'20260806_financial_values',
-		'20260807_computer_device_type_default',
-		self::SCHEMA_REVISION,
-	);
+	const SCHEMA_REVISION = '20261027_observation_receipts';
 
-	/**
-	 * 插件激活时运行的主要方法
-	 *
-	 * @since    1.0.0
-	 */
+	/** Create or repair the current schema without replaying historical data rewrites. */
 	public static function run()
 	{
-		$current_version = defined('NPCINK_DEVICE_INVENTORY_VERSION') ? NPCINK_DEVICE_INVENTORY_VERSION : '1.0.0';
-		self::upgrade_schema(get_option('npcink_device_inventory_schema_revision'), $current_version);
+		return self::upgrade_schema(get_option('npcink_device_inventory_schema_revision'), NPCINK_DEVICE_INVENTORY_VERSION);
 	}
 
-	/**
-	 * 版本升级时执行数据库与索引增量迁移
-	 */
 	public static function upgrade_schema($installed_revision, $current_version)
 	{
-		self::create_default_v3_options();
-		foreach (self::pending_schema_revisions($installed_revision) as $revision) {
-			$migrated = self::run_schema_migration($revision);
-			if (!$migrated) {
+		global $wpdb;
+		$refresh_schema = $installed_revision !== self::SCHEMA_REVISION;
+		$tables = array(
+			self::$table_assets_name => 'create_table_assets',
+			self::$table_asset_identities_name => 'create_table_asset_identities',
+			self::$table_asset_observations_name => 'create_table_asset_observations',
+			self::$table_asset_events_name => 'create_table_asset_events',
+		);
+		foreach ($tables as $suffix => $method) {
+			$table = $wpdb->prefix . $suffix;
+			if ($refresh_schema || $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table))) !== $table) {
+				self::$method();
+			}
+			if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table))) !== $table) {
 				return false;
 			}
-			update_option('npcink_device_inventory_schema_revision', $revision);
 		}
-
-		if (!empty($current_version)) {
-			update_option('npcink_device_inventory_plugin_version', $current_version);
+		$identity_columns = $wpdb->get_var($wpdb->prepare(
+			"SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',')
+			FROM INFORMATION_SCHEMA.STATISTICS
+			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s AND NON_UNIQUE = 0",
+			$wpdb->prefix . self::$table_asset_identities_name,
+			'identity'
+		));
+		if ($identity_columns !== 'identity_type,identity_value') {
+			return false;
 		}
+		$asset_columns = $wpdb->get_var($wpdb->prepare(
+			'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME IN (%s, %s, %s)',
+			$wpdb->prefix . self::$table_assets_name,
+			'financial_residual_value', 'latest_observation_id', 'latest_observed_at'
+		));
+		if (intval($asset_columns) !== 3) {
+			return false;
+		}
+		$receipt_columns = $wpdb->get_var($wpdb->prepare(
+			'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME IN (%s, %s)',
+			$wpdb->prefix . self::$table_asset_observations_name,
+			'observation_uuid', 'payload_hash'
+		));
+		if (intval($receipt_columns) !== 2) {
+			return false;
+		}
+		$observation_key = $wpdb->get_var($wpdb->prepare(
+			"SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s AND NON_UNIQUE = 0",
+			$wpdb->prefix . self::$table_asset_observations_name,
+			'observation_uuid'
+		));
+		if ($observation_key !== 'observation_uuid') {
+			return false;
+		}
+		self::create_default_v3_options();
+		update_option('npcink_device_inventory_schema_revision', self::SCHEMA_REVISION);
+		update_option('npcink_device_inventory_plugin_version', $current_version);
 		update_option('npcink_device_inventory_data_model_version', '3');
 		return true;
-	}
-
-	/**
-	 * Return the ordered migrations that have not yet been committed.
-	 */
-	public static function pending_schema_revisions($installed_revision)
-	{
-		$installed_revision = is_string($installed_revision) ? $installed_revision : '';
-		$installed_index = array_search($installed_revision, self::SCHEMA_REVISIONS, true);
-		if ($installed_index === false) {
-			return self::SCHEMA_REVISIONS;
-		}
-		return array_slice(self::SCHEMA_REVISIONS, $installed_index + 1);
-	}
-
-	/**
-	 * Run one named schema migration. The revision option is updated by the caller only on success.
-	 */
-	private static function run_schema_migration($revision)
-	{
-		if ($revision === '20260706_latest_observed') {
-			// 新资产模型：资产、身份、采集快照、统一事件。
-			self::create_table_assets();
-			self::create_table_asset_identities();
-			self::create_table_asset_observations();
-			self::create_table_asset_events();
-			if (!self::normalize_json_storage_columns()) {
-				return false;
-			}
-			return self::sync_latest_observation_columns();
-		}
-
-		if ($revision === '20260715_atomic_identity') {
-			// Atomic identity claims depend on the unique identity key. dbDelta repairs it if needed.
-			self::create_table_asset_identities();
-			return self::identity_unique_key_ready();
-		}
-
-		if ($revision === '20260715_scope_reset') {
-			return self::reset_pre_ga_scope();
-		}
-
-		if ($revision === '20260806_financial_values') {
-			// Keep the legacy residual_value column as second-hand market value and add a distinct accounting value.
-			return self::add_financial_residual_value_column();
-		}
-
-		if ($revision === '20260807_computer_device_type_default') {
-			return self::normalize_computer_device_type();
-		}
-
-		if ($revision === self::SCHEMA_REVISION) {
-			return self::normalize_retired_values();
-		}
-
-		return false;
-	}
-
-	/**
-	 * Give computer assets a user-facing default subtype and normalize the former labels.
-	 */
-	private static function normalize_computer_device_type()
-	{
-		global $wpdb;
-		$assets = self::quote_internal_table_name($wpdb->prefix . self::$table_assets_name);
-		if (!$assets) {
-			return false;
-		}
-
-		return $wpdb->query(
-			"UPDATE $assets
-			SET category = '台式电脑'
-			WHERE asset_type = 'computer'
-			AND (TRIM(category) = '' OR category IN ('computer', '台式机'))"
-		) !== false;
-	}
-
-	/**
-	 * Retired assets retain historical purchase cost but no current market or carrying value.
-	 */
-	private static function normalize_retired_values()
-	{
-		global $wpdb;
-		$assets = self::quote_internal_table_name($wpdb->prefix . self::$table_assets_name);
-		if (!$assets) {
-			return false;
-		}
-
-		return $wpdb->query(
-			"UPDATE $assets
-			SET residual_value = 0.00, financial_residual_value = 0.00
-			WHERE status = 'retired'
-			AND (residual_value <> 0.00 OR financial_residual_value <> 0.00)"
-		) !== false;
-	}
-
-	/**
-	 * Apply the destructive pre-GA contract reset to development data.
-	 */
-	private static function reset_pre_ga_scope()
-	{
-		global $wpdb;
-		$assets = self::quote_internal_table_name($wpdb->prefix . self::$table_assets_name);
-		$identities = self::quote_internal_table_name($wpdb->prefix . self::$table_asset_identities_name);
-		$events = self::quote_internal_table_name($wpdb->prefix . self::$table_asset_events_name);
-		if (!$assets || !$identities || !$events) {
-			return false;
-		}
-
-		$assets_updated = $wpdb->query(
-			"UPDATE $assets
-			SET category = CASE
-				WHEN asset_type NOT IN ('pc', 'computer', 'custom') AND TRIM(category) = '' THEN asset_type
-				ELSE category
-			END,
-			asset_type = CASE WHEN asset_type IN ('pc', 'computer') THEN 'computer' ELSE 'custom' END"
-		);
-		if ($assets_updated === false) {
-			return false;
-		}
-
-		$identities_deleted = $wpdb->query(
-			"DELETE FROM $identities WHERE identity_type NOT IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1')"
-		);
-		if ($identities_deleted === false) {
-			return false;
-		}
-
-		$events_deleted = $wpdb->query(
-			"DELETE FROM $events WHERE event_type IN ('issue_handled', 'issue_reopened', 'identity_reconciled')"
-		);
-		if ($events_deleted === false) {
-			return false;
-		}
-
-		$options = get_option('npcink_device_inventory_v3_options');
-		if (is_array($options)) {
-			unset(
-				$options['public_query_enabled'],
-				$options['public_query_page_slug'],
-				$options['public_query_access_code_hash']
-			);
-			update_option('npcink_device_inventory_v3_options', $options);
-		}
-		return true;
-	}
-
-	/**
-	 * Verify the exact unique key required by atomic identity claims.
-	 */
-	private static function identity_unique_key_ready()
-	{
-		global $wpdb;
-		$table_name = $wpdb->prefix . self::$table_asset_identities_name;
-		$columns = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',')
-				FROM INFORMATION_SCHEMA.STATISTICS
-				WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s AND NON_UNIQUE = 0",
-				$table_name,
-				'identity'
-			)
-		);
-		return (string) $columns === 'identity_type,identity_value';
-	}
-
-	private static function financial_value_column_ready()
-	{
-		global $wpdb;
-		$table_name = $wpdb->prefix . self::$table_assets_name;
-		$count = $wpdb->get_var(
-			$wpdb->prepare(
-				'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s',
-				$table_name,
-				'financial_residual_value'
-			)
-		);
-		return intval($count) === 1;
-	}
-
-	private static function add_financial_residual_value_column()
-	{
-		global $wpdb;
-		if (self::financial_value_column_ready()) {
-			return true;
-		}
-		$table_name = $wpdb->prefix . self::$table_assets_name;
-		$quoted_table = self::quote_internal_table_name($table_name);
-		if ($quoted_table === null) {
-			return false;
-		}
-		$added = $wpdb->query(
-			"ALTER TABLE $quoted_table ADD COLUMN `financial_residual_value` DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '财务残值' AFTER `residual_value`"
-		);
-		return $added !== false && self::financial_value_column_ready();
-	}
-
-	/**
-	 * 校验并转义插件内部表名。
-	 */
-	private static function quote_internal_table_name($table_name)
-	{
-		global $wpdb;
-		$allowed_tables = array(
-			$wpdb->prefix . self::$table_assets_name,
-			$wpdb->prefix . self::$table_asset_identities_name,
-			$wpdb->prefix . self::$table_asset_observations_name,
-			$wpdb->prefix . self::$table_asset_events_name,
-		);
-
-		if (!is_string($table_name) || !in_array($table_name, $allowed_tables, true) || !preg_match('/^[A-Za-z0-9_]+$/', $table_name)) {
-			return null;
-		}
-
-		return '`' . str_replace('`', '``', $table_name) . '`';
 	}
 
 	/**
@@ -330,7 +141,7 @@ class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_In
 	        status VARCHAR(64) NOT NULL DEFAULT 'active' COMMENT '资产状态',
 	        category VARCHAR(191) NOT NULL DEFAULT '' COMMENT '分类',
 	        purchase_price DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '采购价',
-	        residual_value DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '二手市场价（legacy column name）',
+	        residual_value DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '二手市场价',
 	        financial_residual_value DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '财务残值',
 	        metadata_json LONGTEXT COMMENT 'JSON encoded extended asset information',
 	        latest_observation_id BIGINT UNSIGNED DEFAULT NULL COMMENT 'Latest observation row ID',
@@ -393,6 +204,8 @@ class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_In
 	        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
 	        asset_id BIGINT UNSIGNED NOT NULL COMMENT '资产ID',
 	        source VARCHAR(64) NOT NULL COMMENT '采集来源',
+	        observation_uuid CHAR(36) DEFAULT NULL COMMENT 'Stable collection UUID for upload retries',
+	        payload_hash CHAR(64) DEFAULT NULL COMMENT 'Canonical submitted facts SHA256',
 	        schema_version SMALLINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '采集结构版本',
 	        observed_at DATETIME NOT NULL COMMENT '采集时间',
 	        received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '接收时间',
@@ -400,6 +213,7 @@ class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_In
 	        hardware_json LONGTEXT COMMENT 'JSON encoded hardware detail',
 	        raw_json LONGTEXT COMMENT 'JSON encoded raw source payload',
 	        PRIMARY KEY  (id),
+	        UNIQUE KEY observation_uuid (observation_uuid),
 	        KEY idx_asset_observed (asset_id, observed_at),
 	        KEY idx_source_observed (source, observed_at),
 	        KEY idx_schema_version (schema_version),
@@ -443,96 +257,4 @@ class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_In
 		dbDelta($sql);
 	}
 
-	/**
-	 * Keep JSON-like storage portable across MySQL and MariaDB variants.
-	 */
-	private static function normalize_json_storage_columns()
-	{
-		global $wpdb;
-		$columns = array(
-			array($wpdb->prefix . self::$table_assets_name, 'metadata_json', 'JSON encoded extended asset information'),
-			array($wpdb->prefix . self::$table_asset_observations_name, 'summary_json', 'JSON encoded summary data'),
-			array($wpdb->prefix . self::$table_asset_observations_name, 'hardware_json', 'JSON encoded hardware detail'),
-			array($wpdb->prefix . self::$table_asset_observations_name, 'raw_json', 'JSON encoded raw source payload'),
-			array($wpdb->prefix . self::$table_asset_events_name, 'payload_json', 'JSON encoded event payload'),
-		);
-
-		foreach ($columns as $column) {
-			list($table_name, $column_name, $comment) = $column;
-			$quoted_table = self::quote_internal_table_name($table_name);
-			if ($quoted_table === null || !preg_match('/^[A-Za-z0-9_]+$/', $column_name)) {
-				return false;
-			}
-
-			$column_type = $wpdb->get_var(
-				$wpdb->prepare(
-					'SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s',
-					$table_name,
-					$column_name
-				)
-			);
-			if (strtolower((string) $column_type) === 'longtext') {
-				continue;
-			}
-			if ($column_type === null) {
-				return false;
-			}
-
-			if (
-				$wpdb->query(
-					"ALTER TABLE $quoted_table MODIFY `$column_name` LONGTEXT COMMENT '" . esc_sql($comment) . "'"
-				) === false
-			) {
-				return false;
-			}
-		}
-		return true;
-	}
-
-	/**
-	 * Backfill denormalized latest observation columns used by the admin asset list.
-	 */
-	private static function sync_latest_observation_columns()
-	{
-		global $wpdb;
-		$assets_table = $wpdb->prefix . self::$table_assets_name;
-		$observations_table = $wpdb->prefix . self::$table_asset_observations_name;
-		$quoted_assets = self::quote_internal_table_name($assets_table);
-		$quoted_observations = self::quote_internal_table_name($observations_table);
-		if ($quoted_assets === null || $quoted_observations === null) {
-			return false;
-		}
-		$column_count = $wpdb->get_var(
-			$wpdb->prepare(
-				'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME IN (%s, %s)',
-				$assets_table,
-				'latest_observation_id',
-				'latest_observed_at'
-			)
-		);
-		if (intval($column_count) !== 2) {
-			return false;
-		}
-
-		$result = $wpdb->query(
-			"UPDATE $quoted_assets a
-			SET
-				a.updated_at = a.updated_at,
-				a.latest_observation_id = (
-					SELECT o.id
-					FROM $quoted_observations o
-					WHERE o.asset_id = a.id
-					ORDER BY o.observed_at DESC, o.id DESC
-					LIMIT 1
-				),
-				a.latest_observed_at = (
-					SELECT o.observed_at
-					FROM $quoted_observations o
-					WHERE o.asset_id = a.id
-					ORDER BY o.observed_at DESC, o.id DESC
-					LIMIT 1
-				)"
-		);
-		return $result !== false;
-	}
 }

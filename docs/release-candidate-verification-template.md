@@ -1,107 +1,99 @@
-# Release Candidate Verification Template
+# Release Candidate Verification
 
-Use this template for each release candidate before creating or announcing a
-tagged release. Copy the sections into a dated verification note, then fill the
-actual command output, GitHub Actions run links, artifact names, and real-device
-results.
+Copy into a dated record. Use `pass`, `fail`, `pending`, or `not applicable`
+with evidence; a completed CLI smoke is not a complete release decision.
 
-## Candidate
+## Candidate identity
 
-- Date:
-- Git commit:
-- Planned plugin tag:
-- WordPress plugin version:
-- Desktop app version:
-- Previous desktop release used for update testing:
+- Date / operator:
+- Source commit / clean tracked source:
+- Plugin version / tag:
+- Agent version / scope (plugin or desktop):
+- Previous published plugin / Agent version:
+- GitHub draft URL / tag build run:
+- `candidate.json` source commit matches the tag:
+- `SHA256SUMS` SHA-256:
+- Plugin ZIP SHA-256:
+- Windows exe / `.sig` SHA-256:
+- macOS DMG / updater / `.sig` SHA-256:
+- Both manifest SHA-256:
+- Distribution: trusted internal / public external:
 
-## Local Checks
+Do not replace assets after recording these hashes. Local and CI packages have
+separate identities; local results do not automatically certify later CI bytes.
 
-Run from the repository root unless noted.
+## Local and remote gates
 
-```bash
-git status --short --branch
-npm run build:release
-npm run check:release
-cd ele-rs
-cargo test
-npm run build
-```
+- `npm run check:release-tools`:
+- `npm run build:release` / `npm run check:release`:
+- `npm run check:docker` / final tested ZIP hash:
+- `npm run check:submission` (no rebuild after Docker):
+- Quality workflow run / result:
+- macOS / Windows preview runs (packaging only, no updater signature):
+- Signed tag-build run / draft-download checksum and signature checks:
+- Read-only working inventory left unchanged:
 
-Results:
+## Windows collection
 
-- `git status --short --branch`:
-- `npm run build:release`:
-- `npm run check:release`:
-- `cd ele-rs && cargo test`:
-- `cd ele-rs && npm run build`:
+- Windows / drivers / hardware / PowerShell version:
+- Ordinary user result / report path:
+- Administrator result / report path:
+- Memory module counts/capacities/brands/part numbers/speed units:
+- Known 8GiB DXGI / multi-GPU ambiguity / shared memory:
+- Physical disk → partition → volume / per-disk health failures:
+- Cold/cache/partial retry timing and byte count:
+- Timeouts / descendants cleaned / partial records retained:
+- Chinese names/paths / large peripheral lists:
+- Skipped / failed-optional / manual report steps:
 
-## Preview Builds
+## Plugin upgrade and upload (isolated HTTPS only)
 
-Run GitHub Actions `Build preview packages` before tagging.
+- Test site / trusted certificate / no redirect:
+- Previous real database copy and plugin backup:
+- Upgrade / schema / identities / latest pointers / archived and finance fields:
+- 3.2.3 export preview → restore / retired identity warnings:
+- Signature-v2 matching client upload / old-signature rejection:
+- Existing authorization code remains valid:
+- Idempotency / replay rejection / conflicts / offline and TLS errors:
+- New hardware → detail → export/restore field equality:
+- Temporary token disabled / test data cleanup:
+- Database + installer recovery rehearsal:
 
-- Plugin preview run:
-- macOS desktop preview run:
-- Windows desktop preview run:
+## Exact Windows installer
 
-Artifacts to inspect:
+- Exe hash matches accepted draft:
+- Clean install / WebView2 / Chinese path:
+- Ordinary-user launch / collection / upload / diagnostic export:
+- Previous official Agent 0.4.4 → candidate installer upgrade:
+- Version increased / configuration and Credential Manager credentials retained:
+- Failed install/update recovery:
+- Uninstall retention policy:
+- Tauri updater signature verification:
+- Windows Authenticode (separate; public external distribution requires it):
+- macOS Developer ID/notarization (public external distribution requires it):
 
-- `preview-npcink-device-inventory-plugin`:
-- `preview-npcink-device-agent-macos`:
-- `preview-npcink-device-agent-windows`:
+## Manual publication decision
 
-## Tagged Release Checks
+- All pre-publication blockers closed:
+- Operator / evidence reviewed / date:
+- Decision: hold / publish existing draft:
+- Draft assets unchanged since acceptance:
+- Platform-signing limits and signature-v2 rollout in release notes:
 
-After the tag workflow finishes, record:
+Publishing requires a separate human action in GitHub. Do not rebuild, replace
+assets, or reuse a version while promoting the draft.
 
-- Release URL:
-- `npcink-device-inventory.zip`:
-- macOS DMG:
-- macOS updater `.tar.gz`:
-- macOS updater signature:
-- Windows installer:
-- Windows updater signature:
-- `latest.json`:
-- `latest-desktop.json`:
+## After publication, before working-device rollout
 
-Run against downloaded release artifacts or the workflow artifact directory:
+Private drafts cannot be discovered through the old official Agent's fixed
+latest URL. Keep these pending before publication; do not report an isolated
+harness or manual installer upgrade as the official in-app update.
 
-```bash
-npm run check:desktop-manifests -- artifacts
-```
-
-Result:
-
-- Desktop manifest check:
-
-## Desktop Update Smoke
-
-Before update testing, confirm the installed app is the previous official
-Release package, not a local development build.
-
-- macOS previous official version installed:
-- macOS update check entry used: Settings / native menu
-- macOS update result:
-- Windows previous official version installed:
-- Windows update check entry used: Settings / native menu
-- Windows update result:
-
-## Upload Smoke
-
-- WordPress site:
-- Temporary upload token created:
-- macOS upload result:
-- Windows upload result:
-- Temporary upload token disabled:
-
-## Known Limits
-
-- macOS DMG signing/notarization:
-- Windows code signing:
-- Public GitHub Release access:
-- Any release blocker:
-
-## Decision
-
-- Release candidate status: pass / hold
-- Follow-up required before tag:
-- Follow-up allowed after tag:
+- Published URL:
+- `Verify published candidate` run / public hashes and signatures:
+- Windows official previous version / settings update check:
+- Windows menu update check / download / install / restart / final version:
+- Windows retained configuration and credentials:
+- macOS official GUI update (if applicable):
+- Failure holds rollout; recovery action / previous latest selection:
+- Final decision: hold / rollout:

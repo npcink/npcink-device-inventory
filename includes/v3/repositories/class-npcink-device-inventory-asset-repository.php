@@ -10,6 +10,14 @@ class Npcink_Device_Inventory_Asset_Repository
 	const CACHE_TTL = 60;
 	private $last_write_error = '';
 
+	/** Read current state under the caller's transaction, bypassing shared caches. */
+	public function find_by_id_for_update($id)
+	{
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Upload and archive must serialize on the current asset row.
+		return $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE id = %d FOR UPDATE', Npcink_Device_Inventory_V3_Tables::assets(), intval($id)), ARRAY_A);
+	}
+
 	public function find_by_uuid($uuid)
 	{
 		global $wpdb;
@@ -191,7 +199,7 @@ class Npcink_Device_Inventory_Asset_Repository
 						SELECT 1
 						FROM %i si
 						WHERE si.asset_id = a.id
-						AND si.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1')
+						AND si.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2')
 						AND si.identity_value LIKE %s
 					))
 					OR (%s = '1' AND EXISTS (
@@ -271,7 +279,7 @@ class Npcink_Device_Inventory_Asset_Repository
 					SELECT 1
 					FROM %i si
 					WHERE si.asset_id = a.id
-					AND si.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1')
+					AND si.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2')
 					AND si.identity_value LIKE %s
 				))
 				OR (%s = '1' AND EXISTS (
@@ -300,7 +308,7 @@ class Npcink_Device_Inventory_Asset_Repository
 						SELECT 1
 						FROM %i oi
 						WHERE oi.asset_id = a.id
-						AND oi.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1')
+						AND oi.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2')
 						AND oi.identity_value = %s
 					) THEN 4
 					WHEN %s = '1' AND lo.summary_json LIKE %s THEN 5
@@ -312,7 +320,7 @@ class Npcink_Device_Inventory_Asset_Repository
 						SELECT 1
 						FROM %i pi
 						WHERE pi.asset_id = a.id
-						AND pi.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1')
+						AND pi.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2')
 						AND pi.identity_value LIKE %s
 					) THEN 10
 					WHEN %s = '1' AND lo.summary_json LIKE %s THEN 11

@@ -10,7 +10,8 @@ use std::io::{Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
+#[cfg(target_os = "windows")]
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
@@ -143,18 +144,39 @@ fn get_cached_device_snapshot() -> Result<Option<DeviceSnapshot>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    if let Ok(modified_at) = fs::metadata(&path).and_then(|metadata| metadata.modified()) {
-        if modified_at.elapsed().unwrap_or(SNAPSHOT_CACHE_TTL) > SNAPSHOT_CACHE_TTL {
-            return Ok(None);
-        }
-    }
     let raw = fs::read_to_string(&path).map_err(|error| error.to_string())?;
     let snapshot: DeviceSnapshot =
         serde_json::from_str(&raw).map_err(|error| format!("缓存快照格式无效：{error}"))?;
-    if !snapshot_cache_is_current(&snapshot) {
+    let ttl = snapshot_cache_ttl(&snapshot);
+    let age = fs::metadata(&path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|time| time.elapsed().ok());
+    if age.is_none_or(|age| age >= ttl) || !snapshot_cache_is_current(&snapshot) {
         return Ok(None);
     }
     Ok(Some(snapshot))
+}
+
+fn snapshot_cache_ttl(snapshot: &DeviceSnapshot) -> Duration {
+    let partial = ["hardwareProbeAttempts", "identityProbeAttempts"]
+        .iter()
+        .any(|key| {
+            snapshot
+                .data
+                .get(key)
+                .and_then(Value::as_array)
+                .is_some_and(|probes| {
+                    probes
+                        .iter()
+                        .any(|probe| !matches!(probe["status"].as_str(), Some("ok" | "empty")))
+                })
+        });
+    if partial {
+        Duration::from_secs(60)
+    } else {
+        SNAPSHOT_CACHE_TTL
+    }
 }
 
 fn snapshot_cache_is_current(snapshot: &DeviceSnapshot) -> bool {
@@ -162,13 +184,32 @@ fn snapshot_cache_is_current(snapshot: &DeviceSnapshot) -> bool {
         .data
         .pointer("/collector/schema")
         .and_then(Value::as_str)
-        == Some("npcink-upload-light-v3")
+        == Some(collector::INVENTORY_SCHEMA)
         && snapshot
             .data
             .pointer("/collector/version")
             .and_then(Value::as_str)
             == Some(env!("CARGO_PKG_VERSION"))
+        && snapshot
+            .data
+            .pointer("/collector/observation_id")
+            .and_then(Value::as_str)
+            .is_some_and(collector::valid_observation_id)
         && collector::hardware_identity_v2(&snapshot.data).is_some()
+        && (snapshot
+            .data
+            .pointer("/os/platform")
+            .and_then(Value::as_str)
+            != Some("windows")
+            || snapshot
+                .data
+                .get("hardwareProbeAttempts")
+                .and_then(Value::as_array)
+                .is_some_and(|probes| {
+                    probes
+                        .iter()
+                        .any(|probe| probe["source"] == "graphics_memory")
+                }))
 }
 
 fn collect_device_snapshot_inner() -> Result<DeviceSnapshot, String> {
@@ -910,7 +951,7 @@ fn powershell_stdout(command: &str, timeout: Duration) -> Option<String> {
 
 fn command_stdout(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
     let output = command_output_with_timeout(program, args, timeout).ok()?;
-    if !output.status.success() || output.timed_out {
+    if !output.status.success() || output.timed_out || output.stdout_truncated {
         return None;
     }
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -1739,7 +1780,10 @@ fn write_command_output(path: &Path, program: &str, args: &[&str]) -> Result<()>
         Ok(output) => {
             let mut text = String::new();
             text.push_str(&format!("command: {} {}\n", program, args.join(" ")));
-            text.push_str(&format!("status: {}\n", output.status));
+            text.push_str(&format!(
+                "status: {}\nstdout_truncated: {}\nstderr_truncated: {}\n",
+                output.status, output.stdout_truncated, output.stderr_truncated
+            ));
             if output.timed_out {
                 text.push_str(&format!(
                     "timed_out: true after {} seconds\n",
@@ -1758,45 +1802,14 @@ fn write_command_output(path: &Path, program: &str, args: &[&str]) -> Result<()>
     write_text(path, &redact_diagnostics_text(&content.replace('\0', "")))
 }
 
-struct TimedCommandOutput {
-    status: std::process::ExitStatus,
-    timed_out: bool,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-}
+use npcink_device_agent::command::TimedCommandOutput;
 
 fn command_output_with_timeout(
     program: &str,
     args: &[&str],
     timeout: Duration,
 ) -> std::io::Result<TimedCommandOutput> {
-    let mut child = new_command(program)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-
-    let start = Instant::now();
-    let mut timed_out = false;
-    loop {
-        if child.try_wait()?.is_some() {
-            break;
-        }
-        if start.elapsed() >= timeout {
-            timed_out = true;
-            let _ = child.kill();
-            break;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    let output = child.wait_with_output()?;
-    Ok(TimedCommandOutput {
-        status: output.status,
-        timed_out,
-        stdout: output.stdout,
-        stderr: output.stderr,
-    })
+    npcink_device_agent::command::output_with_timeout(new_command(program).args(args), timeout)
 }
 
 fn new_command(program: &str) -> Command {
@@ -2070,14 +2083,24 @@ mod tests {
     #[test]
     fn snapshot_cache_requires_new_identity_collection_and_current_version() {
         let mut snapshot = DeviceSnapshot {
-            data: json!({"collector": {"schema": "npcink-upload-light-v3", "version": env!("CARGO_PKG_VERSION")}, "uuid": {"hardware": "valid-test-hardware"}}),
+            data: json!({"collector": {"schema": "npcink-hardware-inventory-v3", "version": env!("CARGO_PKG_VERSION"), "observation_id": "cdb0d10b-858d-49aa-a8d4-bcb29f0cdd0e"}, "uuid": {"hardware": "valid-test-hardware"}}),
             device_identity_type: "system_uuid_v2".into(),
             device_identity: "unused".into(),
         };
         assert!(snapshot_cache_is_current(&snapshot));
-        snapshot.data["collector"]["schema"] = json!("npcink-upload-light-v1");
+        snapshot.data["os"] = json!({"platform": "windows"});
         assert!(!snapshot_cache_is_current(&snapshot));
-        snapshot.data["collector"]["schema"] = json!("npcink-upload-light-v3");
+        snapshot.data["hardwareProbeAttempts"] =
+            json!([{"source": "graphics_memory", "status": "failed"}]);
+        assert!(snapshot_cache_is_current(&snapshot));
+        assert_eq!(snapshot_cache_ttl(&snapshot), Duration::from_secs(60));
+        snapshot.data["hardwareProbeAttempts"][0]["status"] = json!("partial");
+        assert_eq!(snapshot_cache_ttl(&snapshot), Duration::from_secs(60));
+        snapshot.data["hardwareProbeAttempts"][0]["status"] = json!("ok");
+        assert_eq!(snapshot_cache_ttl(&snapshot), SNAPSHOT_CACHE_TTL);
+        snapshot.data["collector"]["schema"] = json!("npcink-upload-light-v4");
+        assert!(!snapshot_cache_is_current(&snapshot));
+        snapshot.data["collector"]["schema"] = json!("npcink-hardware-inventory-v3");
         snapshot.data["collector"]["version"] = json!("older-build");
         assert!(!snapshot_cache_is_current(&snapshot));
         snapshot.data["collector"]["version"] = json!(env!("CARGO_PKG_VERSION"));
@@ -2195,8 +2218,8 @@ mod tests {
                     "macs": ["aa:bb:cc:dd:ee:ff"]
                 }
             }),
-            device_identity_type: "device_uuid_v1".to_string(),
-            device_identity: "device_uuid_v1_example".to_string(),
+            device_identity_type: "system_uuid_v2".to_string(),
+            device_identity: "system-v2-example".to_string(),
         };
 
         let export = write_hardware_feedback_export(
@@ -2218,7 +2241,7 @@ mod tests {
             "device-hardware-feedback.json"
         );
         assert_eq!(payload["schema"], "npcink-device-hardware-feedback-v1");
-        assert_eq!(payload["device_identity"]["type"], "device_uuid_v1");
+        assert_eq!(payload["device_identity"]["type"], "system_uuid_v2");
         assert_eq!(payload["hardware"]["baseboard"]["serial"], "BOARD-SERIAL-1");
         assert_eq!(payload["hardware"]["uuid"]["hardware"], "HARDWARE-UUID-1");
         assert_eq!(payload["privacy"]["contains_upload_configuration"], false);

@@ -22,7 +22,9 @@ class Npcink_Device_Inventory_Backup_Restore_Conflict_Exception extends Exceptio
 
 class Npcink_Device_Inventory_Backup_Restore_Controller
 {
-	const IDENTITY_TYPES = array('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1');
+	const IDENTITY_TYPES = array('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2');
+	// Discarded only at the backup boundary; never used for matching or writing.
+	const DISCARDED_IDENTITY_TYPES = array('device_uuid_v1', 'fallback_device_v1');
 	const REMOVED_EVENT_TYPES = array('issue_handled', 'issue_reopened', 'identity_reconciled');
 	const ASSET_STATUSES = array('active', 'inactive', 'maintenance', 'retired', 'deleted');
 
@@ -101,7 +103,11 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			return $validation;
 		}
 
-		$summary = $this->build_restore_plan($backup);
+		try {
+			$summary = $this->build_restore_plan($backup);
+		} catch (Exception $exception) {
+			return Npcink_Device_Inventory_V3_Response::error('backup_restore_failed', 'Failed to read existing backup restore data.', 500);
+		}
 		if ($dry_run) {
 			return rest_ensure_response(
 				array(
@@ -163,8 +169,51 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			}
 		}
 
+		foreach (isset($backup['assets']) ? $backup['assets'] : array() as $asset) {
+			if (is_array($asset) && (isset($asset['assetType']) && !in_array($asset['assetType'], array('computer', 'custom'), true))) {
+				return Npcink_Device_Inventory_V3_Response::error('invalid_backup_asset_type', 'Backup assets must use computer or custom types.', 422);
+			}
+			if (is_array($asset) && array_key_exists('residualValue', $asset) && !isset($asset['secondHandMarketValue'])) {
+				return Npcink_Device_Inventory_V3_Response::error('invalid_backup_field', '备份资产缺少二手市场价字段 secondHandMarketValue，请先转换备份后重试。', 422);
+			}
+		}
+
+		foreach (isset($backup['identities']) ? $backup['identities'] : array() as $group) {
+			if (!is_array($group) || !isset($group['identities']) || !is_array($group['identities'])) {
+				return Npcink_Device_Inventory_V3_Response::error('invalid_backup_identity_group', 'Backup identities must be grouped by asset.', 422);
+			}
+			foreach ($group['identities'] as $identity) {
+				if (!is_array($identity) || !isset($identity['identityType']) || !in_array($identity['identityType'], array_merge(self::IDENTITY_TYPES, self::DISCARDED_IDENTITY_TYPES), true)) {
+					return Npcink_Device_Inventory_V3_Response::error('invalid_backup_identity_type', 'Backup identities must use the current hardware identity types.', 422);
+				}
+			}
+		}
+
 		if (!$has_known_section) {
 			return Npcink_Device_Inventory_V3_Response::error('empty_backup', 'Backup does not contain importable sections.', 422);
+		}
+		$receipt_ids = array();
+		foreach (isset($backup['observations']) ? $backup['observations'] : array() as $observation) {
+			if (!is_array($observation)) {
+				return Npcink_Device_Inventory_V3_Response::error('invalid_backup_observation', 'Backup observations must be objects.', 422);
+			}
+			foreach (array('summary', 'hardware', 'raw') as $field) {
+				if (isset($observation[$field]) && !is_array($observation[$field])) {
+					return Npcink_Device_Inventory_V3_Response::error('invalid_backup_observation', 'Backup observation JSON fields must be objects or arrays.', 422);
+				}
+			}
+			if (isset($observation['payloadHash']) && !isset($observation['observationId'])) {
+				return Npcink_Device_Inventory_V3_Response::error('invalid_backup_receipt', 'Backup receipt hash requires an observation ID.', 422);
+			}
+			if (isset($observation['observationId']) && (!is_string($observation['observationId']) || !preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/D', $observation['observationId']) || !isset($observation['payloadHash']) || !is_string($observation['payloadHash']) || !preg_match('/^[a-f0-9]{64}$/D', $observation['payloadHash']))) {
+				return Npcink_Device_Inventory_V3_Response::error('invalid_backup_receipt', 'Backup observation receipt is invalid.', 422);
+			}
+			if (isset($observation['observationId'])) {
+				if (isset($receipt_ids[$observation['observationId']])) {
+					return Npcink_Device_Inventory_V3_Response::error('invalid_backup_receipt', 'Backup contains duplicate observation IDs.', 422);
+				}
+				$receipt_ids[$observation['observationId']] = true;
+			}
 		}
 
 		return true;
@@ -451,7 +500,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 				continue;
 			}
 
-			$identity_items = isset($group['identities']) && is_array($group['identities']) ? $group['identities'] : array($group);
+			$identity_items = $group['identities'];
 			$asset_id = $this->asset_id_from_backup_reference($group, $asset_map);
 
 			foreach ($identity_items as $identity) {
@@ -460,8 +509,13 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 					continue;
 				}
 				$current_asset_id = $asset_id ? $asset_id : $this->asset_id_from_backup_reference($identity, $asset_map);
-				$type = $this->backup_text($identity, array('identityType', 'type'), 'key');
-				$value = $this->backup_text($identity, array('identityValue', 'value'), 'text');
+				$type = $this->backup_text($identity, array('identityType'), 'key');
+				$value = $this->backup_text($identity, array('identityValue'), 'text');
+				if (in_array($type, self::DISCARDED_IDENTITY_TYPES, true)) {
+					$summary['skipped']['identities']++;
+					$this->add_warning($summary, '已跳过停用的 v1 设备匹配标识，仅恢复当前 v2 标识；请核对缺少 v2 标识的资产，系统不会按编号自动关联设备。');
+					continue;
+				}
 				if (!$current_asset_id || !in_array($type, self::IDENTITY_TYPES, true) || $value === '') {
 					$summary['skipped']['identities']++;
 					$this->add_warning($summary, '设备匹配标识缺少资产、使用旧类型或缺少值，已跳过。');
@@ -544,7 +598,19 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			if ($mutate && $asset_id > 0) {
 				$should_sync_latest = true;
 			}
-			if ($asset_id > 0 && $this->observation_exists($asset_id, $source, $schema_version, $observed_at)) {
+			$exists = false;
+			if (isset($observation['observationId'])) {
+				$receipt = $this->observation_receipt($observation['observationId']);
+				if ($receipt && (intval($receipt['asset_id']) !== $asset_id || !hash_equals((string) $receipt['payload_hash'], $observation['payloadHash']))) {
+					$summary['conflicts'][] = '采集编号已对应其他资产或内容：' . $observation['observationId'];
+					$summary['skipped']['observations']++;
+					continue;
+				}
+				$exists = !empty($receipt);
+			} elseif ($asset_id > 0) {
+				$exists = $this->observation_exists($asset_id, $source, $schema_version, $observed_at);
+			}
+			if ($exists) {
 				if (!$mutate) {
 					$summary['planned']['observationsExisting']++;
 				}
@@ -564,13 +630,15 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 						'asset_id' => $asset_id,
 						'source' => $source,
 						'schema_version' => $schema_version,
+						'observation_uuid' => isset($observation['observationId']) ? $observation['observationId'] : null,
+						'payload_hash' => isset($observation['observationId']) ? $observation['payloadHash'] : null,
 						'observed_at' => $observed_at,
 						'received_at' => $received_at,
 						'summary_json' => $this->safe_json_field($observation, 'summary'),
 						'hardware_json' => $this->safe_json_field($observation, 'hardware'),
 						'raw_json' => $this->safe_json_field($observation, 'raw'),
 					),
-					array('%d', '%s', '%d', '%s', '%s', '%s', '%s', '%s')
+					array('%d', '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s')
 				);
 				// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				if ($result === false) {
@@ -652,12 +720,8 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 
 	private function asset_row_from_backup($asset)
 	{
-		$legacy_asset_type = $this->backup_text($asset, array('assetType'), 'key', 'custom');
-		$asset_type = in_array($legacy_asset_type, array('pc', 'computer'), true) ? 'computer' : 'custom';
+		$asset_type = $this->backup_text($asset, array('assetType'), 'key', 'custom');
 		$category = $this->backup_text($asset, array('category'), 'text');
-		if ($asset_type === 'custom' && $category === '' && $legacy_asset_type !== 'custom') {
-			$category = $legacy_asset_type;
-		}
 
 		$row = array(
 			'uuid' => $this->backup_text($asset, array('uuid'), 'text'),
@@ -669,9 +733,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			'status' => $this->backup_status($asset),
 			'category' => $category,
 			'purchase_price' => isset($asset['purchasePrice']) ? floatval($asset['purchasePrice']) : 0,
-			'residual_value' => isset($asset['secondHandMarketValue'])
-				? floatval($asset['secondHandMarketValue'])
-				: (isset($asset['residualValue']) ? floatval($asset['residualValue']) : 0),
+			'residual_value' => isset($asset['secondHandMarketValue']) ? floatval($asset['secondHandMarketValue']) : 0,
 			'financial_residual_value' => isset($asset['financialResidualValue']) ? floatval($asset['financialResidualValue']) : 0,
 			'metadata_json' => $this->safe_json_field($asset, 'metadata'),
 			'created_at' => $this->backup_datetime($asset, 'createdAt', false),
@@ -720,6 +782,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			ARRAY_A
 		);
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$this->assert_lookup_succeeded();
 		return $row;
 	}
 
@@ -735,6 +798,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			ARRAY_A
 		);
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$this->assert_lookup_succeeded();
 		return $row;
 	}
 
@@ -755,17 +819,6 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 	{
 		$uuid = '';
 		$asset_number = '';
-		if (isset($item['asset']) && is_array($item['asset'])) {
-			$asset = $item['asset'];
-			$uuid = !empty($asset['uuid']) ? (string) $asset['uuid'] : '';
-			$asset_number = !empty($asset['assetNumber']) ? (string) $asset['assetNumber'] : '';
-			if ($uuid !== '' && isset($asset_map['by_uuid'][$uuid])) {
-				return intval($asset_map['by_uuid'][$uuid]);
-			}
-			if ($asset_number !== '' && isset($asset_map['by_number'][$asset_number])) {
-				return intval($asset_map['by_number'][$asset_number]);
-			}
-		}
 		if (!empty($item['assetUuid']) && isset($asset_map['by_uuid'][(string) $item['assetUuid']])) {
 			return intval($asset_map['by_uuid'][(string) $item['assetUuid']]);
 		}
@@ -809,7 +862,17 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			)
 		);
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$this->assert_lookup_succeeded();
 		return $asset_id ? intval($asset_id) : 0;
+	}
+
+	private function observation_receipt($uuid)
+	{
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Current receipt lookup participates in restore conflict checks; unique index arbitrates races.
+		$receipt = $wpdb->get_row($wpdb->prepare('SELECT asset_id, payload_hash FROM %i WHERE observation_uuid = %s', Npcink_Device_Inventory_V3_Tables::observations(), $uuid), ARRAY_A);
+		$this->assert_lookup_succeeded();
+		return $receipt;
 	}
 
 	private function observation_exists($asset_id, $source, $schema_version, $observed_at)
@@ -827,6 +890,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			)
 		);
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$this->assert_lookup_succeeded();
 		return !empty($found);
 	}
 
@@ -892,7 +956,17 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 				)
 			);
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$this->assert_lookup_succeeded();
 		return !empty($found);
+	}
+
+	private function assert_lookup_succeeded()
+	{
+		global $wpdb;
+		// A failed SELECT must never be treated as permission to insert or skip data.
+		if ($wpdb->last_error !== '') {
+			throw new Exception('Failed to read existing backup restore data.');
+		}
 	}
 
 	private function safe_json_field($item, $key)

@@ -144,6 +144,7 @@ const friendlyErrorTextMap: Record<string, string> = {
 };
 
 const errorInterceptor = (error: any) => {
+  if (axios.isCancel(error)) return Promise.reject(error);
   // 检查是否有返回错误信息，有的话展示，没有就显示默认错误信息
   let errorMessage: string;
 

@@ -70,7 +70,7 @@ jobs:
         working-directory: vite-admin
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --audit-level=moderate
           npm run check:hardware-audit
           npm run lint
           npm run build
@@ -110,7 +110,7 @@ jobs:
         working-directory: ele-rs
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --audit-level=moderate
 
       - name: Use stable Rust
         run: rustup show
@@ -164,10 +164,21 @@ jobs:
         working-directory: ele-rs
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --audit-level=moderate
 
       - name: Use stable Rust
         run: rustup show
+
+      - name: Check command runner and Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          node --test ele-rs/scripts/windows-command-runner.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./ele-rs/scripts/test-windows-smoke.ps1
+
+      - name: Check PowerShell 7 wrapper
+        shell: pwsh
+        run: ./ele-rs/scripts/test-windows-smoke.ps1
 
       - name: Check Rust collector
         working-directory: ele-rs

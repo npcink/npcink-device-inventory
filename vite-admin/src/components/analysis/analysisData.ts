@@ -1,4 +1,4 @@
-import type { Asset, AssetObservation } from "@/type/v3";
+import type { Asset, ComparisonObservation } from "@/type/v3";
 import {
   assetHardwareContext,
   firstText,
@@ -7,6 +7,7 @@ import {
   getRecord,
   hardwareDiskBytes,
   hardwareMemoryBytes,
+  hardwareMemoryModules,
   hardwareSummary,
   toNumber,
 } from "@/utils/hardwareAudit";
@@ -122,18 +123,18 @@ export const filterHardwareQueryItems = (items: HardwareQueryItem[], query: Hard
   return true;
 });
 
-export const observationCapacityBytes = (observation: AssetObservation, kind: "memory" | "disk") => {
+export const observationCapacityBytes = (observation: ComparisonObservation, kind: "memory" | "disk") => {
   const summaryKey = kind === "memory" ? "memory_bytes" : "disk_bytes";
   const summaryBytes = toNumber(observation.summary[summaryKey]);
   if (summaryBytes > 0) return summaryBytes;
   const candidates = kind === "memory"
-    ? [observation.hardware.memory, observation.hardware.mem, observation.hardware.memLayout]
+    ? [hardwareMemoryModules(observation.hardware)]
     : [observation.hardware.disks, observation.hardware.disk, observation.hardware.diskLayout];
   const items = candidates.map(getArray).find((value) => value.length) || [];
   return items.reduce((total, item) => total + toNumber(item.size), 0);
 };
 
-export const observationComparableFields = (observation: AssetObservation) => {
+export const observationComparableFields = (observation: ComparisonObservation) => {
   const extracted = hardwareSummary(getRecord(observation.summary), getRecord(observation.hardware));
   const memoryBytes = observationCapacityBytes(observation, "memory");
   const diskBytes = observationCapacityBytes(observation, "disk");

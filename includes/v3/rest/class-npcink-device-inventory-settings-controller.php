@@ -231,34 +231,12 @@ class Npcink_Device_Inventory_Settings_Controller
 			'renewalMinDiskGb' => intval($options['renewal_min_disk_gb']),
 			'renewalMaxResidualRate' => floatval($options['renewal_max_residual_rate']),
 			'countAvailableAssetsOnly' => !empty($options['count_available_assets_only']),
-			'departments' => $this->settings_departments($options),
+			'departments' => Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($options['departments']),
 			'deleteDataOnUninstall' => !empty($options['delete_data_on_uninstall']),
 			'clientTokens' => $tokens,
 		);
 	}
 
-	private function settings_departments($options)
-	{
-		$raw_options = get_option(Npcink_Device_Inventory_V3_Tables::OPTION);
-		if (is_array($raw_options) && array_key_exists('departments', $raw_options)) {
-			return Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($raw_options['departments']);
-		}
-		return Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($this->asset_departments());
-	}
-
-	private function asset_departments()
-	{
-		global $wpdb;
-		$table = Npcink_Device_Inventory_V3_Tables::assets();
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- One-time fallback reads current departments from the plugin-owned assets table when no department setting exists; caching would require invalidation on every asset write.
-		$rows = $wpdb->get_col(
-			$wpdb->prepare('SELECT DISTINCT department FROM %i WHERE department <> %s ORDER BY department ASC', $table, '')
-		);
-		if (!is_array($rows)) {
-			return array();
-		}
-		return Npcink_Device_Inventory_V3_Tables::normalize_departments($rows);
-	}
 
 	private function public_token($token)
 	{

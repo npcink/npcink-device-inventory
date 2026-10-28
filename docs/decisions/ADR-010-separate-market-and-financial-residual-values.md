@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. Legacy REST/import alias compatibility was superseded by
+[ADR-017](ADR-017-remove-historical-compatibility.md) on 2026-10-27. The market /
+accounting value distinction remains in force.
 
 ## Date
 

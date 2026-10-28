@@ -16,14 +16,24 @@ This folder keeps the current product contracts, development guardrails, release
 - `asset-type-archive-admin-ui-development-retrospective-2026-08-06.md`: device subtype reuse, archive-as-business-exclusion, compact admin forms, date localization, summary hierarchy, and final PCP lessons.
 - `windows-upload-light-identity-incident-2026-09-16.md`: device 135 evidence, upload-light root cause, collection recovery and validation limits.
 - `identity-contract.md`: current hardware identity v2 upload contract.
+- `complete-hardware-inventory-2026-10-27.md`: shared complete collection, hardware mapping, full detail fields, source limits and local verification.
+- `collector-and-ingest-audit-2026-10-27.md`: verified collector/upload/storage defects, local boundary reproductions, open-source references and phased recommendations.
+- `collector-remediation-2026-10-27.md`: implemented collection/upload fixes, bounded probe scheduling and local acceptance results.
+- `component-relations-2026-10-27.md`: storage relationships, graphics matching, component diagnostics, verification and remaining platform boundaries.
+- `collection-resilience-and-auth-2026-10-27.md`: streamed partial collection, reserved optional storage budget, request signatures v2 and verified token scope.
+- `windows-collection-acceptance-2026-10-27.md`: prepared real Windows matrix, fault cases, timing/size evidence and upload acceptance; execution deferred.
+- `local-acceptance-2026-10-27.md`: read-only acceptance of 180 existing computers, stored/REST fact equality, real detail samples, old snapshot coverage and the remaining Windows acceptance boundary.
+- `pre-release-review-2026-10-28.md`: Windows/release preflight findings, reused versions, stale ZIP evidence, smoke-script gaps, signed candidate publication and ordered acceptance gates.
+- `release-candidate-preparation-2026-10-28.md`: implemented Agent 0.4.5/plugin 3.2.4 release preparation, local package hash, regression evidence and unresolved Windows/network/Docker gates.
+- `decisions/ADR-018-accept-immutable-release-candidates.md`: immutable signed drafts, manual publication, exact artifact hashes and the post-publication official updater smoke boundary.
 - `device-upload-troubleshooting-and-operations.md`: production upload troubleshooting, evidence, and recovery runbook.
 - `decisions/ADR-003-pre-ga-scope-reset.md`: pre-GA scope reset; its analysis restriction is partially superseded by ADR-009.
-- `decisions/ADR-004-hardware-identity-v2.md`: current hardware identity design and v1 transition rule.
-- `decisions/ADR-006-guard-legacy-identity-migration.md`: evidence-continuity guard for legacy identity migration.
+- `decisions/ADR-004-hardware-identity-v2.md`: current hardware identity design; its v1 transition was superseded by ADR-017.
+- `decisions/ADR-006-guard-legacy-identity-migration.md`: historical legacy-migration guard, superseded by ADR-017.
 - `decisions/ADR-007-keep-production-diagnostics-lightweight.md`: decision to keep production diagnostics lightweight.
 - `decisions/ADR-008-separate-asset-number-identity-and-observation.md`: boundary between business asset numbers, hardware identity, and replaceable hardware observations.
 - `decisions/ADR-009-restore-read-only-analysis.md`: current boundary for read-only trends, distributions, value summaries, and excluded writable analysis workflows.
-- `decisions/ADR-010-separate-market-and-financial-residual-values.md`: separates second-hand market value from accounting residual value while preserving legacy compatibility.
+- `decisions/ADR-010-separate-market-and-financial-residual-values.md`: separates market and accounting values; alias compatibility was superseded by ADR-017.
 - `decisions/ADR-011-configurable-asset-export.md`: configurable Excel/CSV export, status colors, ordered fields, and separate WordPress-aware preview.
 - `decisions/ADR-012-treat-archived-assets-as-business-excluded-records.md`: archived assets remain auditable but are excluded from operational lists, calculations, uploads, and asset-table exports.
 - `decisions/ADR-013-consolidate-analysis-navigation-and-restore-hardware-inventory.md`: restores CPU/disk/memory/baseboard inventory on current facts and groups analysis into four stable management domains.
@@ -33,6 +43,10 @@ This folder keeps the current product contracts, development guardrails, release
 - `read-only-analysis-restoration-retrospective-2026-08-06.md`: history, real-data findings, UI iterations, and reusable lessons from restoring read-only analytics and multi-factor queries.
 - `release-readiness-checklist.md`: release gate and manual smoke-test checklist.
 - `github-release.md`: GitHub release workflow notes.
+
+- `decisions/ADR-016-treat-repeated-board-serial-as-supporting-evidence.md`: treats repeated baseboard serials as supporting evidence when stronger identities resolve ownership.
+- `decisions/ADR-017-remove-historical-compatibility.md`: current-only schema, identity, field, backup, and atomic authentication contracts.
+- `local-preview-and-compatibility-cleanup-2026-10-27.md`: device.local preview connection, compatibility removal, and local verification.
 
 ## Release Records
 

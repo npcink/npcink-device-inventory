@@ -10,11 +10,15 @@ Npcink Device Inventory 是一个 WordPress 设备资产管理插件，用于小
 本阶段设备身份、资产编号、硬件采集和发布经验的集中复盘见
 [`docs/device-identity-collection-release-retrospective-2026-08-05.md`](docs/device-identity-collection-release-retrospective-2026-08-05.md)。
 
+当前工作区按单用户范围移除了旧迁移链、旧字段别名和旧导入形态，见
+[ADR-017](docs/decisions/ADR-017-remove-historical-compatibility.md)。本地预览已接入
+[device.local 后台](http://device.local/wp-admin/plugins.php?page=npcink_device_inventory_settings)，使用原管理员账号登录。
+
 ## 组成
 
 - `npcink-device-inventory.php`：WordPress 插件入口。
 - `admin/`：后台菜单、REST API、数据表读写、导入导出和设置。
-- `includes/`：插件加载器、激活/停用、数据库建表和增量迁移。
+- `includes/`：插件加载器、激活/停用、当前数据库基线建表与校验。
 - `vite-admin/`：后台 React 管理端，构建产物由插件后台加载。
 - `ele-rs/`：Rust/Tauri 设备采集与上传客户端。
 - `docs/`：数据模型、发布流程、验证记录和历史归档。
@@ -35,7 +39,7 @@ v3 使用统一资产模型，详细契约见 `docs/asset-data-model.md`。插�
 - `npcink_asset_observations`：客户端采集、导入或人工录入的资产快照。
 - `npcink_asset_events`：统一事件和审计时间线。
 
-设备上传使用 schema 5 硬件事实。服务端会独立计算系统 UUID、主板序列号和永久 PCI MAC 三类 v2 身份；多条证据互相指向不同资产时返回 409，不自动合并。v1 身份只用于升级时定位已有资产，详见 [`docs/identity-contract.md`](docs/identity-contract.md)。
+设备上传使用 schema 5 硬件事实。服务端会独立计算系统 UUID、主板序列号和永久 PCI MAC 三类 v2 身份；多条证据互相指向不同资产时返回 409，不自动合并。旧 v1 身份算法和升级定位已移除，详见 [`docs/identity-contract.md`](docs/identity-contract.md)。
 
 主要 REST 入口：
 
@@ -63,6 +67,7 @@ v3 使用统一资产模型，详细契约见 `docs/asset-data-model.md`。插�
 - 非 dry-run 导入如果存在冲突会返回 409；schema 不匹配返回 422；体积或行数超限返回 413。
 - 资产按 UUID 和资产编号合并。UUID 与资产编号命中不同资产时视为冲突；仅资产编号命中时会更新资产字段但保留正式站点原 UUID。
 - 资产缺少 UUID 时会在实际导入时生成新 UUID 并在预览中提示；资产缺少 `createdAt` 或 `updatedAt` 时会使用导入时的当前时间。
+- 备份恢复以当前字段 `secondHandMarketValue` 为准；允许 3.2.3 导出附带冗余 `residualValue`，但不使用它回填价格。缺少当前字段而只有旧字段时返回 422。恢复仅写入三种 v2 身份，备份中两种已停用 v1 身份计入跳过数量并提示；未知身份类型和扁平身份组返回 422。
 - 设备匹配标识按 `identity_type + identity_value` 全局去重；同一标识属于其他资产时视为冲突，备份内重复项会跳过并提示。
 - 电脑采集快照和变更记录要求备份内时间有效；缺失或无效时间不会被替换为当前时间，而是跳过并提示。
 - 设置只恢复保留天数、资产编号前缀、折旧参数、统计口径和卸载删除开关。上传授权码和客户端上传基础 URL 不会从备份恢复。
@@ -73,7 +78,7 @@ v3 使用统一资产模型，详细契约见 `docs/asset-data-model.md`。插�
 REST namespace 为 `npcink-device-inventory/v1`。
 
 - 管理端接口需要当前用户具备 `manage_options` 权限，并通过 WordPress REST nonce。
-- 设备上传使用 `/wp-json/npcink-device-inventory/v1/device-observations`，必须使用后台生成的完整授权码。客户端会用 timestamp、nonce、body hash 和 HMAC 签名提交。
+- 设备上传使用 `/wp-json/npcink-device-inventory/v1/device-observations`，必须使用后台生成的完整授权码。签名v2绑定方法、REST路由、Token ID、timestamp、nonce及原始body hash；旧客户端需配套更新，现有授权码可保留。合同见[异常恢复与上传授权](docs/collection-resilience-and-auth-2026-10-27.md)。
 - 新建授权码时只显示一次完整密钥和桌面导入 JSON；之后只能启停或删除，服务端不提供密钥回读。
 - 软件端可填写站点首页、`/wp-json`、`/wp-json/npcink-device-inventory/v1` 或完整上传 endpoint，客户端会自动归一化到 v3 上传接口。
 

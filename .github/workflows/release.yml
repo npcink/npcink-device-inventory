@@ -37,11 +37,28 @@ jobs:
       - name: Check release scope rules
         run: node scripts/check-release-scope.mjs
 
+      - name: Read published release baseline
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)
+          echo "previous_tag=${previous_tag}" >> "$GITHUB_OUTPUT"
+
       - name: Determine release scope
         id: scope
         env:
           RELEASE_TAG: ${{ github.ref_name }}
+          PREVIOUS_RELEASE_TAG: ${{ steps.baseline.outputs.previous_tag }}
         run: node scripts/detect-release-scope.mjs
+
+      - name: Reject existing releases and reused versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PREVIOUS_RELEASE_TAG: ${{ steps.baseline.outputs.previous_tag }}
+          DESKTOP_RELEASE: ${{ steps.scope.outputs.desktop }}
+        run: node scripts/check-release-baseline.mjs
 
   wordpress_plugin:
     name: WordPress plugin zip
@@ -96,7 +113,7 @@ jobs:
         working-directory: vite-admin
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --audit-level=moderate
           npm run check:hardware-audit
           npm run lint
           npm run build
@@ -146,7 +163,7 @@ jobs:
         working-directory: ele-rs
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --audit-level=moderate
 
       - name: Use stable Rust
         run: rustup show
@@ -239,25 +256,39 @@ jobs:
           test -f artifacts/desktop-manifests/latest.json
           test -f artifacts/desktop-manifests/latest-desktop.json
 
+      - name: Record candidate source and versions
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          PREVIOUS_RELEASE_TAG: ${{ needs.release_plan.outputs.previous_tag }}
+          DESKTOP_RELEASE: ${{ needs.release_plan.outputs.desktop }}
+        run: node scripts/write-release-candidate.mjs artifacts
+
       - name: Build release checksums
         run: npm run build:release-checksums -- artifacts
 
-      - name: Create plugin release
+      - name: Save independent candidate proof
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: candidate-proof-${{ github.ref_name }}
+          path: |
+            artifacts/SHA256SUMS
+            artifacts/candidate.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Create immutable plugin draft candidate
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
           mapfile -t release_assets < <(find artifacts -type f | sort)
-          if gh release view "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release upload "${TAG_NAME}" "${release_assets[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
-          else
-            gh release create "${TAG_NAME}" "${release_assets[@]}" --repo "${GITHUB_REPOSITORY}" --generate-notes --title "${TAG_NAME}"
-          fi
+          gh release create "${TAG_NAME}" "${release_assets[@]}" --repo "${GITHUB_REPOSITORY}" --verify-tag --draft --generate-notes --title "${TAG_NAME} candidate"
 
-      - name: Verify published plugin release
+      - name: Verify downloaded plugin draft candidate
         env:
           TAG_NAME: ${{ github.ref_name }}
-        run: npm run check:published-release -- published-assets
+          GH_TOKEN: ${{ github.token }}
+        run: npm run check:published-release -- published-assets --draft
 
   github_release_desktop:
     name: GitHub Release (plugin and desktop)
@@ -293,24 +324,38 @@ jobs:
       - name: Verify release assets
         run: npm run check:release-assets -- artifacts
 
+      - name: Record candidate source and versions
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          PREVIOUS_RELEASE_TAG: ${{ needs.release_plan.outputs.previous_tag }}
+          DESKTOP_RELEASE: ${{ needs.release_plan.outputs.desktop }}
+        run: node scripts/write-release-candidate.mjs artifacts
+
       - name: Build release checksums
         run: npm run build:release-checksums -- artifacts
 
-      - name: Create desktop release
+      - name: Save independent candidate proof
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: candidate-proof-${{ github.ref_name }}
+          path: |
+            artifacts/SHA256SUMS
+            artifacts/candidate.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Create immutable desktop draft candidate
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
           mapfile -t release_assets < <(find artifacts -type f | sort)
-          if gh release view "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release upload "${TAG_NAME}" "${release_assets[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
-          else
-            gh release create "${TAG_NAME}" "${release_assets[@]}" --repo "${GITHUB_REPOSITORY}" --generate-notes --title "${TAG_NAME}"
-          fi
+          gh release create "${TAG_NAME}" "${release_assets[@]}" --repo "${GITHUB_REPOSITORY}" --verify-tag --draft --generate-notes --title "${TAG_NAME} candidate"
 
-      - name: Verify published desktop release
+      - name: Verify downloaded desktop draft candidate
         env:
           TAG_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          npm run check:published-release -- published-assets
+          npm run check:published-release -- published-assets --draft
           npm run check:release-assets -- published-assets

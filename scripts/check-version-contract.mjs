@@ -20,6 +20,26 @@ const desktopVersion = String(desktopPackage.version || "");
 assertEqual(String(tauriConfig.version || ""), desktopVersion, "Tauri config version");
 assertEqual(tomlVersion(collectorManifest), desktopVersion, "collector Cargo version");
 assertEqual(tomlVersion(desktopManifest), desktopVersion, "desktop Cargo version");
+const desktopLock = JSON.parse(await read("ele-rs/package-lock.json"));
+assertEqual(desktopLock.version, desktopVersion, "desktop npm lock version");
+assertEqual(desktopLock.packages?.[""]?.version, desktopVersion, "desktop npm root lock version");
+for (const [file, names] of [
+  ["ele-rs/Cargo.lock", ["npcink-device-agent"]],
+  ["ele-rs/src-tauri/Cargo.lock", ["npcink-device-agent", "npcink-device-agent-desktop"]],
+]) {
+  const lock = await read(file);
+  for (const name of names) {
+    const entry = lock.split("[[package]]").find((block) => block.includes(`name = "${name}"\n`));
+    assertEqual(tomlVersion(entry || ""), desktopVersion, `${file} ${name} version`);
+  }
+}
+const [collectorSource, windowsSmoke] = await Promise.all([
+  read("ele-rs/src/collector/mod.rs"),
+  read("ele-rs/scripts/windows-smoke-test.ps1"),
+]);
+const inventorySchema = collectorSource.match(/const INVENTORY_SCHEMA:\s*&str\s*=\s*"([^"]+)"/)?.[1] || "";
+const smokeSchema = windowsSmoke.match(/\$payload\.collector\.schema -ne "([^"]+)"/)?.[1] || "";
+assertEqual(smokeSchema, inventorySchema, "Windows smoke inventory schema");
 
 const releaseTag = String(process.env.RELEASE_TAG || "").trim();
 if (releaseTag) {

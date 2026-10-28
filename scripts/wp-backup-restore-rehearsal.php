@@ -125,7 +125,9 @@ $backup = array(
 			'status' => 'active',
 			'category' => 'Laptop',
 			'purchasePrice' => 100,
-			'residualValue' => 10,
+			'secondHandMarketValue' => 10,
+			'residualValue' => 999,
+			'financialResidualValue' => 35,
 			'metadata' => array('restoreRehearsal' => true),
 			'createdAt' => '2026-07-06T00:00:00+00:00',
 			'updatedAt' => '2026-07-06T00:00:00+00:00',
@@ -135,7 +137,9 @@ $backup = array(
 		array(
 			'assetNumber' => $asset_number,
 			'identities' => array(
-				array('identityType' => 'device_uuid_v1', 'identityValue' => $identity_value, 'confidence' => 100, 'isPrimary' => true),
+				array('identityType' => 'system_uuid_v2', 'identityValue' => $identity_value, 'confidence' => 100, 'isPrimary' => true),
+				array('identityType' => 'device_uuid_v1', 'identityValue' => 'device-v1-rehearsal'),
+				array('identityType' => 'fallback_device_v1', 'identityValue' => 'fallback-v1-rehearsal'),
 			),
 		),
 	),
@@ -178,6 +182,8 @@ $assert(is_array($preview) && empty($preview['data']['summary']['conflicts']), '
 $assert((int) $preview['data']['summary']['planned']['assetsCreated'] === 1, 'dry-run should plan one asset create');
 $assert((int) $preview['data']['summary']['planned']['identitiesCreated'] === 1, 'dry-run should plan one identity create');
 
+$assert((int) $preview['data']['summary']['skipped']['identities'] === 2, 'preview should explain the discarded v1 identities');
+
 $import = $request_restore($backup, false);
 $assert(is_array($import) && (int) $import['data']['summary']['imported']['assetsCreated'] === 1, 'import should create one asset');
 $assert((int) $import['data']['summary']['imported']['identitiesCreated'] === 1, 'import should create one identity');
@@ -187,9 +193,11 @@ $assert((int) $import['data']['summary']['imported']['eventsCreated'] === 1, 'im
 $assets_table = Npcink_Device_Inventory_V3_Tables::assets();
 $observations_table = Npcink_Device_Inventory_V3_Tables::observations();
 $restored_asset = $wpdb->get_row(
-	$wpdb->prepare("SELECT id, latest_observation_id, latest_observed_at FROM {$assets_table} WHERE asset_number = %s LIMIT 1", $asset_number),
+	$wpdb->prepare("SELECT id, residual_value, financial_residual_value, latest_observation_id, latest_observed_at FROM {$assets_table} WHERE asset_number = %s LIMIT 1", $asset_number),
 	ARRAY_A
 );
+$assert((float) $restored_asset['residual_value'] === 10.0 && (float) $restored_asset['financial_residual_value'] === 35.0, '3.2.3 restore must use canonical market and financial values');
+$assert((int) $import['data']['summary']['skipped']['identities'] === 2, 'import must discard v1 identities');
 $restored_observation = $wpdb->get_row(
 	$wpdb->prepare(
 		"SELECT id, observed_at FROM {$observations_table} WHERE asset_id = %d ORDER BY observed_at DESC, id DESC LIMIT 1",
@@ -235,7 +243,7 @@ $conflict_backup['identities'] = array(
 	array(
 		'assetNumber' => $conflict_asset_number,
 		'identities' => array(
-			array('identityType' => 'device_uuid_v1', 'identityValue' => $identity_value),
+			array('identityType' => 'system_uuid_v2', 'identityValue' => $identity_value),
 		),
 	),
 );

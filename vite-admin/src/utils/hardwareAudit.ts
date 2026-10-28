@@ -67,6 +67,58 @@ export const firstText = (...values: unknown[]) => {
   return "";
 };
 
+const hardwareMemoryRecords = (hardware: JsonRecord): JsonRecord[] =>
+  [getRecord(hardware.memory).modules, hardware.memory, hardware.mem, hardware.memLayout]
+    .map(getArray).find((items) => items.length) || [];
+
+// Uploads store module facts under memory.modules; aggregate RAM is not a DIMM.
+export const hardwareMemoryModules = (hardware: JsonRecord): JsonRecord[] => {
+  const kind = getRecord(hardware.memory).kind;
+  if (kind === "unified") return [];
+  const modules = hardwareMemoryRecords(hardware);
+  return modules.filter((item) => toNumber(item.size) > 0 && (
+    kind === "dimm" ||
+    modules.length > 1 ||
+    (firstText(item.bank).toLowerCase() !== "unified memory" && Boolean(firstText(item.bank, item.partNum, item.serialNum, item.formFactor))) ||
+    /^(?:DDR|LPDDR)/i.test(firstText(item.type))
+  ));
+};
+
+export const hardwareDiskRecords = (hardware: JsonRecord): JsonRecord[] =>
+  [hardware.disks, hardware.disk, hardware.diskLayout].map(getArray).find((items) => items.length) || [];
+
+export const isDiskVolume = (disk: JsonRecord) => Boolean(disk.mount || disk.fsType) &&
+  !firstText(disk.model, disk.serialNum, disk.serial, disk.interfaceType, disk.pnpDeviceId);
+
+const componentText = (...values: unknown[]) => {
+  const text = firstText(...values).trim();
+  return /^(?:unknown|undefined|none|n\/a|not specified|0)$/i.test(text) ? "" : text;
+};
+
+export const memoryModuleRows = (hardware: JsonRecord) => hardwareMemoryModules(hardware).map((item, index) => ({
+  key: `memory-${index}`,
+  label: `内存 ${index + 1}`,
+  slot: componentText(item.bank),
+  capacity: formatBytes(item.size),
+  size: toNumber(item.size),
+  type: componentText(item.type, item.memoryType),
+  brand: /^[0-9a-f]{4,8}$/i.test(componentText(item.manufacturer)) ? `厂商代码 ${componentText(item.manufacturer)}` : componentText(item.manufacturer),
+  model: componentText(item.partNum),
+  frequency: toNumber(item.clockSpeed || item.clock) > 0 ? `${toNumber(item.clockSpeed || item.clock)} ${firstText(item.speedUnit) || "（单位未记录）"}` : "",
+}));
+
+export const diskComponentRows = (hardware: JsonRecord) => hardwareDiskRecords(hardware).map((item, index) => ({
+  key: `disk-${index}`,
+  label: `${isDiskVolume(item) ? "卷" : "硬盘"} ${index + 1}`,
+  isVolume: isDiskVolume(item),
+  model: componentText(item.model, item.name),
+  capacity: formatBytes(item.size),
+  type: componentText(item.type, item.mediaType),
+  brand: componentText(item.vendor, item.manufacturer),
+  interface: componentText(item.interfaceType),
+  mount: componentText(item.mount),
+}));
+
 const VIRTUAL_GRAPHICS_PATTERN = /(?:orayidd|virtual\s+(?:display|graphics|monitor)|remote\s+display|iddsample|parsec.*display|microsoft\s+remote\s+display)/i;
 
 export const isVirtualGraphicsController = (controller: JsonRecord) =>
@@ -113,16 +165,8 @@ export const hardwareSummary = (summary: JsonRecord, hardware: JsonRecord) => {
   const system = getRecord(hardware.system);
   const baseboard = getRecord(hardware.baseboard);
   const displays = getArray(graphics.displays);
-  const disks = getArray(hardware.disks).length
-    ? getArray(hardware.disks)
-    : getArray(hardware.disk).length
-      ? getArray(hardware.disk)
-      : getArray(hardware.diskLayout);
-  const memory = getArray(hardware.memory).length
-    ? getArray(hardware.memory)
-    : getArray(hardware.mem).length
-      ? getArray(hardware.mem)
-      : getArray(hardware.memLayout);
+  const disks = diskComponentRows(hardware);
+  const memory = memoryModuleRows(hardware);
   const net = getRecord(hardware.net);
 
   return {
@@ -134,17 +178,14 @@ export const hardwareSummary = (summary: JsonRecord, hardware: JsonRecord) => {
     ),
     deviceModel: firstText(summary.device_model, system.model),
     baseboard: firstText(baseboard.model, baseboard.serial, system.model),
-    memoryLines: memory.map((item) =>
-      [
-        item.clockSpeed || item.clock ? `频率: ${item.clockSpeed || item.clock} MHz` : "",
-        item.size ? `大小: ${formatBytes(item.size)}` : "",
-      ].filter(Boolean).join(" ")
-    ).filter(Boolean),
+    memoryLines: memory.map((item) => [
+      item.slot || item.label, item.capacity, item.type, item.brand, item.model, item.frequency,
+    ].filter(Boolean).join(" · ")),
     display: displays[0] && displayResolution(displays[0])
       ? `${displayResolution(displays[0])}${displays[0].currentRefreshRate ? ` (${displays[0].currentRefreshRate} 赫兹)` : ""}`
       : "",
     displayModel: firstText(displays[0]?.model),
-    primaryDisk: firstText(disks[0]?.name, disks[0]?.device, disks[0]?.serialNum),
+    primaryDisk: disks[0] ? [disks[0].model, disks[0].capacity, disks[0].type, disks[0].interface, disks[0].mount].filter(Boolean).join(" · ") : "",
     primaryIp: firstText(summary.primary_ip, net.ip4, net.defaultGateway),
   };
 };
@@ -180,12 +221,9 @@ export const hardwareMemoryBytes = (asset: Asset) => {
   if (summaryBytes > 0) {
     return summaryBytes;
   }
-  const memory = getArray(hardware.memory).length
-    ? getArray(hardware.memory)
-    : getArray(hardware.mem).length
-      ? getArray(hardware.mem)
-      : getArray(hardware.memLayout);
-  return memory.reduce((total, item) => total + toNumber(item.size), 0);
+  const records = hardwareMemoryRecords(hardware);
+  const moduleBytes = records.reduce((total, item) => total + toNumber(item.size), 0);
+  return moduleBytes || toNumber(getRecord(getRecord(hardware.memory).system).total) || toNumber(getRecord(hardware.mem).total);
 };
 
 export const hardwareDiskBytes = (asset: Asset) => {

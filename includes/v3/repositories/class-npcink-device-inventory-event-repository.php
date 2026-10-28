@@ -116,7 +116,7 @@ class Npcink_Device_Inventory_Event_Repository
 			$wpdb->prepare(
 				"SELECT COUNT(*) FROM %i e
 				LEFT JOIN %i a ON a.id = e.asset_id
-				WHERE (%s = '' OR (%s = 'manual' AND e.event_source IN ('manual', 'legacy_manual')) OR (%s = 'auto' AND e.event_source IN ('upload', 'system', 'import', 'legacy_auto', 'legacy_import')))
+				WHERE (%s = '' OR (%s = 'manual' AND e.event_source = 'manual') OR (%s = 'auto' AND e.event_source IN ('upload', 'system', 'import')))
 				AND (%s = '' OR e.event_source = %s)
 				AND (%s = '' OR e.event_type = %s)
 				AND (%s = '' OR e.message LIKE %s OR e.field_name LIKE %s OR a.asset_number LIKE %s OR a.name LIKE %s)",
@@ -141,7 +141,7 @@ class Npcink_Device_Inventory_Event_Repository
 				"SELECT e.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
 			FROM %i e
 			LEFT JOIN %i a ON a.id = e.asset_id
-			WHERE (%s = '' OR (%s = 'manual' AND e.event_source IN ('manual', 'legacy_manual')) OR (%s = 'auto' AND e.event_source IN ('upload', 'system', 'import', 'legacy_auto', 'legacy_import')))
+			WHERE (%s = '' OR (%s = 'manual' AND e.event_source = 'manual') OR (%s = 'auto' AND e.event_source IN ('upload', 'system', 'import')))
 			AND (%s = '' OR e.event_source = %s)
 			AND (%s = '' OR e.event_type = %s)
 			AND (%s = '' OR e.message LIKE %s OR e.field_name LIKE %s OR a.asset_number LIKE %s OR a.name LIKE %s)
@@ -171,6 +171,12 @@ class Npcink_Device_Inventory_Event_Repository
 		$result = array('items' => $items ?: array(), 'total' => intval($total), 'page' => $page, 'pageSize' => $page_size);
 		wp_cache_set($cache_key, $result, self::CACHE_GROUP, self::CACHE_TTL);
 		return $result;
+	}
+
+	/** Invalidate reads populated before a transaction committed or rolled back. */
+	public function invalidate_cache()
+	{
+		$this->bump_list_cache_version();
 	}
 
 	private function build_cache_key($prefix, $parts)

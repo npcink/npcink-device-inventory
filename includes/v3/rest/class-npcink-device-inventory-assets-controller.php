@@ -165,6 +165,36 @@ class Npcink_Device_Inventory_Assets_Controller
 				'permission_callback' => array($this, 'admin_permissions_check'),
 			)
 		);
+		register_rest_route('npcink-device-inventory/v1', '/analysis/hardware-observations', array(
+			'methods' => WP_REST_Server::READABLE,
+			'callback' => array($this, 'get_comparison_observations'),
+			'permission_callback' => array($this, 'admin_permissions_check'),
+			'args' => array(
+				'afterAssetId' => array('type' => 'integer', 'minimum' => 0, 'default' => 0),
+				'throughAssetId' => array('type' => 'integer', 'minimum' => 0, 'default' => 0),
+				'pageSize' => array('type' => 'integer', 'minimum' => 1, 'maximum' => 25, 'default' => 25),
+			),
+		));
+	}
+
+	public function get_comparison_observations($request)
+	{
+		$result = $this->observations->comparison_page($request->get_param('afterAssetId'), $request->get_param('throughAssetId'), $request->get_param('pageSize') ?: 25);
+		if ($result === null) {
+			return Npcink_Device_Inventory_V3_Response::error('analysis_query_failed', 'Failed to read comparison observations.', 500);
+		}
+		return rest_ensure_response(array(
+			'data' => array_map(function ($row) {
+				return array(
+					'id' => intval($row['id']),
+					'assetId' => intval($row['asset_id']),
+					'observedAt' => $this->format_utc_datetime($row['observed_at']),
+					'summary' => $this->decode_json($row['summary_json'], array()),
+					'hardware' => $this->decode_json($row['hardware_json'], array()),
+				);
+			}, $result['items']),
+			'pagination' => $result['pagination'],
+		));
 	}
 
 	public function admin_permissions_check()
@@ -312,7 +342,6 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (!$this->commit_transaction()) {
 			return $this->rollback_error('transaction_commit_failed', 'Failed to commit asset transaction.');
 		}
-		$this->observations->invalidate_cache();
 		return rest_ensure_response(array('data' => $this->format_asset($updated)));
 	}
 
@@ -398,9 +427,6 @@ class Npcink_Device_Inventory_Assets_Controller
 
 		if (!$this->commit_transaction()) {
 			return $this->rollback_error('transaction_commit_failed', 'Failed to commit batch transaction.');
-		}
-		if ($operation === 'archive') {
-			$this->observations->invalidate_cache();
 		}
 		return rest_ensure_response(
 			array(
@@ -752,15 +778,15 @@ class Npcink_Device_Inventory_Assets_Controller
 			$data[$definition[0]] = $value;
 		}
 
+		if (array_key_exists('residualValue', $params)) {
+			return Npcink_Device_Inventory_V3_Response::error('invalid_asset_field', 'Use secondHandMarketValue for asset market values.', 422);
+		}
+
 		$number_fields = array(
 			'purchasePrice' => 'purchase_price',
 			'secondHandMarketValue' => 'residual_value',
 			'financialResidualValue' => 'financial_residual_value',
 		);
-		// residualValue remains a write-compatible alias for older admin clients.
-		if (!array_key_exists('secondHandMarketValue', $params) && array_key_exists('residualValue', $params)) {
-			$params['secondHandMarketValue'] = $params['residualValue'];
-		}
 		foreach ($number_fields as $input_key => $storage_key) {
 			if (!$creating && !array_key_exists($input_key, $params)) {
 				continue;
@@ -873,7 +899,11 @@ class Npcink_Device_Inventory_Assets_Controller
 	{
 		global $wpdb;
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Asset mutations and audit events must commit together.
-		return $wpdb->query('COMMIT') !== false;
+		if ($wpdb->query('COMMIT') === false) {
+			return false;
+		}
+		$this->invalidate_transaction_caches();
+		return true;
 	}
 
 	private function rollback_transaction()
@@ -881,7 +911,16 @@ class Npcink_Device_Inventory_Assets_Controller
 		global $wpdb;
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Roll back every partial asset mutation.
 		$wpdb->query('ROLLBACK');
+		$this->invalidate_transaction_caches();
+	}
+
+	private function invalidate_transaction_caches()
+	{
+		// A separate connection may have cached old committed state during the write.
 		$this->assets->invalidate_cache();
+		$this->identities->invalidate_cache();
+		$this->observations->invalidate_cache();
+		$this->events->invalidate_cache();
 	}
 
 	private function rollback_error($code, $message, $status = 500)
@@ -908,25 +947,8 @@ class Npcink_Device_Inventory_Assets_Controller
 
 	private function configured_departments()
 	{
-		$raw_options = get_option(Npcink_Device_Inventory_V3_Tables::OPTION);
-		if (is_array($raw_options) && array_key_exists('departments', $raw_options)) {
-			return Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($raw_options['departments']);
-		}
-		return Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($this->asset_departments());
-	}
-
-	private function asset_departments()
-	{
-		global $wpdb;
-		$table = Npcink_Device_Inventory_V3_Tables::assets();
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- One-time fallback reads current departments from the plugin-owned assets table when no department setting exists; caching would require invalidation on every asset write.
-		$rows = $wpdb->get_col(
-			$wpdb->prepare('SELECT DISTINCT department FROM %i WHERE department <> %s ORDER BY department ASC', $table, '')
-		);
-		if (!is_array($rows)) {
-			return array();
-		}
-		return Npcink_Device_Inventory_V3_Tables::normalize_departments($rows);
+		$options = Npcink_Device_Inventory_V3_Tables::options();
+		return Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($options['departments']);
 	}
 
 	private function asset_from_request($request)
@@ -957,8 +979,7 @@ class Npcink_Device_Inventory_Assets_Controller
 			'category' => (string) $row['category'],
 			'purchasePrice' => floatval($row['purchase_price']),
 			'secondHandMarketValue' => floatval($row['residual_value']),
-			'financialResidualValue' => floatval(isset($row['financial_residual_value']) ? $row['financial_residual_value'] : 0),
-			'residualValue' => floatval($row['residual_value']),
+			'financialResidualValue' => floatval($row['financial_residual_value']),
 			'metadata' => $this->decode_json(isset($row['metadata_json']) ? $row['metadata_json'] : '', array()),
 			'createdAt' => (string) $row['created_at'],
 			'updatedAt' => (string) $row['updated_at'],
