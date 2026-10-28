@@ -23,6 +23,12 @@ assertEqual(tomlVersion(desktopManifest), desktopVersion, "desktop Cargo version
 const desktopLock = JSON.parse(await read("ele-rs/package-lock.json"));
 assertEqual(desktopLock.version, desktopVersion, "desktop npm lock version");
 assertEqual(desktopLock.packages?.[""]?.version, desktopVersion, "desktop npm root lock version");
+const tauriRustLock = await read("ele-rs/src-tauri/Cargo.lock");
+const tauriRustEntry = tauriRustLock.split("[[package]]").find((block) => block.includes('name = "tauri"\n'));
+const tauriRustVersion = tomlVersion(tauriRustEntry || "");
+const tauriApiVersion = desktopLock.packages?.["node_modules/@tauri-apps/api"]?.version || "";
+assertEqual(tauriApiVersion.split(".").slice(0, 2).join("."), tauriRustVersion.split(".").slice(0, 2).join("."), "Tauri JS API / Rust major.minor");
+assertEqual(desktopLock.packages?.[""]?.dependencies?.["@tauri-apps/api"], desktopPackage.dependencies?.["@tauri-apps/api"], "Tauri API npm dependency lock");
 for (const [file, names] of [
   ["ele-rs/Cargo.lock", ["npcink-device-agent"]],
   ["ele-rs/src-tauri/Cargo.lock", ["npcink-device-agent", "npcink-device-agent-desktop"]],

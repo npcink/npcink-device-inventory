@@ -30,6 +30,6 @@
     "check:submission": "node scripts/check-release-readiness.mjs --submission",
     "check:lifecycle": "php tests/lifecycle-fixtures.php",
     "check:observation-repository": "php tests/observation-repository-fixtures.php",
-    "check:release-tools": "node --test scripts/release-version-baseline.test.mjs scripts/release-checksums.test.mjs scripts/release-candidate.test.mjs ele-rs/scripts/windows-command-runner.test.mjs"
+    "check:release-tools": "node --test scripts/release-version-baseline.test.mjs scripts/version-contract.test.mjs scripts/release-checksums.test.mjs scripts/release-candidate.test.mjs ele-rs/scripts/windows-command-runner.test.mjs"
   }
 }

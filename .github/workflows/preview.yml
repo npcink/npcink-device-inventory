@@ -166,6 +166,9 @@ jobs:
           npm ci
           npm audit --audit-level=moderate
 
+      - name: Check paired product and Tauri dependency versions
+        run: npm run check:versions
+
       - name: Use stable Rust
         run: rustup show
 
