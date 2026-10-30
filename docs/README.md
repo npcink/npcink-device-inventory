@@ -4,6 +4,7 @@ This folder keeps the current product contracts, development guardrails, release
 
 ## Start Here
 
+- `session-closeout-2026-10-30.md`: a02/a03 history-to-document reconciliation, verified code and artifact state, local closeout checks, and remaining Windows/upload/release work; third requested chat is awaiting identification.
 - `development-playbook.md`: the working agreement for new changes: scope, evidence, contracts, testing, and release gates.
 - `development-and-release-governance-2026-08-13.md`: consolidated development lessons, failure modes, release gates, and agent working rules from the v3.1.4 hardening cycle.
 - `release-closeout-2026-08-21-v3.2.2.md`: final closeout for plugin 3.2.2 and Device Agent 0.4.2, including lightweight collection, department settings, GitHub/WordPress.org publishing, and reusable release rules.
@@ -24,7 +25,7 @@ This folder keeps the current product contracts, development guardrails, release
 - `windows-collection-acceptance-2026-10-27.md`: prepared real Windows matrix, fault cases, timing/size evidence and upload acceptance; execution deferred.
 - `local-acceptance-2026-10-27.md`: read-only acceptance of 180 existing computers, stored/REST fact equality, real detail samples, old snapshot coverage and the remaining Windows acceptance boundary.
 - `pre-release-review-2026-10-28.md`: Windows/release preflight findings, reused versions, stale ZIP evidence, smoke-script gaps, signed candidate publication and ordered acceptance gates.
-- `release-candidate-preparation-2026-10-28.md`: implemented Agent 0.4.5/plugin 3.2.4 release preparation, local package hash, regression evidence and unresolved Windows/network/Docker gates.
+- `release-candidate-preparation-2026-10-28.md`: implemented Agent 0.4.5/plugin 3.2.4 preparation, historical local package hash and regression evidence; subsequent Docker/network/Windows runner results are in `windows-preview-build-2026-10-28.md`.
 - `windows-preview-build-2026-10-28.md`: subsequent authorized M5 Docker acceptance, online submission gates, Windows preview build fixes, and installer verification.
 - `decisions/ADR-018-accept-immutable-release-candidates.md`: immutable signed drafts, manual publication, exact artifact hashes and the post-publication official updater smoke boundary.
 - `device-upload-troubleshooting-and-operations.md`: production upload troubleshooting, evidence, and recovery runbook.
@@ -96,6 +97,7 @@ historical unless a newer ADR explicitly restores them.
 
 ## Incidents And Review Follow-Ups
 
+- `asset-161-reconciliation-2026-10-14.md`: reinstall-induced duplicate asset, verified identity/observation/event repair, local backup hashes and reusable reconciliation rules.
 - `windows-identity-and-asset-reconciliation-incident-2026-08-05.md`: Windows collection failure and 32/35 identity reconciliation incident.
 - `asset-list-regexp-incident-2026-07-06.md`: asset list search incident note.
 - `plugin-check-db-cache-escaping-follow-up-2026-07-03.md`: Plugin Check and escaping follow-up.

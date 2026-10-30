@@ -1,5 +1,7 @@
 # Windows 0.4.5 测试包与隔离验收（2026-10-28）
 
+2026-10-30收尾复核：本地exe本体缺失，已从下述同一artifact恢复并重新核对ZIP/安装包哈希。该包仍对应`ff62c0c`，不含后来`89e6d89`的HTML错误提示修复；后续事项统一见[会话收尾记录](session-closeout-2026-10-30.md)。
+
 ## 授权及范围
 
 用户授权使用当前M5的Docker，并将当前候选代码提交、推送到专用测试分支运行Windows preview。本轮不合并master、不创建tag或正式Release，不向device.local写入测试数据。
