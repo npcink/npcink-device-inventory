@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use hmac::{Hmac, Mac};
 use rand::{distributions::Alphanumeric, Rng};
 use reqwest::blocking::Client;
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use reqwest::Method;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -144,6 +144,7 @@ fn send_json(
 
     let mut request = client
         .request(method, site)
+        .header(ACCEPT, "application/json")
         .header(CONTENT_TYPE, "application/json")
         .body(body_json);
 
@@ -243,15 +244,22 @@ fn validate_payload<T: Serialize>(body: &T) -> Result<()> {
 }
 
 fn parse_submit_response(status: reqwest::StatusCode, text: String) -> Result<Value> {
+    let payload = serde_json::from_str::<Value>(&text).map_err(|_| {
+        anyhow::anyhow!(
+            "站点返回了网页或其他非 JSON 内容（HTTP {status}），无法确认操作结果。请核对站点地址及设备接口，检查登录限制、防火墙或代理设置；若仍失败，请联系站点管理员核对服务器日志。"
+        )
+    })?;
     if !status.is_success() {
-        let payload = serde_json::from_str::<Value>(&text).unwrap_or(Value::Null);
         let code = payload
             .get("code")
             .and_then(Value::as_str)
-            .unwrap_or_default();
-        let server_message = payload
-            .get("message")
-            .and_then(Value::as_str)
+            .filter(|code| {
+                !code.is_empty()
+                    && code.len() <= 64
+                    && code
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            })
             .unwrap_or_default();
         let guidance = match (status.as_u16(), code) {
             (401, "unsupported_signature_version") => {
@@ -267,21 +275,17 @@ fn parse_submit_response(status: reqwest::StatusCode, text: String) -> Result<Va
             (413, _) => "采集数据超过服务器限制，请导出排障包并联系管理员。",
             (429, _) => "上传过于频繁，请稍后再试。",
             (500..=599, _) => "服务器暂时无法处理上传，请稍后重试并查看 WordPress 日志。",
-            _ => "请检查站点地址和插件状态；如仍失败，请复制技术详情给管理员。",
+            _ => "请检查站点地址和插件状态；如仍失败，请将 HTTP 状态和错误码提供给管理员。",
         };
-        let technical = if server_message.is_empty() {
-            code
-        } else {
-            server_message
-        };
-        if technical.is_empty() {
+        // Server messages can contain WordPress HTML, stack traces, or reflected input.
+        // Only expose bounded machine codes alongside locally owned guidance.
+        if code.is_empty() {
             bail!("上传失败（HTTP {status}）。{guidance}");
         }
-        bail!("上传失败（HTTP {status}）。{guidance}\n技术详情：{technical}");
+        bail!("上传失败（HTTP {status}）。{guidance}\n错误码：{code}");
     }
 
-    serde_json::from_str::<Value>(&text)
-        .with_context(|| format!("服务器返回成功状态 {status}，但响应格式不是有效 JSON"))
+    Ok(payload)
 }
 
 pub(crate) fn build_observation_v3(upload_note: &str, data: &Value) -> Result<Value> {
@@ -818,9 +822,66 @@ mod tests {
         );
 
         let error = result.expect_err("HTML must not be accepted as a successful upload response");
-        assert!(error
-            .to_string()
-            .contains("服务器返回成功状态 200 OK，但响应格式不是有效 JSON"));
+        assert!(error.to_string().contains("HTTP 200 OK"));
+        assert!(error.to_string().contains("非 JSON"));
+        assert!(!error.to_string().contains("<!doctype"));
+    }
+
+    #[test]
+    fn server_markup_and_unbounded_messages_never_reach_upload_errors() {
+        for message in [
+            "<p>发生错误</p><script>private-server-detail</script>".to_string(),
+            "<!DOCTYPE html><html><body>private-server-detail</body></html>".to_string(),
+            "private-server-detail".repeat(2000),
+        ] {
+            let error = parse_submit_response(
+                reqwest::StatusCode::FORBIDDEN,
+                json!({"code": "rest_forbidden", "message": message}).to_string(),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(error.contains("HTTP 403 Forbidden"));
+            assert!(error.contains("错误码：rest_forbidden"));
+            assert!(error.contains("没有上传权限"));
+            assert!(!error.contains("<"));
+            assert!(!error.contains("private-server-detail"));
+            assert!(error.chars().count() < 300);
+        }
+        for code in ["<html>private</html>", "forged\nmessage", &"x".repeat(1000)] {
+            let error = parse_submit_response(
+                reqwest::StatusCode::BAD_REQUEST,
+                json!({"code": code, "message": "private-server-detail"}).to_string(),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(!error.contains("错误码："));
+            assert!(!error.contains("private"));
+        }
+    }
+
+    #[test]
+    fn non_json_errors_report_the_http_boundary_without_guessing_token_failure() {
+        for status in [
+            reqwest::StatusCode::UNAUTHORIZED,
+            reqwest::StatusCode::FORBIDDEN,
+            reqwest::StatusCode::BAD_GATEWAY,
+        ] {
+            for body in [
+                "<!doctype html><title>private-html-body</title>",
+                "upstream unavailable",
+                "",
+            ] {
+                let error = parse_submit_response(status, body.to_string())
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains(&format!("HTTP {status}")));
+                assert!(error.contains("非 JSON"));
+                assert!(error.contains("防火墙"));
+                assert!(!error.contains("授权码无效"));
+                assert!(!error.contains("private-html-body"));
+                assert!(!error.contains("upstream unavailable"));
+            }
+        }
     }
 
     #[test]
@@ -833,7 +894,8 @@ mod tests {
             .expect_err("unauthorized upload must fail")
             .to_string();
         assert!(error.contains("授权码无效、已禁用或签名校验失败"));
-        assert!(error.contains("技术详情：Device token is invalid."));
+        assert!(error.contains("错误码：invalid_token"));
+        assert!(!error.contains("Device token is invalid."));
     }
 
     #[test]
