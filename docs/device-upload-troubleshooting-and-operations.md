@@ -6,6 +6,8 @@
 
 完整事故事实见 [`windows-identity-and-asset-reconciliation-incident-2026-08-05.md`](windows-identity-and-asset-reconciliation-incident-2026-08-05.md)；身份算法与错误语义见 [`identity-contract.md`](identity-contract.md)。
 
+180/36/old-87整理、42独立保留、数据库ID与资产编号混淆及重复主板序列号的后续经验，见[2026年9月身份清查复盘](identity-reconciliation-retrospective-2026-09.md)。其中历史v1迁移建议已由ADR-017退出，当前排障遵循现行身份契约。
+
 ## 系统职责边界
 
 ```text

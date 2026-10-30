@@ -4,7 +4,7 @@ This folder keeps the current product contracts, development guardrails, release
 
 ## Start Here
 
-- `session-closeout-2026-10-30.md`: a02/a03 history-to-document reconciliation, verified code and artifact state, local closeout checks, and remaining Windows/upload/release work; third requested chat is awaiting identification.
+- `session-closeout-2026-10-30.md`: a01/a02/a03 history-to-document reconciliation, verified code and artifact state, local closeout checks, and remaining identity/Windows/upload/release work.
 - `development-playbook.md`: the working agreement for new changes: scope, evidence, contracts, testing, and release gates.
 - `development-and-release-governance-2026-08-13.md`: consolidated development lessons, failure modes, release gates, and agent working rules from the v3.1.4 hardening cycle.
 - `release-closeout-2026-08-21-v3.2.2.md`: final closeout for plugin 3.2.2 and Device Agent 0.4.2, including lightweight collection, department settings, GitHub/WordPress.org publishing, and reusable release rules.
@@ -97,6 +97,7 @@ historical unless a newer ADR explicitly restores them.
 
 ## Incidents And Review Follow-Ups
 
+- `identity-reconciliation-retrospective-2026-09.md`: a01 identity audit/backfill, asset 180/36/old-87 repairs, independent asset 42, identifier confusion, repeated-board rules and remaining recollection work.
 - `asset-161-reconciliation-2026-10-14.md`: reinstall-induced duplicate asset, verified identity/observation/event repair, local backup hashes and reusable reconciliation rules.
 - `windows-identity-and-asset-reconciliation-incident-2026-08-05.md`: Windows collection failure and 32/35 identity reconciliation incident.
 - `asset-list-regexp-incident-2026-07-06.md`: asset list search incident note.
