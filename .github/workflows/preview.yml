@@ -205,6 +205,20 @@ jobs:
         working-directory: ele-rs
         run: npm run tauri:build
 
+      - name: Windows collector smoke (no submission)
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./ele-rs/scripts/windows-smoke-test.ps1 -SkipBuild -SkipCargoTest -SkipSubmit -SkipDiagnostics
+
+      - name: Save Windows smoke summary
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: preview-windows-collector-smoke-summary
+          path: ele-rs/smoke-reports/**/windows-smoke-report.json
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Upload Windows installer
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
