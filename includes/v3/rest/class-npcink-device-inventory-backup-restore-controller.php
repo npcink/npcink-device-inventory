@@ -386,9 +386,6 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 		if (array_key_exists('renewalMaxResidualRate', $settings)) {
 			$options['renewal_max_residual_rate'] = min(100, max(0, floatval($settings['renewalMaxResidualRate'])));
 		}
-		if (array_key_exists('countAvailableAssetsOnly', $settings)) {
-			$options['count_available_assets_only'] = (bool) $settings['countAvailableAssetsOnly'];
-		}
 		if (array_key_exists('departments', $settings)) {
 			$options['departments'] = Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($settings['departments']);
 		}

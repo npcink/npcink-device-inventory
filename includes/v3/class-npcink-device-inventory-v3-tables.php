@@ -52,7 +52,6 @@ class Npcink_Device_Inventory_V3_Tables
 			'renewal_min_memory_gb' => 8,
 			'renewal_min_disk_gb' => 256,
 			'renewal_max_residual_rate' => 20,
-			'count_available_assets_only' => true,
 			'departments' => array(self::DEFAULT_DEPARTMENT),
 			'delete_data_on_uninstall' => false,
 		);

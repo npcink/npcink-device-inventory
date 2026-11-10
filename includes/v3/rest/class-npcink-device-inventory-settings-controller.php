@@ -112,9 +112,6 @@ class Npcink_Device_Inventory_Settings_Controller
 		if (array_key_exists('renewalMaxResidualRate', $params)) {
 			$options['renewal_max_residual_rate'] = min(100, max(0, floatval($params['renewalMaxResidualRate'])));
 		}
-		if (array_key_exists('countAvailableAssetsOnly', $params)) {
-			$options['count_available_assets_only'] = (bool) $params['countAvailableAssetsOnly'];
-		}
 		if (array_key_exists('departments', $params)) {
 			$options['departments'] = Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($params['departments']);
 		}
@@ -230,7 +227,6 @@ class Npcink_Device_Inventory_Settings_Controller
 			'renewalMinMemoryGb' => intval($options['renewal_min_memory_gb']),
 			'renewalMinDiskGb' => intval($options['renewal_min_disk_gb']),
 			'renewalMaxResidualRate' => floatval($options['renewal_max_residual_rate']),
-			'countAvailableAssetsOnly' => !empty($options['count_available_assets_only']),
 			'departments' => Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($options['departments']),
 			'deleteDataOnUninstall' => !empty($options['delete_data_on_uninstall']),
 			'clientTokens' => $tokens,

@@ -45,6 +45,23 @@ try {
 	$observe($archived, '2026-01-02 00:00:00', 'archived');
 	$observe($custom, '2026-01-02 00:00:00', 'custom');
 	wp_set_current_user(get_user_by('login', 'npcink-e2e-admin')->ID);
+	$removed_route = rest_do_request(new WP_REST_Request('GET', '/npcink-device-inventory/v1/observations'));
+	npcink_integration_assert($removed_route->get_status() === 404 && $removed_route->get_data()['code'] === 'rest_no_route', 'Unused global observation route must be absent.');
+	$history = rest_do_request(new WP_REST_Request('GET', '/npcink-device-inventory/v1/assets/' . $first['uuid'] . '/observations'));
+	npcink_integration_assert($history->get_status() === 200 && count($history->get_data()['data']) === 3, 'Per-asset observation history must remain intact.');
+	npcink_integration_assert(rest_do_request(new WP_REST_Request('GET', '/npcink-device-inventory/v1/analysis/collection-trends'))->get_status() === 200, 'Collection trends must remain available.');
+	$legacy_options = Npcink_Device_Inventory_V3_Tables::options();
+	$legacy_options['count_available_assets_only'] = true;
+	$legacy_options['unrelated_extension'] = 'preserved';
+	update_option(Npcink_Device_Inventory_V3_Tables::OPTION, $legacy_options);
+	$settings_request = new WP_REST_Request('PATCH', '/npcink-device-inventory/v1/settings');
+	$settings_request->set_header('content-type', 'application/json');
+	$settings_request->set_body(wp_json_encode(array('countAvailableAssetsOnly' => false, 'depreciationPeriodMonths' => 48)));
+	$settings_response = rest_do_request($settings_request);
+	npcink_integration_assert($settings_response->get_status() === 200 && !array_key_exists('countAvailableAssetsOnly', $settings_response->get_data()['data']), 'Settings must ignore the retired key and omit it from responses.');
+	$saved_options = get_option(Npcink_Device_Inventory_V3_Tables::OPTION);
+	npcink_integration_assert($saved_options['depreciation_period_months'] === 48 && $saved_options['unrelated_extension'] === 'preserved' && $saved_options['count_available_assets_only'] === true, 'Settings update must preserve unrelated stored data and ignore the retired key.');
+	echo "Real removed-route, asset history and legacy settings compatibility passed.\n";
 	$request_page = static function ($params) {
 		$request = new WP_REST_Request('GET', '/npcink-device-inventory/v1/analysis/hardware-observations');
 		$request->set_query_params($params);

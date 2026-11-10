@@ -409,6 +409,7 @@ npcink_assert($exported_backup['assets'][0]['secondHandMarketValue'] === 100.0, 
 npcink_assert($exported_backup['assets'][0]['financialResidualValue'] === 50.0, 'backup must export financial residual value independently');
 npcink_assert(count($exported_backup['identities'][0]['identities']) === 1, 'server export must group identities by asset');
 npcink_assert($export_result['meta']['counts']['observations'] === 1, 'server export must report restorable section counts');
+npcink_assert(!array_key_exists('countAvailableAssetsOnly', $exported_backup['settings']), 'exports must omit the unused counting setting');
 npcink_assert($exported_backup['settings']['renewalAgeYears'] === 5, 'server export must include the renewal age threshold');
 npcink_assert($exported_backup['settings']['renewalMinMemoryGb'] === 8, 'server export must include the renewal memory threshold');
 npcink_assert($exported_backup['settings']['renewalMinDiskGb'] === 256, 'server export must include the renewal disk threshold');
@@ -438,6 +439,7 @@ $settings_backup = array(
 	'schema' => 'npcink-device-inventory/v3-admin-export',
 	'exportedAt' => '2026-07-06T00:00:00+00:00',
 	'settings' => array(
+		'countAvailableAssetsOnly' => false,
 		'renewalAgeYears' => 7,
 		'renewalMinMemoryGb' => 16,
 		'renewalMinDiskGb' => 512,
@@ -448,6 +450,7 @@ $npcink_updated_options = array();
 $settings_restore = npcink_restore($settings_backup, false);
 npcink_assert($settings_restore instanceof WP_REST_Response, 'renewal settings restore should succeed');
 $restored_options = $npcink_updated_options[Npcink_Device_Inventory_V3_Tables::OPTION];
+npcink_assert(!array_key_exists('count_available_assets_only', $restored_options), 'legacy counting keys must be ignored without rejecting other settings');
 npcink_assert($restored_options['renewal_age_years'] === 7, 'restore must apply the renewal age threshold');
 npcink_assert($restored_options['renewal_min_memory_gb'] === 16, 'restore must apply the renewal memory threshold');
 npcink_assert($restored_options['renewal_min_disk_gb'] === 512, 'restore must apply the renewal disk threshold');

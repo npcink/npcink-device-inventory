@@ -140,18 +140,6 @@ require_once __DIR__ . '/../includes/v3/repositories/class-npcink-device-invento
 $wpdb->queries = array();
 $wpdb->args = array();
 $observations = new Npcink_Device_Inventory_Observation_Repository();
-$observations->list_all(
-	array(
-		'page' => 1,
-		'pageSize' => 20,
-		'source' => '',
-		'search' => '',
-	)
-);
-npcink_asset_search_assert(count($wpdb->queries) === 2, 'global observation list should run count and select queries');
-npcink_asset_search_assert(strpos($wpdb->queries[0], "a.status <> 'deleted'") !== false, 'global observation count must exclude archived assets');
-npcink_asset_search_assert(strpos($wpdb->queries[1], "a.status <> 'deleted'") !== false, 'global observation rows must exclude archived assets');
-
 $wpdb->queries = array();
 $wpdb->args = array();
 $observations->daily_counts_between('2026-07-01 00:00:00', '2026-08-01 00:00:00');

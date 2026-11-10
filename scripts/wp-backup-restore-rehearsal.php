@@ -111,7 +111,6 @@ $backup = array(
 		'assetNumberPrefix' => 'E2E',
 		'depreciationPeriodMonths' => 24,
 		'defaultResidualRate' => 8,
-		'countAvailableAssetsOnly' => true,
 	),
 	'assets' => array(
 		array(

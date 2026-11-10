@@ -196,7 +196,6 @@ class Npcink_Device_Inventory_Asset_Repository
 
 class Npcink_Device_Inventory_Identity_Repository
 {
-	const CLAIM_CONFLICT = 'conflict';
 	public $cache_invalidations = 0;
 	public function invalidate_cache() { $this->cache_invalidations++; }
 }
@@ -277,8 +276,19 @@ function get_option($name, $fallback = false)
 	return array('departments' => array('未分配', 'IT', '财务'));
 }
 
+class WP_REST_Server
+{
+	const READABLE = 'GET';
+	const CREATABLE = 'POST';
+	const EDITABLE = 'POST, PUT, PATCH';
+	const DELETABLE = 'DELETE';
+}
+
+$registered_routes = array();
 function register_rest_route($namespace, $route, $args)
 {
+	global $registered_routes;
+	$registered_routes[$route] = $args;
 	return true;
 }
 
@@ -333,6 +343,16 @@ function npcink_asset_write_controller($rows)
 
 $wpdb = new Npcink_Asset_Write_Wpdb();
 list($controller) = npcink_asset_write_controller(array());
+$controller->register_routes();
+$identity_routes = $registered_routes['/assets/(?P<uuid>[A-Za-z0-9_-]+)/identities'];
+npcink_asset_write_assert(count($identity_routes) === 1 && $identity_routes[0]['methods'] === 'GET', 'identity REST surface must remain read-only');
+npcink_asset_write_assert($identity_routes[0]['callback'][1] === 'get_identities', 'identity read access must remain available');
+
+npcink_asset_write_assert(!isset($registered_routes['/observations']), 'unused global observation route must not be registered');
+foreach (array('/assets/(?P<uuid>[A-Za-z0-9_-]+)/observations', '/analysis/hardware-observations', '/analysis/collection-trends') as $route) {
+	npcink_asset_write_assert(isset($registered_routes[$route]), 'asset history and analysis routes must remain available: ' . $route);
+}
+
 $trend_observations = new Npcink_Device_Inventory_Observation_Repository();
 $trend_observations->daily_counts = array(
 	array('day' => '2026-07-14', 'count' => '2'),
@@ -506,16 +526,6 @@ npcink_asset_write_assert($race_events->records === array(), 'database duplicate
 
 $wpdb = new Npcink_Asset_Write_Wpdb();
 list($controller, $assets, $events) = npcink_asset_write_controller($rows);
-$legacy_identity = $controller->create_identity(
-	new Npcink_Asset_Write_Request(
-		array(
-			'uuid' => $first_uuid,
-			'type' => 'stable_device_id_v3',
-			'value' => 'legacy-identity',
-		)
-	)
-);
-npcink_asset_write_assert(is_wp_error($legacy_identity) && $legacy_identity->get_error_code() === 'invalid_identity', 'manual identity writes must use the current v2 contract');
 $obsolete_issue_event = $controller->create_event(
 	new Npcink_Asset_Write_Request(
 		array(

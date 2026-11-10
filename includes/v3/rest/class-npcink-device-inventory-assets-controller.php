@@ -7,7 +7,6 @@ if (!defined('ABSPATH')) {
 class Npcink_Device_Inventory_Assets_Controller
 {
 	const ASSET_TYPES = array('computer', 'custom');
-	const IDENTITY_TYPES = array('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2');
 	const ASSET_STATUSES = array('active', 'inactive', 'maintenance', 'retired', 'deleted');
 	const MAX_BATCH_SIZE = 100;
 
@@ -101,11 +100,6 @@ class Npcink_Device_Inventory_Assets_Controller
 					'callback' => array($this, 'get_identities'),
 					'permission_callback' => array($this, 'admin_permissions_check'),
 				),
-				array(
-					'methods' => WP_REST_Server::CREATABLE,
-					'callback' => array($this, 'create_identity'),
-					'permission_callback' => array($this, 'admin_permissions_check'),
-				),
 			)
 		);
 
@@ -142,16 +136,6 @@ class Npcink_Device_Inventory_Assets_Controller
 			array(
 				'methods' => WP_REST_Server::READABLE,
 				'callback' => array($this, 'get_all_events'),
-				'permission_callback' => array($this, 'admin_permissions_check'),
-			)
-		);
-
-		register_rest_route(
-			'npcink-device-inventory/v1',
-			'/observations',
-			array(
-				'methods' => WP_REST_Server::READABLE,
-				'callback' => array($this, 'get_all_observations'),
 				'permission_callback' => array($this, 'admin_permissions_check'),
 			)
 		);
@@ -534,64 +518,6 @@ class Npcink_Device_Inventory_Assets_Controller
 		return rest_ensure_response(array('data' => array_map(array($this, 'format_identity'), $items)));
 	}
 
-	public function create_identity($request)
-	{
-		$asset = $this->asset_from_request($request);
-		if (is_wp_error($asset)) {
-			return $asset;
-		}
-		$params = $request->get_json_params();
-		if (!is_array($params) || !isset($params['type'], $params['value']) || !is_scalar($params['type']) || !is_scalar($params['value'])) {
-			return Npcink_Device_Inventory_V3_Response::error('invalid_identity', 'Identity type and value are required.', 422);
-		}
-		$type = sanitize_key((string) $params['type']);
-		$value = sanitize_text_field((string) $params['value']);
-		$confidence = isset($params['confidence']) && is_numeric($params['confidence']) ? floatval($params['confidence']) : 100;
-		if (!in_array($type, self::IDENTITY_TYPES, true) || $value === '' || $this->text_length($value) > 191 || $confidence < 0 || $confidence > 100) {
-			return Npcink_Device_Inventory_V3_Response::error('invalid_identity', 'Identity fields are invalid.', 422);
-		}
-		if (!$this->begin_transaction()) {
-			return Npcink_Device_Inventory_V3_Response::error('transaction_start_failed', 'Failed to start identity transaction.', 500);
-		}
-		$claim = $this->identities->claim(
-			intval($asset['id']),
-			array(
-				'type' => $type,
-				'value' => $value,
-				'confidence' => $confidence,
-				'source' => 'manual',
-			),
-			!empty($params['isPrimary'])
-		);
-		if ($claim['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_CONFLICT) {
-			$this->rollback_transaction();
-			return Npcink_Device_Inventory_V3_Response::error(
-				'identity_conflict',
-				'Identity is already owned by another asset.',
-				409,
-				array('ownerAssetId' => $claim['ownerAssetId'])
-			);
-		}
-		if ($claim['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_INVALID) {
-			$this->rollback_transaction();
-			return Npcink_Device_Inventory_V3_Response::error('invalid_identity', 'Identity type and value are required.', 422);
-		}
-		if ($claim['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_ERROR) {
-			$this->rollback_transaction();
-			return Npcink_Device_Inventory_V3_Response::error('identity_claim_failed', 'Failed to claim identity.', 500);
-		}
-		if ($claim['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_INSERTED) {
-			if (!$this->event_service->record(intval($asset['id']), 'manual', 'identity_added', 'Asset identity added in admin.')) {
-				return $this->rollback_error('event_create_failed', 'Failed to record identity claim.');
-			}
-		}
-		if (!$this->commit_transaction()) {
-			return $this->rollback_error('transaction_commit_failed', 'Failed to commit identity transaction.');
-		}
-		$items = $this->identities->list_for_asset(intval($asset['id']));
-		return rest_ensure_response(array('data' => array_map(array($this, 'format_identity'), $items)));
-	}
-
 	public function get_observations($request)
 	{
 		$asset = $this->asset_from_request($request);
@@ -631,22 +557,6 @@ class Npcink_Device_Inventory_Assets_Controller
 			)
 		);
 		$items = array_map(array($this, 'format_event'), $result['items']);
-		return rest_ensure_response(
-			Npcink_Device_Inventory_V3_Response::paginated($items, $result['page'], $result['pageSize'], $result['total'])
-		);
-	}
-
-	public function get_all_observations($request)
-	{
-		$result = $this->observations->list_all(
-			array(
-				'page' => $request->get_param('page') ?: 1,
-				'pageSize' => $request->get_param('pageSize') ?: 20,
-				'source' => $request->get_param('source'),
-				'search' => $request->get_param('search'),
-			)
-		);
-		$items = array_map(array($this, 'format_observation'), $result['items']);
 		return rest_ensure_response(
 			Npcink_Device_Inventory_V3_Response::paginated($items, $result['page'], $result['pageSize'], $result['total'])
 		);
