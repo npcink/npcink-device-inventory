@@ -157,7 +157,7 @@ npm run tauri:dev
 - macOS Apple Silicon
 - 同时存在 Wi-Fi、有线网、虚拟网卡的机器
 
-## 0.4.5 候选验收
+## 0.4.6 候选验收
 
 - rc.2 将概览合并到设置页本机信息：十项字段、两列布局，窄窗口切换单列；显卡和显示器支持多条换行。当前保留设置、排障、技术详情三个 TAB；运行监控已按 [ADR-019](../docs/decisions/ADR-019-focus-on-inventory-and-upload.md) 移除。
 

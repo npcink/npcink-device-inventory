@@ -75,10 +75,11 @@ The plugin does not transmit this data to Npcink or any third-party server durin
 == Changelog ==
 
 = 3.2.4 =
-* Pair with Device Agent 0.4.5: collect detailed memory, 64-bit DXGI graphics memory, physical storage relationships and query diagnostics within bounded budgets.
+* Pair with Device Agent 0.4.6: collect detailed memory, 64-bit DXGI graphics memory, physical storage relationships and query diagnostics within bounded budgets.
 * Preserve successfully collected records when a query partially fails or times out; show collected fields in eight detail groups and hide empty fields by default.
 * Require request signatures v2; upgrade the plugin and Agent together. Existing upload authorization codes remain valid, but older Agent signatures are rejected.
 * Strengthen upload validation, idempotent receipts, identity ownership, backup restore and uninstall cleanup; remove obsolete compatibility paths.
+* Focus on inventory and upload diagnostics; simplify analysis, export and settings while preserving historical records.
 * Build immutable draft release candidates with version, checksum and signing verification before manual acceptance and publication.
 
 = 3.2.3 =
@@ -204,7 +205,7 @@ The plugin does not transmit this data to Npcink or any third-party server durin
 == Upgrade Notice ==
 
 = 3.2.4 =
-Requires Device Agent 0.4.5 and HTTPS. Older request signatures are rejected; existing authorization codes remain valid. Back up the database before upgrading.
+Requires Device Agent 0.4.6 and HTTPS. Older request signatures are rejected; existing authorization codes remain valid. Back up the database before upgrading.
 
 
 = 3.1.0 =
