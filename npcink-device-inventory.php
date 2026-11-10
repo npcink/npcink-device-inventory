@@ -18,7 +18,6 @@
  * Description:       设备资产管理插件，提供设备录入、客户端上报、后台台账和变更记录。
  * Version:           3.2.4
  * Requires at least: 6.5
- * Tested up to:      7.1
  * Requires PHP:      7.4
  * Author:            Npcink
  * Author URI:        https://www.npc.ink

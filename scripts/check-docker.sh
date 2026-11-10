@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${ROOT_DIR}/docker-compose.test.yml"
 PROJECT_NAME="npcink-device-inventory-check-$$-${RANDOM}"
-PLUGIN_CHECK_VERSION="${NPCINK_PLUGIN_CHECK_VERSION:-2.0.0}"
+PLUGIN_CHECK_VERSION="${NPCINK_PLUGIN_CHECK_VERSION:-2.2.0}"
 PLUGIN_ZIP="${ROOT_DIR}/release/npcink-device-inventory.zip"
 SUBMISSION_ZIP="${ROOT_DIR}/sj/npcink-device-inventory.zip"
 SUBMISSION_MANIFEST="${ROOT_DIR}/sj/package-manifest.json"

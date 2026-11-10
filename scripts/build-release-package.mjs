@@ -125,13 +125,14 @@ async function updateSubmissionManifest(zipPath) {
   const manifest = JSON.parse(await readFile(submissionManifest, "utf8"));
   const metadata = await zipMetadata(zipPath);
   const pluginSource = await readFile(path.join(repoRoot, "npcink-device-inventory.php"), "utf8");
+  const readmeSource = await readFile(path.join(repoRoot, "README.txt"), "utf8");
   const header = (name) => pluginSource.match(new RegExp(`^[ \\t*]*${name}:\\s*(.+)$`, "m"))?.[1].trim() || "";
   manifest.plugin = {
     ...manifest.plugin,
     name: header("Plugin Name"),
     version: header("Version"),
     requires_at_least: header("Requires at least"),
-    tested_up_to: header("Tested up to"),
+    tested_up_to: readmeSource.match(/^Tested up to:\s*(.+)$/m)?.[1].trim() || "",
     requires_php: header("Requires PHP"),
     license: header("License"),
   };

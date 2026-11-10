@@ -1,5 +1,6 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { createRequire } from "node:module";
 //配置路径
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,12 +9,50 @@ const projectDir = fileURLToPath(new URL(".", import.meta.url));
 
 const site = "/wp-content/plugins/npcink-device-inventory/";
 
+// WordPress owns the production React instance. Keep Vite's standalone dev runtime.
+function wordpressReact(): Plugin {
+  const require = createRequire(import.meta.url);
+  const modules = new Map([
+    ["react", ["window.React", Object.keys(require("react"))]],
+    ["react-dom", ["window.ReactDOM", Object.keys(require("react-dom"))]],
+    ["react-dom/client", ["window.wp.element", ["createRoot", "hydrateRoot"]]],
+  ] as const);
+  const prefix = "\0wordpress-react:";
+  return {
+    name: "wordpress-react",
+    enforce: "pre",
+    apply: "build",
+    resolveId(source) {
+      if (modules.has(source)) return prefix + source;
+    },
+    load(id) {
+      if (!id.startsWith(prefix)) return;
+      const [global, names] = modules.get(id.slice(prefix.length))!;
+      return `const runtime = ${global};\nexport default runtime;\n` + names
+        .filter((name) => !name.startsWith("__"))
+        .map((name) => `export const ${name} = runtime.${name};`)
+        .join("\n");
+    },
+    generateBundle(_options, bundle) {
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type !== "chunk") continue;
+        for (const id of Object.keys(chunk.modules)) {
+          if (/[/\\]node_modules[/\\](react|react-dom)[/\\]/.test(id)) {
+            this.error(`Production must use WordPress React, found bundled module: ${id}`);
+          }
+        }
+      }
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const isProd = mode === "production";
   const devProxyTarget = process.env.WP_DEV_PROXY_TARGET;
 
   return {
-    plugins: [react()],
+    plugins: [react(isProd ? { jsxRuntime: "classic" } : {}), ...(isProd ? [wordpressReact()] : [])],
+    ...(isProd ? { oxc: { jsx: { pragma: "window.React.createElement", pragmaFrag: "window.React.Fragment" } } } : {}),
     build: {
       manifest: true,
       rollupOptions: {
