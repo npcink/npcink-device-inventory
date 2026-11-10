@@ -2,7 +2,7 @@
 
 ## 目的
 
-本规范用于新增或修改 WordPress 管理端的分析、汇总、筛选、下钻和设备只读详情。它补充 [`development-playbook.md`](development-playbook.md)；架构边界以 [`ADR-009`](decisions/ADR-009-restore-read-only-analysis.md) 为准。
+本规范用于新增或修改 WordPress 管理端的分析、汇总、筛选、下钻和设备只读详情。它补充 [`development-playbook.md`](development-playbook.md)；架构边界以 [`ADR-009`](decisions/ADR-009-restore-read-only-analysis.md) 为准；评分、财务补齐提醒和更新计划草案的收缩以 [ADR-019](decisions/ADR-019-focus-on-inventory-and-upload.md) 为准。
 
 ## 1. 产品边界
 
@@ -20,7 +20,9 @@
 
 ### 缺失值
 
-- 缺失金额显示“未登记”，不得按零参与总额、折价或残值率。
+- 缺失金额与合法零值分别处理；报废和手动登记的零净值不属于资料缺项。
+- 资料缺项仅检查可行动的业务/硬件字段，不计算综合分数，也不要求普遍填写二手市场价。
+- 更新候选只提供依据和清单导出，不生成更新计划草案或采购预算。
 - 缺少计算所需任一字段时显示“无法计算”，不得猜测。
 - 缺少某次硬件字段不能解释为硬件拆除。
 - 空部门、`未分配` 和历史 `默认` 可在分析中归为待分配，但不得自动改写资产。

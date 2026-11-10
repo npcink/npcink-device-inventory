@@ -15,18 +15,14 @@
 
 ## 在 Windows 设备上运行
 
-推荐直接使用与设备编号对应的双击脚本，并保持 BAT 和 PowerShell 探针在同一目录：
+当前使用通用双击脚本，并保持 BAT 和 PowerShell 探针在同一目录：
 
 ```text
-windows-hardware-identity-probe-35.bat
-windows-hardware-identity-probe-161.bat
-windows-hardware-identity-probe-103.bat
-windows-hardware-identity-probe-174.bat
-windows-hardware-identity-probe-133.bat
+windows-hardware-identity-probe.bat
 windows-hardware-identity-probe.ps1
 ```
 
-双击对应的 BAT 后，JSON 会自动保存到当前用户桌面。
+双击 BAT 后输入设备编号（未知时可留空），JSON 自动保存到当前用户桌面。原五个编号专用 BAT 已合并。
 
 需要手动运行时，将 `ele-rs/scripts/windows-hardware-identity-probe.ps1` 复制到设备上，在 PowerShell 中运行：
 

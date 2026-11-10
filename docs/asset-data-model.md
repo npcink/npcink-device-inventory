@@ -124,12 +124,20 @@ provides a straight-line depreciation suggestion:
 
 `estimated carrying amount = max(terminal residual, purchase price − monthly depreciation × elapsed full months)`
 
-The calculation uses the explicit purchase date and falls back to the asset
-creation date when needed. `metadata.finance.financial_residual_mode` controls
+The calculation requires the explicit purchase date; an asset's creation date
+is never used as a substitute. `metadata.finance.financial_residual_mode` controls
 which value is effective:
 
 - `auto`: use the live estimated carrying amount in detail views, analysis, and exports.
 - `manual`: use `financial_residual_value` as an explicit carrying-amount override.
+
+For display and analysis, a manual zero, a calculated zero and a retired asset's
+zero are known values. An automatic value without enough calculation inputs or
+a positive saved amount is unknown (`null` in the frontend resolver). Unknown
+values appear as undetermined in details and blank in tabular exports; they are
+excluded from carrying-amount and depreciation totals. If no values can be
+resolved, the corresponding total is also undetermined. These frontend rules do
+not change the numeric REST, storage or backup field, or rewrite saved amounts.
 
 The internal `financial_residual_value` name remains for database, REST, and
 backup compatibility. It must not cause the current carrying amount to be
@@ -138,6 +146,25 @@ presented as the terminal residual value in user-facing copy.
 Assets without a mode default to `manual` when they already contain a positive
 financial residual value, preserving historical entries; otherwise they default
 to `auto`.
+
+Admin forms keep the manual amount separate from the live estimate. All three
+editors use the same serializer: automatic mode computes from the final submitted
+purchase price and date, rather than copying estimates into the form as inputs
+change. If the price or date is cleared or changed so an estimate cannot be
+computed, the numeric saved amount is zero and the frontend resolver treats it as
+unknown. An existing positive automatic amount is retained when its calculation
+inputs and mode have not changed and no new estimate is available. Manual zero
+remains an explicit known amount.
+
+Fields absent from a form submission preserve their purchase metadata; present
+empty fields intentionally clear it. Form editors take the canonical asset name
+and purchase price from the asset row, rather than an older duplicate in purchase
+metadata. Cards and details follow the same authority: `name` and `purchasePrice`
+come from the asset row, never from `metadata.purchase.title` or `.total`.
+New entries, edits, and spreadsheet imports no longer write those duplicate keys.
+Existing duplicates remain untouched for historical fidelity; independent purchase
+facts (quantity, date, order, platform, shop, purchaser, link, payment method) and
+unrelated extension fields remain supported.
 
 When an asset has the `retired` status, its historical `purchase_price` remains
 unchanged while `residual_value` and `financial_residual_value` are both forced

@@ -34,7 +34,7 @@ npm run check:identity
 ### 依赖及跨平台检查
 
 - 管理端、桌面端 npm 全依赖审计（包括开发依赖）以 moderate 为阻断门限，纳入本地总检查、质量 CI 及构建/发布工作流。
-- Windows CI 在单元测试后执行 `windows-smoke-test.ps1 -SkipBuild -SkipCargoTest -SkipSubmit -SkipDiagnostics`，校验 Windows/CPU/内存、v2 身份、完整采集和运行状态；artifact 仅保存步骤摘要。驱动差异、安装及签名自动更新仍需 Windows 实机验收。
+- Windows CI 在单元测试后执行 `windows-smoke-test.ps1 -SkipBuild -SkipCargoTest -SkipSubmit -SkipDiagnostics`，校验 Windows/CPU/内存、v2 身份和完整采集；artifact 仅保存步骤摘要。驱动差异、安装及签名自动更新仍需 Windows 实机验收。
 - Rust 当前仍有 5 条兼容上游未解决提示，详见 `docs/project-remediation-2026-10-26.md`；不设置忽略规则。
 
 ### 事务缓存和主身份回归（2026-10-27）

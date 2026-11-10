@@ -2,6 +2,8 @@
 
 Npcink Device Inventory 是一个 WordPress 设备资产管理插件，用于小型团队维护设备资产、采集快照、身份匹配和事件时间线。
 
+本轮已收缩运行监控、通用系统排障、完整度评分和更新计划草案，见[精简记录](docs/scope-simplification-2026-11-10.md)。
+
 当前产品范围、开发约束和发布入口见
 [`docs/development-playbook.md`](docs/development-playbook.md)。硬件身份以
 [`docs/identity-contract.md`](docs/identity-contract.md) 为准；历史 v1 身份
@@ -47,7 +49,7 @@ v3 使用统一资产模型，详细契约见 `docs/asset-data-model.md`。插�
 - `GET|POST /wp-json/npcink-device-inventory/v1/assets`：管理资产列表与新增资产。
 - `POST /wp-json/npcink-device-inventory/v1/assets/batch`：在一个事务中批量更新或归档资产；批量新增请使用资产新增接口逐条提交，或使用后续事务性导入接口。
 - `GET|PATCH|DELETE /wp-json/npcink-device-inventory/v1/assets/{uuid}`：资产详情、更新、软删除。
-- `GET|POST /wp-json/npcink-device-inventory/v1/assets/{uuid}/identities`：资产身份。
+- `GET /wp-json/npcink-device-inventory/v1/assets/{uuid}/identities`：只读查看资产身份；身份由采集入库或备份恢复流程认领。
 - `GET /wp-json/npcink-device-inventory/v1/assets/{uuid}/observations`：资产采集快照。
 - `GET|POST /wp-json/npcink-device-inventory/v1/assets/{uuid}/events`：资产事件时间线。
 - `GET|PATCH /wp-json/npcink-device-inventory/v1/settings`：插件设置。
