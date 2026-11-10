@@ -5,7 +5,8 @@
 | 需要了解的内容 | 当前入口 |
 | --- | --- |
 | 产品范围与开发约束 | [开发手册](development-playbook.md) |
-| 当前收尾与发布准备 | [2026-11-10 收尾](simplification-closeout-2026-11-10.md) |
+| 当前安装包与电脑更新 | [Agent 0.4.6 构建与交接](agent-0.4.6-build-and-handoff-2026-11-10.md) |
+| 源码精简收尾 | [2026-11-10 收尾](simplification-closeout-2026-11-10.md) |
 | 本轮范围收缩与验证 | [精简实施记录](scope-simplification-2026-11-10.md)、[ADR-019](decisions/ADR-019-focus-on-inventory-and-upload.md) |
 | 数据存储与资产生命周期 | [资产模型](asset-data-model.md) |
 | 设备身份与匹配 | [身份契约](identity-contract.md) |
