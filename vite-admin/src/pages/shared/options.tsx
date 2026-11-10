@@ -1,4 +1,4 @@
-import type { Asset, AssetInput, AssetListParams, AssetType, JsonRecord } from "@/type/v3";
+import type { Asset, AssetInput, AssetListParams, AssetType } from "@/type/v3";
 
 export const ASSET_TYPES: Array<{ label: string; value: AssetType }> = [
   { label: "电脑", value: "computer" },
@@ -60,10 +60,10 @@ export type AssetScope = (typeof ASSET_SCOPE_OPTIONS)[number]["value"];
 export type FinancialDataStatus = NonNullable<AssetListParams["financialDataStatus"]>;
 
 export const FINANCIAL_DATA_STATUS_OPTIONS: Array<{ label: string; value: FinancialDataStatus }> = [
-  { label: "缺采购价", value: "missing_purchase_price" },
-  { label: "缺二手市场价", value: "missing_second_hand_market_value" },
-  { label: "两项都缺", value: "missing_both" },
-  { label: "财务资料完整", value: "complete" },
+  { label: "采购价为零", value: "missing_purchase_price" },
+  { label: "二手市场价为零", value: "missing_second_hand_market_value" },
+  { label: "两项金额均为零", value: "missing_both" },
+  { label: "两项金额均大于零", value: "complete" },
 ];
 
 export interface SavedAssetFilter {
@@ -107,8 +107,6 @@ export interface AssetImportPreviewRow {
   key: string;
   rowNumber: number;
   input: AssetInput;
-  purchaseDate?: string;
-  manualHardware: JsonRecord;
   errors: string[];
   existing?: Asset;
   action: "create" | "update" | "skip" | "invalid";
@@ -139,10 +137,6 @@ export type AssetExportFieldKey =
 export type AssetExportScope = "current-filter" | "selected" | "computer" | "custom" | "all";
 
 export type AssetExportFormat = "xlsx" | "csv";
-
-export type AssetExportColorMode = "row" | "status-cell";
-
-export type AssetExportStatusColors = Record<string, string>;
 
 export const DEFAULT_ASSET_IMPORT_SECTIONS: AssetImportSection[] = ["basic", "finance", "hardware"];
 

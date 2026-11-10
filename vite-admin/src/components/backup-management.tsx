@@ -1,3 +1,4 @@
+import { HelpLabel } from "@/components/HelpLabel";
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { useMutation } from "@tanstack/react-query";
@@ -69,11 +70,8 @@ export const BackupManagementPanels = ({ onOpenImport }: { onOpenImport: () => v
     <>
       <div className="npcink-v3-tool-panel">
         <div>
-          <Title level={4}>JSON 备份导出</Title>
+          <Title level={4}><HelpLabel label="JSON 备份导出" description="电脑采集快照用于保留客户端上报的硬件历史；日常台账表格导出不需要。" /></Title>
           <Text type="secondary">给管理员完整迁移或归档，默认导出全部业务数据；不会导出客户端令牌密钥。</Text>
-          <Text type="secondary" className="npcink-v3-export-range-note">
-            电脑采集快照用于保留客户端上报的硬件历史；日常台账表格导出不需要。
-          </Text>
           <Checkbox.Group
             className="npcink-v3-checkbox-row"
             value={sections}

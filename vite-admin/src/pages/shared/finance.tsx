@@ -12,7 +12,7 @@ export const isComputerAsset = (asset?: Asset | null) =>
 
 export const assetPurchaseDateText = (asset: Asset) => {
   const purchase = getRecord(getRecord(asset.metadata).purchase);
-  return firstText(purchase.order_time, asset.createdAt);
+  return firstText(purchase.order_time);
 };
 
 export const calculateFinancialResidualValue = (
@@ -61,14 +61,16 @@ export const calculatedFinancialResidualForAsset = (asset: Asset, settings?: Inv
   );
 };
 
-export const effectiveFinancialResidualValue = (asset: Asset, settings?: InventorySettings) => {
+// null means unknown; zero is a valid manual, calculated or retired carrying amount.
+export const effectiveFinancialResidualValue = (asset: Asset, settings?: InventorySettings): number | null => {
   if (asset.status === "retired") {
     return 0;
   }
   if (financialResidualMode(asset) === "manual") {
     return Number(asset.financialResidualValue || 0);
   }
-  return calculatedFinancialResidualForAsset(asset, settings) ?? Number(asset.financialResidualValue || 0);
+  return calculatedFinancialResidualForAsset(asset, settings)
+    ?? (asset.financialResidualValue > 0 ? asset.financialResidualValue : null);
 };
 
 export const assetUpdateTimeText = (asset: Asset) =>

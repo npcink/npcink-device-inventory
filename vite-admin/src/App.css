@@ -228,7 +228,7 @@
 
 .npcink-v3-value-kpis {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
 }
 
@@ -245,14 +245,6 @@
 .npcink-v3-value-kpis strong {
   color: #111827;
   font-size: 24px;
-}
-
-.npcink-v3-analysis-score {
-  margin: 18px 0 8px;
-  color: #3157d5;
-  font-size: 48px;
-  font-weight: 700;
-  line-height: 1;
 }
 
 .npcink-v3-threshold-summary {
@@ -273,10 +265,6 @@
 .npcink-v3-settings-grid-four {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-top: 16px;
-}
-
-.npcink-v3-renewal-plan-kpis {
-  margin: 18px 0;
 }
 
 .npcink-v3-hardware-query-controls {
@@ -1675,18 +1663,6 @@
   gap: 10px;
 }
 
-.npcink-v3-export-field-order {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px;
-  background: #f8fafc;
-  border: 1px dashed #cfd6df;
-  border-radius: 8px;
-  max-height: 116px;
-  overflow-y: auto;
-}
-
 .npcink-v3-export-field-toolbar,
 .npcink-v3-export-field-toolbar > div:first-child {
   display: flex;
@@ -1697,52 +1673,6 @@
 
 .npcink-v3-export-field-toolbar > div:first-child {
   justify-content: flex-start;
-}
-
-.npcink-v3-export-field-order button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  color: #344054;
-  background: #fff;
-  border: 1px solid #d9dee7;
-  border-radius: 6px;
-  cursor: grab;
-}
-
-.npcink-v3-export-field-order button:active {
-  cursor: grabbing;
-}
-
-.npcink-v3-export-field-order span {
-  color: #98a2b3;
-}
-
-.npcink-v3-export-colors {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 12px;
-}
-
-.npcink-v3-export-colors.is-disabled {
-  opacity: .5;
-}
-
-.npcink-v3-export-colors > div {
-  display: grid;
-  grid-template-columns: minmax(72px, 1fr) 36px auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.npcink-v3-export-colors input[type="color"] {
-  width: 34px;
-  height: 28px;
-  padding: 2px;
-  background: #fff;
-  border: 1px solid #d9dee7;
-  border-radius: 6px;
 }
 
 .npcink-v3-export-preview-table {
@@ -2198,8 +2128,23 @@
   cursor: help;
 }
 
+.npcink-v3-help-trigger {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1;
+  cursor: help;
+}
+
+.npcink-v3-help-tooltip {
+  pointer-events: none;
+}
+
 .npcink-v3-form-label-with-help .anticon:hover,
-.npcink-v3-form-label-with-help .anticon:focus-visible {
+.npcink-v3-help-trigger:focus-visible .anticon {
   color: #1677ff;
 }
 
@@ -2507,10 +2452,6 @@
 
   .npcink-v3-export-config {
     overflow: visible;
-  }
-
-  .npcink-v3-export-colors {
-    grid-template-columns: 1fr;
   }
 
   .npcink-v3-export-scope-grid {

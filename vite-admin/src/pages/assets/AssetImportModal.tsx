@@ -1,3 +1,4 @@
+import { HelpLabel } from "@/components/HelpLabel";
 import { getSettings, importAssets } from "@/services/v3";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -15,6 +16,7 @@ import {
   message,
 } from "antd";
 import { useMemo, useState } from "react";
+import type { JsonRecord } from "@/type/v3";
 import { fetchAllAssets } from "@/pages/shared/assets";
 import { normalizeDepartmentList } from "@/pages/shared/departments";
 import {
@@ -43,7 +45,7 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
   const [rawText, setRawText] = useState("");
   const [strategy, setStrategy] = useState<AssetImportStrategy>("upsert-by-number");
   const [sections, setSections] = useState<AssetImportSection[]>(DEFAULT_ASSET_IMPORT_SECTIONS);
-  const [previewRows, setPreviewRows] = useState<AssetImportPreviewRow[]>([]);
+  const [sourceRows, setSourceRows] = useState<JsonRecord[] | null>(null);
   const settingsQuery = useQuery(["v3-settings"], getSettings, { enabled: open, staleTime: 60_000 });
   const departmentOptions = useMemo(
     () => normalizeDepartmentList(settingsQuery.data?.departments || []),
@@ -52,6 +54,17 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
   const existingAssetsQuery = useQuery(["v3-assets-import-index"], () => fetchAllAssets({ assetScope: "all", includeDeleted: true }), {
     enabled: open,
   });
+  const preflightReady = Boolean(
+    settingsQuery.data && existingAssetsQuery.data &&
+    !settingsQuery.isError && !settingsQuery.isFetching &&
+    !existingAssetsQuery.isError && !existingAssetsQuery.isFetching
+  );
+  const previewRows = useMemo(
+    () => sourceRows && preflightReady
+      ? buildImportPreviewRows(sourceRows, existingAssetsQuery.data || [], strategy, sections, departmentOptions)
+      : [],
+    [sourceRows, preflightReady, existingAssetsQuery.data, strategy, sections, departmentOptions]
+  );
   const importMutation = useMutation(
     async (rows: AssetImportPreviewRow[]) => {
       const executable = rows.filter((row) => row.action === "create" || row.action === "update");
@@ -67,16 +80,17 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
         onImported();
         message.success(`导入完成：新增 ${result.created} 条，更新 ${result.updated} 条，跳过 ${result.skipped} 条`);
         setRawText("");
-        setPreviewRows([]);
+        setSourceRows(null);
         onClose();
       },
     }
   );
 
   const parseSource = (text = rawText) => {
+    setSourceRows(null);
     try {
-      const rows = buildImportPreviewRows(parseTabularText(text), existingAssetsQuery.data || [], strategy, sections, departmentOptions);
-      setPreviewRows(rows);
+      const rows = parseTabularText(text);
+      setSourceRows(rows);
       if (!rows.length) {
         message.warning("没有识别到可导入的数据");
       }
@@ -92,22 +106,19 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
       onCancel={onClose}
       width={980}
       className="npcink-v3-import-modal"
-      destroyOnClose
+      destroyOnHidden
       footer={[
         <Button key="cancel" onClick={onClose}>
           取消
         </Button>,
-        <Button key="preview" onClick={() => parseSource()}>
+        <Button key="preview" disabled={!preflightReady || importMutation.isLoading} onClick={() => parseSource()}>
           生成预览
         </Button>,
         <Button
           key="import"
           type="primary"
           disabled={
-            settingsQuery.isError ||
-            settingsQuery.isLoading ||
-            existingAssetsQuery.isError ||
-            existingAssetsQuery.isLoading ||
+            !preflightReady ||
             !previewRows.some((row) => row.action === "create" || row.action === "update")
           }
           loading={importMutation.isLoading}
@@ -133,6 +144,9 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
             action={<Button onClick={() => { settingsQuery.refetch(); existingAssetsQuery.refetch(); }}>重试</Button>}
           />
         ) : null}
+        {settingsQuery.isFetching || existingAssetsQuery.isFetching ? (
+          <Alert type="info" showIcon message="正在加载部门和已有资产，完成后生成预览" />
+        ) : null}
         <Alert type="success" showIcon message="导入使用单次服务端事务" description="任意一行写入失败时，本次可执行数据会全部回滚，不会留下半导入。" />
         <Space wrap>
           <Button onClick={() => downloadCsvFile(`asset-import-template-${Date.now()}.csv`, importTemplateCsv())}>
@@ -140,10 +154,7 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
           </Button>
           <Radio.Group
             value={strategy}
-            onChange={(event) => {
-              setStrategy(event.target.value);
-              setPreviewRows([]);
-            }}
+            onChange={(event) => setStrategy(event.target.value)}
             options={[
               { label: "新增或更新", value: "upsert-by-number" },
               { label: "只新增", value: "create-only" },
@@ -152,14 +163,11 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
           />
         </Space>
         <div>
-          <Text strong>导入数据</Text>
+          <Text strong><HelpLabel label="导入数据" description="仅修改勾选分组中已填写的字段；空白单元格保留已有值。金额须为非负数，购置日期使用 YYYY-MM-DD。" /></Text>
           <Checkbox.Group
             className="npcink-v3-checkbox-row"
             value={sections}
-            onChange={(values) => {
-              setSections(values as AssetImportSection[]);
-              setPreviewRows([]);
-            }}
+            onChange={(values) => setSections(values as AssetImportSection[])}
             options={[
               { label: "基础信息", value: "basic" },
               { label: "财务信息", value: "finance" },
@@ -175,12 +183,15 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
             if (!file) {
               return;
             }
+            setRawText("");
+            setSourceRows(null);
             const reader = new FileReader();
             reader.onload = () => {
               const text = String(reader.result || "");
               setRawText(text);
               parseSource(text);
             };
+            reader.onerror = () => message.error("文件读取失败，请重新选择 CSV 文件");
             reader.readAsText(file);
           }}
         />
@@ -189,7 +200,7 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
           value={rawText}
           onChange={(event) => {
             setRawText(event.target.value);
-            setPreviewRows([]);
+            setSourceRows(null);
           }}
           placeholder="粘贴标准 CSV。第一行应使用模板表头：资产编号,资产名称,资产类型,使用人,部门,状态..."
         />

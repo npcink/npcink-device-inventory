@@ -74,6 +74,191 @@ try {
   assert.equal(diskComponentRows(moduleHardware)[0].interface, "NVMe");
   assert.equal(diskComponentRows({ disks: [{ size: 100, mount: "C:\\", fsType: "NTFS", name: "System" }] })[0].isVolume, true, "Filesystem volumes cannot prove physical disk counts");
   assert.equal(JSON.stringify(moduleHardware), beforeComponents, "Display parsing must preserve collected facts");
+  for (const [moduleName, modulePath] of [
+    ["finance", "src/pages/shared/finance.tsx"],
+    ["analysisData", "src/components/analysis/analysisData.ts"],
+    ["tabular", "src/pages/shared/tabular.tsx"],
+    ["assetForm", "src/pages/shared/assetForm.ts"],
+    ["assets", "src/pages/shared/assets.tsx"],
+    ["cache", "src/pages/shared/cache.tsx"],
+  ]) {
+    await build({
+      entryPoints: [path.join(root, modulePath)], outfile: path.join(outDir, `${moduleName}.cjs`),
+      bundle: true, format: "cjs", platform: "node", jsx: "automatic",
+      plugins: [{ name: "no-fixture-network", setup(builder) {
+        builder.onResolve({ filter: /^@\/services\/v3$/ }, () => ({ path: "asset-api", namespace: "fixture" }));
+        builder.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({ contents: "export const getAssets = () => { throw new Error('Unexpected fixture network request'); };" }));
+      } }, aliasPlugin], logLevel: "silent",
+    });
+  }
+  const { assetPurchaseDateText, calculatedFinancialResidualForAsset, effectiveFinancialResidualValue } = createRequire(import.meta.url)(path.join(outDir, "finance.cjs"));
+  const { assetMissingFields, assetValueSummary } = createRequire(import.meta.url)(path.join(outDir, "analysisData.cjs"));
+  const { assetsToCsv, ASSET_EXPORT_FIELDS, csvCell, parseTabularText, buildImportPreviewRows } = createRequire(import.meta.url)(path.join(outDir, "tabular.cjs"));
+  const { assetFormValuesToInput } = createRequire(import.meta.url)(path.join(outDir, "assetForm.cjs"));
+  const { customAssetInfo } = createRequire(import.meta.url)(path.join(outDir, "assets.cjs"));
+  globalThis.window = {};
+  const { clearObsoleteAssetListCache } = createRequire(import.meta.url)(path.join(outDir, "cache.cjs"));
+  const stored = {
+    "npcinkDeviceInventoryAssetList:computer": "obsolete",
+    "npcinkDeviceInventoryAssetList:custom": "obsolete",
+    "npcinkDeviceInventoryAssetListOther": "keep",
+    "npcinkDeviceInventorySavedFilters": "keep",
+    "npcinkDeviceInventoryLayout": "keep",
+  };
+  window.localStorage = new Proxy(stored, { get(target, key) {
+    return key === "removeItem" ? (name) => { delete target[name]; } : target[key];
+  } });
+  clearObsoleteAssetListCache();
+  assert.deepEqual(Object.keys(stored), ["npcinkDeviceInventoryAssetListOther", "npcinkDeviceInventorySavedFilters", "npcinkDeviceInventoryLayout"], "Only obsolete full-list entries may be removed");
+  Object.defineProperty(window, "localStorage", { configurable: true, get() { throw new Error("Storage denied"); } });
+  assert.doesNotThrow(clearObsoleteAssetListCache, "Unavailable storage must not prevent startup");
+  delete globalThis.window;
+  const financeAsset = {
+    id: 1, uuid: "finance-fixture", assetType: "computer", assetNumber: "FIN-001", name: "电脑",
+    department: "IT", ownerName: "管理员", status: "active", createdAt: "2010-01-01",
+    purchasePrice: 5000, financialResidualValue: 0, secondHandMarketValue: 0, metadata: {},
+    latestObservation: { observedAt: "2026-11-10", summary: { cpu: "Test CPU", memory_bytes: 8 * 1024 ** 3, disk_bytes: 256 * 1024 ** 3 } },
+  };
+  const financeSettings = { depreciationPeriodMonths: 60, defaultResidualRate: 5 };
+  assert.equal(assetPurchaseDateText(financeAsset), "", "A registration date must never substitute for an unknown purchase date");
+  assert.equal(calculatedFinancialResidualForAsset(financeAsset, financeSettings), null, "Unknown purchase dates cannot support depreciation estimates");
+  assert.deepEqual(assetMissingFields(financeAsset), [], "Zero money values do not make operational records incomplete");
+  const retiredAsset = { ...financeAsset, status: "retired", ownerName: "" };
+  assert.equal(effectiveFinancialResidualValue(retiredAsset, financeSettings), 0);
+  assert.deepEqual(assetMissingFields(retiredAsset), [], "Retired assets do not require an owner or a positive valuation");
+  const datedAsset = { ...financeAsset, metadata: { purchase: { order_time: "2026-01-15" } } };
+  assert.equal(assetPurchaseDateText(datedAsset), "2026-01-15", "Explicit purchase dates must survive unchanged");
+  assert.equal(typeof calculatedFinancialResidualForAsset(datedAsset, financeSettings), "number");
+  assert(assetMissingFields({ ...financeAsset, ownerName: "" }).includes("责任人"), "An active asset without an owner must remain actionable");
+  const manualZero = { ...financeAsset, metadata: { finance: { financial_residual_mode: "manual" } } };
+  const autoZero = { ...financeAsset, metadata: { purchase: { order_time: "2010-01-01" }, finance: { financial_residual_mode: "auto" } } };
+  const zeroResidualSettings = { ...financeSettings, defaultResidualRate: 0 };
+  const financeFacts = [financeAsset, manualZero, autoZero, retiredAsset];
+  const beforeFinance = JSON.stringify(financeFacts);
+  assert.equal(effectiveFinancialResidualValue(financeAsset, financeSettings), null, "The default stored zero cannot prove an unknown automatic carrying amount");
+  assert.equal(effectiveFinancialResidualValue(manualZero, financeSettings), 0, "A manual zero must remain known");
+  assert.equal(effectiveFinancialResidualValue(autoZero, zeroResidualSettings), 0, "Fully depreciated automatic zero must remain known");
+  assert.equal(effectiveFinancialResidualValue({ ...financeAsset, financialResidualValue: 500 }, financeSettings), 500, "Historical positive entries must survive missing purchase dates");
+  const values = assetValueSummary(financeFacts, zeroResidualSettings);
+  assert.equal(values.totalPurchase, 20000);
+  assert.equal(values.totalResidual, 0);
+  assert.equal(values.knownDepreciation, 15000, "Manual, fully depreciated and retired zero amounts must all contribute depreciation");
+  assert.equal(values.unknownResidualCount, 1);
+  assert.equal(values.departmentRows[0].value, 0);
+  assert(values.departmentRows[0].meta.includes("3 条"), "Unknown amounts must not inflate department value counts");
+  assert.equal(assetValueSummary([financeAsset], financeSettings).totalResidual, null, "No known values must not be reported as a zero total");
+  assert.equal(assetValueSummary([financeAsset], financeSettings).knownDepreciation, null);
+  const financialField = ASSET_EXPORT_FIELDS.find((field) => field.key === "financialResidualValue");
+  assert.equal(financialField.value(financeAsset, financeSettings), null, "Excel and preview must receive an empty cell for unknown values");
+  assert.equal(financialField.value(manualZero, financeSettings), 0);
+  assert.deepEqual(assetsToCsv(financeFacts, ["assetNumber", "financialResidualValue"], zeroResidualSettings).split("\n").slice(1), ["FIN-001,", "FIN-001,0", "FIN-001,0", "FIN-001,0"], "CSV must distinguish blank unknown amounts from known zero");
+  assert.equal(JSON.stringify(financeFacts), beforeFinance, "Financial display and export must not mutate stored asset facts");
+  assert.equal(csvCell(null), "");
+  assert.equal(csvCell(0), "0");
+  assert.equal(csvCell("=1+1"), "'=1+1", "Empty-value handling must preserve CSV formula protection");
+  assert.equal(csvCell('a,"b"'), '"a,""b"""', "Quoted CSV fields must stay escaped");
+  const editedAsset = {
+    ...financeAsset, financialResidualValue: 1700, metadata: {
+      purpose: "原用途", notes: "原备注",
+      purchase: { title: "原名称", total: 5000, numbers: 2, purchaser: "采购员", shop_name: "原店铺", link: "https://example.test/item", order: "ORDER-1", order_time: "2026-01-15", platform: "京东", pay_method: "微信", future: "保留扩展" },
+      finance: { financial_residual_mode: "auto", future: "保留财务扩展" },
+    },
+  };
+  const beforeEdit = JSON.stringify(editedAsset);
+  const basicEdit = assetFormValuesToInput({ name: "新名称" }, editedAsset, financeSettings);
+  assert.equal(basicEdit.metadata.purpose, "原用途", "Unrendered fields must survive a partial edit");
+  assert.equal(basicEdit.metadata.purchase.order_time, "2026-01-15");
+  assert.equal(basicEdit.metadata.purchase.numbers, 2);
+  assert.equal(basicEdit.metadata.purchase.shop_name, "原店铺");
+  assert.equal(basicEdit.metadata.purchase.future, "保留扩展");
+  assert.equal(basicEdit.metadata.finance.future, "保留财务扩展");
+  assert.equal(basicEdit.purchasePrice, 5000);
+  assert.equal(basicEdit.name, "新名称");
+  assert.equal(basicEdit.metadata.purchase.title, "原名称", "Legacy mirrored facts are preserved, never rewritten");
+  const moneyEdit = assetFormValuesToInput({ name: "主记录名称", purchasePrice: 1234 }, editedAsset, financeSettings);
+  assert.equal(moneyEdit.purchasePrice, 1234);
+  assert.equal(moneyEdit.metadata.purchase.total, 5000);
+  const canonicalInfo = customAssetInfo({ ...editedAsset, ...moneyEdit });
+  assert.equal(canonicalInfo.title, "主记录名称", "Stale purchase titles must not override the asset name");
+  assert.equal(canonicalInfo.priceText, "1,234 元", "Stale purchase totals must not override the purchase price");
+  const newInput = assetFormValuesToInput({ name: "新增", purchasePrice: 100 }, null, financeSettings);
+  assert.equal(newInput.metadata.purchase.title, undefined);
+  assert.equal(newInput.metadata.purchase.total, undefined);
+  const clearedDate = assetFormValuesToInput({ financialResidualMode: "auto", orderTime: "", financialResidualValue: 4200 }, editedAsset, financeSettings);
+  assert.equal(clearedDate.metadata.purchase.order_time, "");
+  assert.equal(clearedDate.financialResidualValue, 0, "Clearing the purchase date must not store an obsolete automatic estimate");
+  assert.equal(effectiveFinancialResidualValue({ ...editedAsset, ...clearedDate }, financeSettings), null);
+  for (const purchasePrice of [0, null]) {
+    assert.equal(assetFormValuesToInput({ financialResidualMode: "auto", purchasePrice, financialResidualValue: 4200 }, editedAsset, financeSettings).financialResidualValue, 0, "Clearing or zeroing the price must discard obsolete automatic estimates");
+  }
+  const recalculated = assetFormValuesToInput({ financialResidualMode: "auto", purchasePrice: 8000, orderTime: "2026-01-15", financialResidualValue: 1 }, editedAsset, financeSettings);
+  assert.equal(recalculated.financialResidualValue, calculatedFinancialResidualForAsset({ ...editedAsset, purchasePrice: 8000 }, financeSettings), "The final submitted inputs must determine automatic value");
+  const manualEdit = assetFormValuesToInput({ financialResidualMode: "manual", financialResidualValue: 0, orderTime: "" }, editedAsset, financeSettings);
+  assert.equal(manualEdit.financialResidualValue, 0);
+  assert.equal(effectiveFinancialResidualValue({ ...editedAsset, ...manualEdit }, financeSettings), 0, "Explicit manual zero must remain known");
+  const historicalAuto = { ...editedAsset, metadata: { ...editedAsset.metadata, purchase: { ...editedAsset.metadata.purchase, order_time: "" } } };
+  assert.equal(assetFormValuesToInput({ name: "只改名称" }, historicalAuto, financeSettings).financialResidualValue, 1700, "Unchanged historical positive amounts must survive unrelated edits");
+  assert.equal(assetFormValuesToInput({ financialResidualMode: "auto" }, { ...historicalAuto, metadata: { ...historicalAuto.metadata, finance: { financial_residual_mode: "manual" } } }, financeSettings).financialResidualValue, 0, "Switching to automatic without inputs must not retain a manual amount as an estimate");
+  const clearedPurchase = assetFormValuesToInput({ purpose: "", purchaser: "", order: "", numbers: 0, shopName: "", platform: undefined }, editedAsset, financeSettings);
+  assert.equal(clearedPurchase.metadata.purpose, "");
+  assert.equal(clearedPurchase.metadata.purchase.purchaser, "");
+  assert.equal(clearedPurchase.metadata.purchase.order, "");
+  assert.equal(clearedPurchase.metadata.purchase.numbers, 0);
+  assert.equal(clearedPurchase.metadata.purchase.platform, "", "Explicitly cleared selects may submit undefined, which differs from an absent field");
+  assert.equal(clearedPurchase.metadata.purchase.link, "https://example.test/item");
+  assert.equal(assetFormValuesToInput({ financialResidualMode: "auto", purchasePrice: 9000 }, editedAsset).financialResidualValue, 0, "Unavailable settings must not preserve an estimate after its inputs change");
+  assert.equal(JSON.stringify(editedAsset), beforeEdit, "Form serialization must not mutate the stored asset");
+  const importedAsset = {
+    ...financeAsset, category: "台式电脑", metadata: {
+      notes: "保留备注", purchase: { order_time: "2026-01-15", vendor: "保留供应商" },
+      manualHardware: { cpu: "旧 CPU", memory: "16 GB", disk: "512 GB", raw: { cpu: "旧 CPU", memory: "16 GB", disk: "512 GB", future: "保留原始信息" } },
+    },
+  };
+  const beforeImport = JSON.stringify(importedAsset);
+  const importPreview = (row, sections = ["basic", "finance", "hardware"]) => buildImportPreviewRows(
+    [{ assetNumber: "FIN-001", ...row }], [importedAsset], "upsert-by-number", sections, ["IT"]
+  )[0];
+  const financeOnly = importPreview({ assetType: "手机", category: "新分类", name: "不应修改", status: "报废", purchasePrice: "0" }, ["finance"]);
+  assert.equal(financeOnly.action, "update");
+  assert.equal(financeOnly.input.assetType, "computer", "Finance-only import must preserve the asset type");
+  assert.equal(financeOnly.input.category, "台式电脑");
+  assert.equal(financeOnly.input.name, "电脑");
+  assert.equal(financeOnly.input.status, "active");
+  assert.equal(financeOnly.input.purchasePrice, 0, "An explicit zero must overwrite the previous amount");
+  assert.equal(financeOnly.input.metadata.purchase.total, undefined, "Imports must not add a mirrored purchase total");
+  assert.equal(financeOnly.input.metadata.purchase.vendor, "保留供应商");
+  assert.equal(importPreview({ purchasePrice: "" }).input.purchasePrice, 5000, "Blank amounts preserve existing facts");
+  const hardwareOnly = importPreview({ cpu: "新 CPU" }, ["hardware"]).input.metadata;
+  assert.equal(hardwareOnly.manualHardware.cpu, "新 CPU");
+  assert.equal(hardwareOnly.manualHardware.memory, "16 GB", "Partial hardware import must preserve other fields");
+  assert.equal(hardwareOnly.manualHardware.raw.cpu, "新 CPU");
+  assert.equal(hardwareOnly.manualHardware.raw.future, "保留原始信息");
+  assert.equal(hardwareOnly.notes, "保留备注");
+  for (const field of ["purchasePrice", "secondHandMarketValue", "financialResidualValue"]) {
+    for (const value of ["abc", "NaN", "Infinity", "-1", "10000000000", "1,2", "￥元", "0x10"]) {
+      assert.equal(importPreview({ [field]: value }).action, "invalid", `${field}=${value} must not silently become valid money`);
+    }
+    assert.equal(importPreview({ [field]: "￥ 1,234.50 元" }).input[field], 1234.5);
+    assert.notEqual(importPreview({ [field]: "9999999999.99" }).action, "invalid");
+  }
+  assert.equal(importPreview({ purchasePrice: "abc", status: "未知状态", purchaseDate: "not-a-date" }, ["hardware"]).action, "update", "Ignored sections must not reject unrelated columns");
+  assert.equal(importPreview({}, []).action, "invalid", "An empty selection must never produce an executable import");
+  assert.equal(importPreview({ status: "未知状态" }).action, "invalid");
+  assert.equal(importPreview({ status: "maintenance" }).input.status, "maintenance");
+  assert.equal(importPreview({ status: "闲置" }).input.status, "inactive");
+  for (const date of ["2026-02-29", "2026-02-31", "unknown"]) {
+    assert.equal(importPreview({ purchaseDate: date }).action, "invalid", `Invalid purchase date ${date} must not be normalized into another date`);
+  }
+  assert.equal(importPreview({ purchaseDate: "2024-02-29" }).input.metadata.purchase.order_time, "2024-02-29");
+  assert.equal(JSON.stringify(importedAsset), beforeImport, "Preflight must not mutate existing assets");
+  const multilineName = '第一行\n第二行，带 "引号"';
+  assert.equal(parseTabularText(assetsToCsv([{ ...financeAsset, name: multilineName }], ["assetNumber", "name"]))[0]["资产名称"], multilineName);
+  const exportedPriceRow = parseTabularText(assetsToCsv([financeAsset], ["assetNumber", "purchasePrice"]))[0];
+  assert.equal(buildImportPreviewRows([exportedPriceRow], [], "create-only", ["finance"])[0].input.purchasePrice, 5000, "Exported purchase-price headers must also be recognized on import");
+  assert.deepEqual(parseTabularText('\uFEFF资产编号,备注\r\nFIN-001,"第一行\r\n第二行"\r\n'), [{ 资产编号: "FIN-001", 备注: "第一行\r\n第二行" }]);
+  for (const text of ['资产编号,备注\nFIN-001,"未闭合', '资产编号,备注\nFIN-001,多余,一列', '资产编号,资产编号\nA,B', '资产名称\n无编号', '[{"assetNumber":"FIN-001"}]']) {
+    assert.throws(() => parseTabularText(text), undefined, "Malformed or unsupported input must never leave executable rows");
+  }
   const detailBundle = path.join(outDir, "hardware-details.cjs");
   await build({
     entryPoints: [path.join(root, "src/pages/shared/detail.tsx")],
@@ -81,6 +266,9 @@ try {
     plugins: [aliasPlugin], logLevel: "silent",
   });
   const { hardwareDetailSections, groupDetailSections, visibleDetailSections } = createRequire(path.join(root, "package.json"))(detailBundle);
+  const residualDetail = (asset) => hardwareDetailSections(asset, assetHardwareContext(asset), financeSettings).find((section) => section.key === "asset").rows.find((row) => row.key === "financialResidualValue").value;
+  assert.equal(residualDetail(financeAsset), "暂无法确定");
+  assert(residualDetail(manualZero).includes("0"), "Technical details must display a known zero instead of missing-value copy");
   const detailAsset = { assetType: "computer", metadata: {}, latestObservation: { summary: {}, hardware: moduleHardware } };
   const sections = hardwareDetailSections(detailAsset, assetHardwareContext(detailAsset));
   const memoryDetails = sections.find((section) => section.key === "memory").rows;

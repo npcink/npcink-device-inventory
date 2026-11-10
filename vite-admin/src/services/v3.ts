@@ -20,7 +20,6 @@ import type {
   CreatedClientToken,
   EventListParams,
   InventorySettings,
-  ObservationListParams,
   ObservationCleanupResult,
   PaginatedResult,
 } from "@/type/v3";
@@ -126,16 +125,6 @@ export const getAssetObservations = async (
       showSuccessMessage: false,
     } as RequestConfig
   );
-  return response.data;
-};
-
-export const getObservations = async (
-  params: ObservationListParams
-): Promise<PaginatedResult<AssetObservation>> => {
-  const response = await restInstance.get<PaginatedResult<AssetObservation>>("/observations", {
-    params,
-    showSuccessMessage: false,
-  } as RequestConfig);
   return response.data;
 };
 

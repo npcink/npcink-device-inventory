@@ -1,3 +1,4 @@
+import { HelpLabel } from "@/components/HelpLabel";
 import type { AssetInput } from "@/type/v3";
 import { Alert, Form, Input, Modal, Select } from "antd";
 import { useEffect, useMemo } from "react";
@@ -60,8 +61,8 @@ export const BulkEditModal = ({ open, count, loading, categoryMode, departmentOp
       >
         <Form.Item
           name="department"
-          label="部门"
-          extra={normalizedDepartmentOptions.length ? "只能选择设置中维护的部门；留空表示不修改。" : "请先到设置 > 部门管理添加部门。"}
+          label={<HelpLabel label="部门" description="只能选择设置中维护的部门；留空表示不修改。" />}
+          extra={!normalizedDepartmentOptions.length ? "请先到设置 > 部门管理添加部门。" : undefined}
           rules={[
             {
               validator: async (_, value) => {
@@ -85,11 +86,11 @@ export const BulkEditModal = ({ open, count, loading, categoryMode, departmentOp
         <Form.Item name="ownerName" label="使用人 / 责任人">
           <Input placeholder="统一修改使用人 / 责任人" />
         </Form.Item>
-        <Form.Item name="status" label="状态" extra="选择报废后，将保留采购价，并把二手市场价和账面净值调整为 0。">
+        <Form.Item name="status" label={<HelpLabel label="状态" description="选择报废后，将保留采购价，并把二手市场价和账面净值调整为 0。" />}>
           <Select allowClear options={EDITABLE_STATUS_OPTIONS} placeholder="统一修改状态" />
         </Form.Item>
         {categoryMode === "computer" ? (
-          <Form.Item name="category" label="设备类型" extra="留空表示不修改。">
+          <Form.Item name="category" label={<HelpLabel label="设备类型" description="留空表示不修改。" />}>
             <Select
               allowClear
               options={COMPUTER_DEVICE_TYPE_OPTIONS}
@@ -98,7 +99,7 @@ export const BulkEditModal = ({ open, count, loading, categoryMode, departmentOp
             />
           </Form.Item>
         ) : categoryMode === "custom" ? (
-          <Form.Item name="category" label="分类" extra="留空表示不修改。">
+          <Form.Item name="category" label={<HelpLabel label="分类" description="留空表示不修改。" />}>
             <Input placeholder="统一修改分类" />
           </Form.Item>
         ) : (

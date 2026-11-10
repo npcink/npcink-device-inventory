@@ -1,3 +1,4 @@
+import { HelpLabel } from "@/components/HelpLabel";
 import { cleanupObservations, getSettings, updateSettings } from "@/services/v3";
 import type { InventorySettings } from "@/type/v3";
 import { RestUrl } from "@/utils/index";
@@ -101,8 +102,7 @@ export const SettingsWorkspace = () => {
             <div className="npcink-v3-settings-grid">
               <Form.Item
                 name="clientUploadBaseUrl"
-                label="外部访问地址"
-                extra="留空使用当前站点 REST 地址；反向代理、内网穿透或 HTTPS 域名不一致时再填写。"
+                label={<HelpLabel label="外部访问地址" description="留空使用当前站点 REST 地址；反向代理、内网穿透或 HTTPS 域名不一致时再填写。" />}
                 className="npcink-v3-settings-wide"
               >
                 <Input placeholder={RestUrl} />
@@ -111,9 +111,8 @@ export const SettingsWorkspace = () => {
           </div>
           <div className="npcink-v3-settings-section">
             <Title level={4}>采集快照保留</Title>
-            <Text type="secondary">设置原始硬件快照的自动保留期。0 表示不自动删除；清理时始终保留每台资产的最新快照。</Text>
             <div className="npcink-v3-settings-grid">
-              <Form.Item name="observationRetentionDays" label="保留天数" extra="保存设置后每日自动清理；建议先完成 JSON 备份。">
+              <Form.Item name="observationRetentionDays" label={<HelpLabel label="保留天数" description="0 表示不自动删除；清理时始终保留每台资产的最新快照。" />} extra="保存设置后每日自动清理；建议先完成 JSON 备份。">
                 <InputNumber min={0} max={3650} precision={0} addonAfter="天" />
               </Form.Item>
             </div>
@@ -131,22 +130,17 @@ export const SettingsWorkspace = () => {
             >立即清理</Button>
           </div>
           <div className="npcink-v3-settings-section">
-            <Title level={4}>账面净值估算</Title>
-            <Text type="secondary">
-              使用直线折旧法：采购价减去预计最终残值后，按月平均折旧。默认使用系统实时估算的账面净值；特殊设备可在编辑页切换为手动账面净值。
-            </Text>
+            <Title level={4}><HelpLabel label="账面净值估算" description="使用直线折旧法：采购价减去预计最终残值后，按月平均折旧。默认使用系统实时估算的账面净值；特殊设备可在编辑页切换为手动账面净值。" /></Title>
             <div className="npcink-v3-settings-grid">
               <Form.Item
                 name="depreciationPeriodMonths"
-                label="折旧年限"
-                extra="普通电脑通常采用 3 年或 5 年；请以公司会计政策为准。"
+                label={<HelpLabel label="折旧年限" description="普通电脑通常采用 3 年或 5 年；请以公司会计政策为准。" />}
               >
                 <InputNumber min={1} max={240} precision={0} addonAfter="个月" />
               </Form.Item>
               <Form.Item
                 name="defaultResidualRate"
-                label="预计残值率"
-                extra="折旧期满后的预计残值占采购价的比例，常见为 3%–5%。"
+                label={<HelpLabel label="预计残值率" description="折旧期满后的预计残值占采购价的比例，常见为 3%–5%。" />}
               >
                 <InputNumber min={0} max={100} precision={1} addonAfter="%" />
               </Form.Item>
@@ -161,19 +155,18 @@ export const SettingsWorkspace = () => {
             </Space>
           </div>
           <div className="npcink-v3-settings-section">
-            <Title level={4}>更新候选规则</Title>
-            <Text type="secondary">分析页只根据这些阈值列出候选，不会自动修改状态或归档设备。</Text>
+            <Title level={4}><HelpLabel label="更新候选规则" description="分析页只根据这些阈值列出候选，不会自动修改状态或归档设备。" /></Title>
             <div className="npcink-v3-settings-grid npcink-v3-settings-grid-four">
-              <Form.Item name="renewalAgeYears" label="使用年限阈值（年）" extra="有购置日期且达到该年限时进入候选。">
+              <Form.Item name="renewalAgeYears" label={<HelpLabel label="使用年限阈值（年）" description="有购置日期且达到该年限时进入候选。" />}>
                 <InputNumber min={1} max={20} precision={0} addonAfter="年" />
               </Form.Item>
-              <Form.Item name="renewalMinMemoryGb" label="最低内存（GB）" extra="已采集内存低于该容量时进入候选。">
+              <Form.Item name="renewalMinMemoryGb" label={<HelpLabel label="最低内存（GB）" description="已采集内存低于该容量时进入候选。" />}>
                 <InputNumber min={1} max={512} precision={0} addonAfter="GB" />
               </Form.Item>
-              <Form.Item name="renewalMinDiskGb" label="最低硬盘（GB）" extra="已采集硬盘容量低于该值时进入候选。">
+              <Form.Item name="renewalMinDiskGb" label={<HelpLabel label="最低硬盘（GB）" description="已采集硬盘容量低于该值时进入候选。" />}>
                 <InputNumber min={1} max={8192} precision={0} addonAfter="GB" />
               </Form.Item>
-              <Form.Item name="renewalMaxResidualRate" label="低账面净值率阈值（%）" extra="采购价和当前有效账面净值均存在时参与判断。">
+              <Form.Item name="renewalMaxResidualRate" label={<HelpLabel label="低账面净值率阈值（%）" description="采购价和当前有效账面净值均存在时参与判断。" />}>
                 <InputNumber min={0} max={100} precision={0} addonAfter="%" />
               </Form.Item>
             </div>
@@ -183,8 +176,7 @@ export const SettingsWorkspace = () => {
             <div className="npcink-v3-settings-grid">
               <Form.Item
                 name="departments"
-                label="部门列表"
-                extra="未分配是系统兜底部门，不能删除；设备详情、批量修改和表格导入只能选择这里维护的部门。"
+                label={<HelpLabel label="部门列表" description="未分配是系统兜底部门，不能删除；设备详情、批量修改和表格导入只能选择这里维护的部门。" />}
                 className="npcink-v3-settings-wide"
               >
                 <Select

@@ -1,9 +1,10 @@
+import { HelpLabel } from "@/components/HelpLabel";
 import { Alert, Empty, Select, Table, Typography } from "antd";
 import type { Asset } from "@/type/v3";
 import type { HardwareChangeRow } from "./analysisTypes";
 import type { ReactNode } from "react";
 
-const { Text, Title } = Typography;
+const { Title } = Typography;
 
 export interface HardwareChangesViewProps {
   rows: HardwareChangeRow[];
@@ -20,7 +21,7 @@ export const HardwareChangesView = ({ rows, types, selectedType, loading, error,
   <div className="npcink-v3-analysis-grid">
     <section className="npcink-v3-analysis-panel is-wide">
       <div className="npcink-v3-analysis-panel-head">
-        <div><Title level={4}>最近两次有效采集变化</Title><Text type="secondary">仅当变化前后字段均存在时展示，缺失字段不视为硬件移除。</Text></div>
+        <div><Title level={4}><HelpLabel label="最近两次有效采集变化" description="仅当变化前后字段均存在时展示，缺失字段不视为硬件移除。" /></Title></div>
         <Select allowClear placeholder="变化类型" options={types} value={selectedType} onChange={onTypeChange} className="npcink-v3-filter" />
       </div>
     </section>

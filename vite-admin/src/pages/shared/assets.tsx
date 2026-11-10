@@ -78,25 +78,22 @@ export const plainMoneyText = (value: unknown) => {
 export const customAssetInfo = (asset: Asset) => {
   const order = assetPurchaseRecord(asset);
   const quantity = firstText(order.numbers, order.quantity, order.count);
-  const total = firstText(order.total, asset.purchasePrice);
   return {
-    title: firstText(order.title, asset.name, asset.assetNumber, "未命名资产"),
+    title: firstText(asset.name, asset.assetNumber, "未命名资产"),
     usage: firstText(asset.ownerName),
     number: firstText(asset.assetNumber),
     category: firstText(asset.category, assetTypeLabel(asset.assetType)),
     purpose: firstText(getRecord(asset.metadata).purpose, order.purpose),
     status: statusLabel(asset.status),
-    createdAt: asset.createdAt,
     purchaser: firstText(order.purchaser),
     quantity,
-    total,
     platform: firstText(order.platform),
     orderNo: firstText(order.order),
     orderTime: firstText(order.order_time),
     payMethod: firstText(order.pay_method),
     shopName: firstText(order.shop_name),
     link: firstText(order.link),
-    priceText: plainMoneyText(total),
+    priceText: plainMoneyText(asset.purchasePrice),
     quantityText: quantity || "-",
   };
 };

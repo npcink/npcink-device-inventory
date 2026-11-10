@@ -163,10 +163,9 @@ export const DetailDrawer = ({
   const purchaseDate = firstText(purchaseRecord.order_time);
   const purchasePrice = Number(asset?.purchasePrice || 0);
   const secondHandMarketValue = Number(asset?.secondHandMarketValue || 0);
-  const financialResidualValue = asset ? effectiveFinancialResidualValue(asset, settingsQuery.data) : 0;
+  const financialResidualValue = asset ? effectiveFinancialResidualValue(asset, settingsQuery.data) : null;
   const activeFinancialResidualMode = financialResidualMode(asset);
   const hasPurchasePrice = purchasePrice > 0;
-  const hasFinancialResidualValue = financialResidualValue > 0;
   const createEventMutation = useMutation(
     (input: AssetEventInput) => createAssetEvent(uuid || "", input),
     {
@@ -256,7 +255,7 @@ export const DetailDrawer = ({
       footer={null}
       width={readOnly ? "min(780px, calc(100vw - 32px))" : (isComputerAsset(asset) ? "min(840px, calc(100vw - 32px))" : "min(860px, calc(100vw - 32px))")}
       className="npcink-v3-detail-modal"
-      destroyOnClose
+      destroyOnHidden
     >
       {assetQuery.isLoading ? (
         <Table loading pagination={false} showHeader={false} />
@@ -306,7 +305,7 @@ export const DetailDrawer = ({
                 账面净值（估算）
                 <em>{activeFinancialResidualMode === "manual" ? "手动" : "自动"}</em>
               </span>
-              <strong>{hasFinancialResidualValue ? formatMoney(financialResidualValue) : "未登记"}</strong>
+              <strong>{financialResidualValue === null ? "暂无法确定" : formatMoney(financialResidualValue)}</strong>
             </div>
           </div>
           <Tabs

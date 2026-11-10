@@ -158,6 +158,7 @@ export const hardwareDetailSections = (
     return controller;
   });
   const extraFields = withoutFields(hardware, ["cpu", "processors", "memory", "mem", "memLayout", "disks", "disk", "diskLayout", "volumes", "battery", "graphics", "baseboard", "network", "net", "bios", "chassis", "os", "system", "uuid", "hardwareUuid", "collection", "platformData", "peripherals", "storage", "security"]);
+  const residual = effectiveFinancialResidualValue(asset, settings);
   return [
     {
       key: "asset",
@@ -171,7 +172,7 @@ export const hardwareDetailSections = (
         detailRow("category", "类型", computerDeviceType(asset.category)),
         detailRow("purchase", "购置价值", formatMoney(asset.purchasePrice)),
         detailRow("secondHandMarketValue", "二手市场价", formatMoney(asset.secondHandMarketValue)),
-        detailRow("financialResidualValue", "账面净值（估算）", formatMoney(effectiveFinancialResidualValue(asset, settings))),
+        detailRow("financialResidualValue", "账面净值（估算）", residual === null ? "暂无法确定" : formatMoney(residual)),
         detailRow("updated", "更新时间", assetUpdateTimeText(asset))
       ),
     },

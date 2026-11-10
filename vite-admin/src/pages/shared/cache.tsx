@@ -1,9 +1,7 @@
 import type { Asset, AssetListParams, PaginatedResult } from "@/type/v3";
 import { InitialAssets } from "@/utils/index";
 
-export const ASSET_LIST_CACHE_PREFIX = "npcinkDeviceInventoryAssetList:";
-
-export const ASSET_LIST_CACHE_TTL_MS = 10 * 60 * 1000;
+const ASSET_LIST_CACHE_PREFIX = "npcinkDeviceInventoryAssetList:";
 
 export const normalizedAssetListParams = (params: AssetListParams) => ({
   page: params.page || 1,
@@ -20,43 +18,12 @@ export const normalizedAssetListParams = (params: AssetListParams) => ({
   includeDeleted: Boolean(params.includeDeleted),
 });
 
-export const assetListCacheKey = (params: AssetListParams) =>
-  `${ASSET_LIST_CACHE_PREFIX}${JSON.stringify(normalizedAssetListParams(params))}`;
-
-export const readCachedAssetList = (params: AssetListParams): PaginatedResult<Asset> | undefined => {
-  if (typeof window === "undefined") {
-    return undefined;
-  }
+export const clearObsoleteAssetListCache = () => {
   try {
-    const raw = window.localStorage.getItem(assetListCacheKey(params));
-    if (!raw) {
-      return undefined;
-    }
-    const parsed = JSON.parse(raw) as { cachedAt?: number; result?: PaginatedResult<Asset> };
-    if (!parsed.cachedAt || Date.now() - parsed.cachedAt > ASSET_LIST_CACHE_TTL_MS) {
-      window.localStorage.removeItem(assetListCacheKey(params));
-      return undefined;
-    }
-    return parsed.result;
+    const keys = Object.keys(window.localStorage).filter((key) => key.startsWith(ASSET_LIST_CACHE_PREFIX));
+    keys.forEach((key) => window.localStorage.removeItem(key));
   } catch {
-    return undefined;
-  }
-};
-
-export const writeCachedAssetList = (params: AssetListParams, result: PaginatedResult<Asset>) => {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.localStorage.setItem(
-      assetListCacheKey(params),
-      JSON.stringify({
-        cachedAt: Date.now(),
-        result,
-      })
-    );
-  } catch {
-    // Storage can be unavailable in private mode; the REST result remains authoritative.
+    // Storage may be unavailable; REST and in-memory queries do not depend on it.
   }
 };
 

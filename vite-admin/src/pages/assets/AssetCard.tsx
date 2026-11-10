@@ -93,7 +93,7 @@ export const AssetCard = ({
             </div>
             <div>
               <dt>购置：</dt>
-              <dd>{formatDate(customInfo.orderTime || customInfo.createdAt)}</dd>
+              <dd>{customInfo.orderTime ? formatDate(customInfo.orderTime) : "未登记"}</dd>
             </div>
             <div>
               <dt>更新：</dt>

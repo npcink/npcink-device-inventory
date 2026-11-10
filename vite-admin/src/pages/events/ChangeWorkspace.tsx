@@ -19,7 +19,6 @@ export const ChangeWorkspace = () => {
   const [pageSize, setPageSize] = useState(20);
   const [search, setSearch] = useState("");
   const [eventMode, setEventMode] = useState<"manual" | "auto">("auto");
-  const [hideNames, setHideNames] = useState(false);
   const queryParams = useMemo(
     () => ({ page, pageSize, search, eventMode }),
     [eventMode, page, pageSize, search]
@@ -50,7 +49,7 @@ export const ChangeWorkspace = () => {
       title: "姓名",
       width: 160,
       render: (_, event) => (
-        <span>{hideNames ? "已隐藏" : changeActorName(event)}</span>
+        <span>{changeActorName(event)}</span>
       ),
     },
     {
@@ -71,7 +70,7 @@ export const ChangeWorkspace = () => {
         const asset = changeAssetLabelParts(event.asset);
         return (
           <span>
-            <span>{hideNames && asset.name !== "-" ? "已隐藏" : asset.name}</span>
+            <span>{asset.name}</span>
             {asset.suffix ? ` _ ${asset.suffix}` : ""}
           </span>
         );
@@ -99,9 +98,6 @@ export const ChangeWorkspace = () => {
             }}
           >
             {eventMode === "manual" ? "手动变更数据" : "自动变更数据"}
-          </Button>
-          <Button onClick={() => setHideNames((value) => !value)}>
-            {hideNames ? "显示姓名" : "隐藏姓名"}
           </Button>
         </div>
         <div className="npcink-v3-change-filters">

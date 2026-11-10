@@ -1,28 +1,23 @@
+import { HelpLabel } from "@/components/HelpLabel";
 import { getAssets, getSettings } from "@/services/v3";
 import type { Asset, AssetListParams } from "@/type/v3";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Checkbox, Empty, Modal, Radio, Space, Typography, message } from "antd";
+import { Button, Checkbox, Empty, Modal, Radio, Space, Typography, message } from "antd";
 import { useEffect, useState } from "react";
 import { fetchAllAssets } from "@/pages/shared/assets";
-import { effectiveFinancialResidualValue } from "@/pages/shared/finance";
 import {
-  AssetExportColorMode,
   AssetExportFieldKey,
   AssetExportFormat,
   AssetExportScope,
-  AssetExportStatusColors,
-  STATUS_OPTIONS,
 } from "@/pages/shared/options";
 import {
-  ASSET_EXPORT_COLOR_STORAGE_KEY,
+  ASSET_EXPORT_STATUS_COLORS,
   ASSET_EXPORT_FIELDS,
   DEFAULT_ASSET_EXPORT_FIELD_KEYS,
-  DEFAULT_ASSET_EXPORT_STATUS_COLORS,
   assetsToCsv,
   downloadCsvFile,
   exportAssetWorkbook,
   exportableAssets,
-  loadAssetExportStatusColors,
   selectedAssetExportFields,
 } from "@/pages/shared/tabular";
 
@@ -49,9 +44,6 @@ export const AssetExportModal = ({
   const [scope, setScope] = useState<AssetExportScope>("current-filter");
   const [fieldKeys, setFieldKeys] = useState<AssetExportFieldKey[]>(DEFAULT_ASSET_EXPORT_FIELD_KEYS);
   const [format, setFormat] = useState<AssetExportFormat>("xlsx");
-  const [statusColors, setStatusColors] = useState<AssetExportStatusColors>(loadAssetExportStatusColors);
-  const [colorMode, setColorMode] = useState<AssetExportColorMode>("row");
-  const [draggedField, setDraggedField] = useState<AssetExportFieldKey>();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLeftOffset, setPreviewLeftOffset] = useState(0);
   const [exporting, setExporting] = useState(false);
@@ -66,8 +58,6 @@ export const AssetExportModal = ({
       setScope(selectedAssets.length ? "selected" : "current-filter");
       setFieldKeys(DEFAULT_ASSET_EXPORT_FIELD_KEYS);
       setFormat("xlsx");
-      setStatusColors(loadAssetExportStatusColors());
-      setColorMode("row");
       setPreviewOpen(false);
     }
   }, [open, selectedAssets.length]);
@@ -91,29 +81,12 @@ export const AssetExportModal = ({
     { enabled: open && previewOpen && scope !== "selected", staleTime: 30_000 }
   );
   const selectedExportAssets = exportableAssets(selectedAssets);
-  const previewAssets = exportableAssets(scope === "selected" ? selectedAssets : previewQuery.data?.data || []).slice(0, 30).map((asset) => ({
-    ...asset,
-    financialResidualValue: effectiveFinancialResidualValue(asset, settingsQuery.data),
-  }));
+  const previewAssets = exportableAssets(scope === "selected" ? selectedAssets : previewQuery.data?.data || []).slice(0, 30);
   const previewFields = selectedAssetExportFields(fieldKeys);
 
   const toggleField = (key: AssetExportFieldKey, checked: boolean) => {
     setFieldKeys((keys) => checked ? [...keys, key] : keys.filter((item) => item !== key));
   };
-  const moveField = (target: AssetExportFieldKey) => {
-    if (!draggedField || draggedField === target) return;
-    setFieldKeys((keys) => {
-      const next = keys.filter((key) => key !== draggedField);
-      next.splice(next.indexOf(target), 0, draggedField);
-      return next;
-    });
-    setDraggedField(undefined);
-  };
-  const saveColorDefaults = () => {
-    window.localStorage.setItem(ASSET_EXPORT_COLOR_STORAGE_KEY, JSON.stringify(statusColors));
-    message.success("状态颜色已保存为默认方案");
-  };
-
   const exportAssets = async () => {
     if (!fieldKeys.length) {
       message.warning("请至少选择一个导出字段");
@@ -128,14 +101,10 @@ export const AssetExportModal = ({
         message.warning("当前范围没有可导出的未归档资产");
         return;
       }
-      const exportAssetsWithEffectiveFinancialValue = assets.map((asset) => ({
-        ...asset,
-        financialResidualValue: effectiveFinancialResidualValue(asset, settingsQuery.data),
-      }));
       if (format === "xlsx") {
-        await exportAssetWorkbook(exportAssetsWithEffectiveFinancialValue, fieldKeys, statusColors, colorMode);
+        await exportAssetWorkbook(assets, fieldKeys, settingsQuery.data);
       } else {
-        downloadCsvFile(`电脑设备-${Date.now()}.csv`, assetsToCsv(exportAssetsWithEffectiveFinancialValue, fieldKeys));
+        downloadCsvFile(`电脑设备-${Date.now()}.csv`, assetsToCsv(assets, fieldKeys, settingsQuery.data));
       }
       message.success(`已导出 ${assets.length} 条资产`);
       setPreviewOpen(false);
@@ -172,7 +141,7 @@ export const AssetExportModal = ({
       open={open}
       onCancel={onClose}
       width={820}
-      destroyOnClose
+      destroyOnHidden
       className="npcink-v3-export-modal"
       footer={[
         <Button key="cancel" onClick={onClose}>取消</Button>,
@@ -182,22 +151,18 @@ export const AssetExportModal = ({
     >
       <div className="npcink-v3-export-config">
         <section>
-          <Text strong>文件格式</Text>
+          <Text strong><HelpLabel label="文件格式" description="Excel 按固定配色标记状态单元格；CSV 不保存颜色和单元格样式，预览窗口仅展示数据内容。" /></Text>
           <Radio.Group
             value={format}
             onChange={(event) => setFormat(event.target.value)}
             options={[
-              { label: "Excel（推荐，包含状态颜色）", value: "xlsx" },
+              { label: "Excel（推荐）", value: "xlsx" },
               { label: "CSV（通用，无颜色）", value: "csv" },
             ]}
           />
-          {format === "csv" ? <Alert type="info" showIcon message="CSV 不保存颜色和单元格样式，预览窗口仅展示数据内容。" /> : null}
         </section>
         <section>
-          <Text strong>导出范围</Text>
-          <Text type="secondary" className="npcink-v3-export-range-note">
-            符合当前筛选条件的数据，就是资产列表里筛选后的全部结果，不只是当前页；已归档设备始终不会导出。
-          </Text>
+          <Text strong><HelpLabel label="导出范围" description="符合当前筛选条件的数据，就是资产列表里筛选后的全部结果，不只是当前页；已归档设备始终不会导出。" /></Text>
           <Radio.Group className="npcink-v3-export-scope-grid" value={scope} onChange={(event) => setScope(event.target.value)}>
             <Radio value="current-filter"><strong>当前筛选结果</strong><small>{currentScopeLabel} · {currentFilterCountText}</small></Radio>
             {selectedAssets.length ? <Radio value="selected"><strong>已勾选设备</strong><small>可导出 {selectedExportAssets.length} 条（自动排除已归档）</small></Radio> : <div className="npcink-v3-export-scope-empty"><strong>已勾选设备</strong><small>尚未选择设备，请先在资产列表进入批量模式并勾选。</small></div>}
@@ -207,7 +172,7 @@ export const AssetExportModal = ({
           </Radio.Group>
         </section>
         <section>
-          <div className="npcink-v3-export-section-head"><Text strong>导出字段</Text><Text type="secondary">已选 {fieldKeys.length} 个，可拖动排序</Text></div>
+          <div className="npcink-v3-export-section-head"><Text strong>导出字段</Text><Text type="secondary">已选 {fieldKeys.length} 个</Text></div>
           <div className="npcink-v3-export-field-toolbar">
             <div><Text type="secondary">常用方案</Text><Space wrap size={6}>
               <Button type="primary" ghost size="small" onClick={() => setFieldKeys(["assetNumber", "ownerName", "department", "status", "purchasePrice", "secondHandMarketValue", "financialResidualValue", "baseboard", "cpu"])}>推荐电脑台账</Button>
@@ -216,9 +181,6 @@ export const AssetExportModal = ({
             </Space></div>
             <Space size={6}><Button size="small" onClick={() => setFieldKeys(ASSET_EXPORT_FIELDS.map((field) => field.key))}>全选</Button><Button danger type="text" size="small" onClick={() => setFieldKeys([])}>清空</Button></Space>
           </div>
-          {fieldKeys.length ? <div className="npcink-v3-export-field-order">
-            {previewFields.map((field) => <button key={field.key} type="button" draggable onDragStart={() => setDraggedField(field.key)} onDragOver={(event) => event.preventDefault()} onDrop={() => moveField(field.key)}>{field.label}<span>⋮⋮</span></button>)}
-          </div> : null}
           <div className="npcink-v3-export-fields">
             {["基础信息", "财务信息", "硬件信息", "系统信息"].map((group) => (
               <div key={group}>
@@ -231,14 +193,6 @@ export const AssetExportModal = ({
             ))}
           </div>
         </section>
-        <section>
-          <div className="npcink-v3-export-section-head"><Text strong>状态颜色</Text><Text type="secondary">仅 Excel 生效</Text></div>
-          <Radio.Group disabled={format === "csv"} value={colorMode} onChange={(event) => setColorMode(event.target.value)} options={[{ label: "整行背景", value: "row" }, { label: "仅状态单元格", value: "status-cell" }]} />
-          <div className={`npcink-v3-export-colors${format === "csv" ? " is-disabled" : ""}`}>
-            {STATUS_OPTIONS.map((status) => <div key={status.value}><span>{status.label}</span><input type="color" disabled={format === "csv"} value={statusColors[status.value] || "#ffffff"} onChange={(event) => setStatusColors((colors) => ({ ...colors, [status.value]: event.target.value }))} /><Button size="small" disabled={format === "csv" || !statusColors[status.value]} onClick={() => setStatusColors((colors) => ({ ...colors, [status.value]: "" }))}>不填色</Button></div>)}
-          </div>
-          <Space wrap><Button size="small" disabled={format === "csv"} onClick={() => setStatusColors({ ...DEFAULT_ASSET_EXPORT_STATUS_COLORS })}>恢复默认</Button><Button size="small" disabled={format === "csv"} onClick={saveColorDefaults}>保存为默认方案</Button></Space>
-        </section>
       </div>
     </Modal>
     <Modal
@@ -248,7 +202,7 @@ export const AssetExportModal = ({
       width={`calc(100vw - ${previewLeftOffset + 32}px)`}
       style={{ marginLeft: previewLeftOffset + 16, marginRight: 16 }}
       className="npcink-v3-export-preview-modal"
-      destroyOnClose
+      destroyOnHidden
       footer={[
         <Button key="back" onClick={() => setPreviewOpen(false)}>返回修改</Button>,
         <Button key="export" type="primary" loading={exporting} onClick={exportAssets}>{format === "xlsx" ? "确认导出 Excel" : "确认导出 CSV"}</Button>,
@@ -256,12 +210,13 @@ export const AssetExportModal = ({
     >
       <div className="npcink-v3-export-preview-summary">
         <div><Text strong>{previewScopeLabel}</Text><Text type="secondary">预览前 {previewAssets.length} 条，导出时包含范围内全部数据。</Text></div>
-        <Text type="secondary">{previewTotalText} · {fieldKeys.length} 列 · {format === "xlsx" ? "Excel" : "CSV"}{format === "xlsx" ? ` · ${colorMode === "row" ? "整行着色" : "状态单元格着色"}` : ""}</Text>
+        <Text type="secondary">{previewTotalText} · {fieldKeys.length} 列 · {format === "xlsx" ? "Excel" : "CSV"}{format === "xlsx" ? " · 状态单元格着色" : ""}</Text>
       </div>
       <div className="npcink-v3-export-preview-table is-fullscreen">
         {fieldKeys.length ? <table><thead><tr>{previewFields.map((field) => <th key={field.key}>{field.label}</th>)}</tr></thead><tbody>{previewAssets.map((asset) => <tr key={asset.uuid}>{previewFields.map((field) => {
-          const colored = format === "xlsx" && statusColors[asset.status] && (colorMode === "row" || field.key === "status");
-          return <td key={field.key} style={colored ? { backgroundColor: statusColors[asset.status] } : undefined} title={String(field.value(asset) ?? "")}>{String(field.value(asset) ?? "") || "-"}</td>;
+          const color = format === "xlsx" && field.key === "status" ? ASSET_EXPORT_STATUS_COLORS[asset.status] : undefined;
+          const value = String(field.value(asset, settingsQuery.data) ?? "");
+          return <td key={field.key} style={color ? { backgroundColor: color } : undefined} title={value}>{value || "-"}</td>;
         })}</tr>)}</tbody></table> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择至少一个导出字段" />}
         {previewQuery.isLoading && scope !== "selected" ? <div className="npcink-v3-export-preview-loading">正在加载预览…</div> : null}
       </div>

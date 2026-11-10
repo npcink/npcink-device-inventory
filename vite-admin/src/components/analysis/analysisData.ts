@@ -1,4 +1,6 @@
-import type { Asset, ComparisonObservation } from "@/type/v3";
+import type { Asset, ComparisonObservation, InventorySettings } from "@/type/v3";
+import { effectiveFinancialResidualValue } from "@/pages/shared/finance";
+import { formatMoney } from "@/pages/shared/presentation";
 import {
   assetHardwareContext,
   firstText,
@@ -145,5 +147,53 @@ export const observationComparableFields = (observation: ComparisonObservation) 
     "硬盘": diskBytes > 0 ? formatBytes(diskBytes) : "",
     "主板/机型": firstText(extracted.baseboard, extracted.deviceModel),
     "显卡": extracted.graphics,
+  };
+};
+
+export const assetMissingFields = (asset: Asset): string[] => {
+  const context = assetHardwareContext(asset);
+  const checks = [
+    { label: "资产编号", complete: Boolean(asset.assetNumber.trim()) },
+    { label: "资产名称", complete: Boolean(asset.name.trim()) },
+    { label: "具体部门", complete: Boolean(asset.department.trim() && !["未分配", "默认"].includes(asset.department.trim())) },
+    ...(asset.status === "active" ? [{ label: "责任人", complete: Boolean(asset.ownerName.trim()) }] : []),
+    { label: "采集快照", complete: Boolean(asset.latestObservation?.observedAt) },
+    { label: "CPU", complete: Boolean(context.extracted.cpu) },
+    { label: "内存", complete: hardwareMemoryBytes(asset) > 0 },
+    { label: "硬盘", complete: hardwareDiskBytes(asset) > 0 },
+  ];
+  return checks.filter((check) => !check.complete).map((check) => check.label);
+};
+
+export const assetValueSummary = (assets: Asset[], settings?: InventorySettings) => {
+  let totalPurchase = 0;
+  let totalResidual = 0;
+  let knownDepreciation = 0;
+  let knownResidualCount = 0;
+  let depreciationCount = 0;
+  const departments = new Map<string, { count: number; value: number }>();
+  assets.forEach((asset) => {
+    const purchase = Math.max(0, asset.purchasePrice);
+    totalPurchase += purchase;
+    const residual = effectiveFinancialResidualValue(asset, settings);
+    if (residual === null) return;
+    knownResidualCount++;
+    totalResidual += residual;
+    if (purchase > 0) {
+      knownDepreciation += Math.max(0, purchase - residual);
+      depreciationCount++;
+    }
+    const label = asset.department.trim() || "未填写";
+    const current = departments.get(label) || { count: 0, value: 0 };
+    departments.set(label, { count: current.count + 1, value: current.value + residual });
+  });
+  return {
+    totalPurchase,
+    totalResidual: knownResidualCount ? totalResidual : null,
+    knownDepreciation: depreciationCount ? knownDepreciation : null,
+    unknownResidualCount: assets.length - knownResidualCount,
+    departmentRows: Array.from(departments, ([label, value]) => ({
+      label, value: value.value, meta: `${formatMoney(value.value)} · ${value.count} 条`,
+    })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label, "zh-CN")),
   };
 };

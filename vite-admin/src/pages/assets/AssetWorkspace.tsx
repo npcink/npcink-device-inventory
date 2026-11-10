@@ -1,6 +1,6 @@
 import { lazy } from "react";
 import { DeferredPanel } from "@/components/DeferredPanel";
-import { archiveAsset, batchAssets, createAsset, getAssets, getSettings, updateAsset } from "@/services/v3";
+import { archiveAsset, batchAssets, createAsset, getAssets, getSettings } from "@/services/v3";
 import type { Asset, AssetInput, AssetType } from "@/type/v3";
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,7 +23,7 @@ import type { ColumnsType, TablePaginationConfig } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import { AssetCard } from "@/pages/assets/AssetCard";
 import { AssetLayoutMode, bulkUpdateChanges, countStatus } from "@/pages/shared/assets";
-import { initialAssetsForParams, readCachedAssetList, writeCachedAssetList } from "@/pages/shared/cache";
+import { initialAssetsForParams } from "@/pages/shared/cache";
 import { normalizeDepartmentList } from "@/pages/shared/departments";
 import { assetUpdateDateText, isComputerAsset } from "@/pages/shared/finance";
 import {
@@ -78,7 +78,6 @@ export const AssetWorkspace = ({
   const [financialDataStatus, setFinancialDataStatus] = useState<FinancialDataStatus | undefined>();
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [assetModalOpen, setAssetModalOpen] = useState(false);
-  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"card" | "table">("card");
   const [assetLayoutMode, setAssetLayoutMode] = useState<AssetLayoutMode>(() =>
@@ -104,18 +103,13 @@ export const AssetWorkspace = ({
     [assetScope, assetType, category, financialDataStatus, page, pageSize, purchasePlatform, search, status]
   );
   const initialAssetsData = useMemo(
-    () => initialAssetsForParams(queryParams) || readCachedAssetList(queryParams),
+    () => initialAssetsForParams(queryParams),
     [queryParams]
   );
   const settingsQuery = useQuery(["v3-settings"], getSettings, { staleTime: 60_000 });
   const assetsQuery = useQuery(["v3-assets", queryParams], () => getAssets(queryParams), {
     initialData: initialAssetsData,
     keepPreviousData: true,
-    onSuccess: (result) => {
-      if (result) {
-        writeCachedAssetList(queryParams, result);
-      }
-    },
   });
 
   useEffect(() => {
@@ -131,26 +125,11 @@ export const AssetWorkspace = ({
   const createMutation = useMutation(createAsset, {
     onSuccess: (asset) => {
       setAssetModalOpen(false);
-      setEditingAsset(null);
       setSelectedUuid(asset.uuid);
       queryClient.invalidateQueries(["v3-assets"]);
       message.success("资产已创建");
     },
   });
-  const updateMutation = useMutation(
-    ({ uuid, input }: { uuid: string; input: AssetInput }) => updateAsset(uuid, input),
-    {
-      onSuccess: (asset) => {
-        setAssetModalOpen(false);
-        setEditingAsset(null);
-        setSelectedUuid(asset.uuid);
-        queryClient.invalidateQueries(["v3-assets"]);
-        queryClient.invalidateQueries(["v3-asset", asset.uuid]);
-        queryClient.invalidateQueries(["v3-asset-events", asset.uuid]);
-        message.success("资产已更新");
-      },
-    }
-  );
   const archiveMutation = useMutation(archiveAsset, {
     onSuccess: (asset) => {
       queryClient.invalidateQueries(["v3-assets"]);
@@ -370,16 +349,7 @@ export const AssetWorkspace = ({
     },
   ];
 
-  const submitAsset = async (values: AssetInput) => {
-    if (editingAsset) {
-      await updateMutation.mutateAsync({ uuid: editingAsset.uuid, input: values });
-      return;
-    }
-    await createMutation.mutateAsync(values);
-  };
-
   const openCreateModal = () => {
-    setEditingAsset(null);
     setAssetModalOpen(true);
   };
 
@@ -522,7 +492,7 @@ export const AssetWorkspace = ({
           {assetScope !== "other" ? (
             <Select
               allowClear
-              placeholder="财务资料"
+              placeholder="金额筛选"
               options={FINANCIAL_DATA_STATUS_OPTIONS}
               value={financialDataStatus}
               onChange={(value) => {
@@ -727,11 +697,10 @@ export const AssetWorkspace = ({
       </DeferredPanel>
       <DeferredPanel open={assetModalOpen}>
       <AssetFormModal
-        asset={editingAsset}
         open={assetModalOpen}
         departmentOptions={departmentOptions}
         onClose={() => setAssetModalOpen(false)}
-        onSubmit={submitAsset}
+        onSubmit={async (values) => { await createMutation.mutateAsync(values); }}
       />
       </DeferredPanel>
       <DeferredPanel open={bulkModalOpen}>

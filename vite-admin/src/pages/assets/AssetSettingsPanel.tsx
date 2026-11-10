@@ -1,12 +1,13 @@
+import { HelpLabel } from "@/components/HelpLabel";
 import { getSettings, updateAsset } from "@/services/v3";
-import type { Asset, AssetInput } from "@/type/v3";
-import { assetHardwareContext, firstText, getRecord } from "@/utils/hardwareAudit";
-import { InfoCircleOutlined } from "@ant-design/icons";
+import type { Asset } from "@/type/v3";
+import { assetHardwareContext, firstText } from "@/utils/hardwareAudit";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Button, DatePicker, Form, Input, InputNumber, Radio, Select, Tooltip, message } from "antd";
+import { Button, DatePicker, Form, Input, InputNumber, Radio, Select, message } from "antd";
 import dayjs from "dayjs";
 import { useEffect, useMemo } from "react";
 import { customAssetInfo } from "@/pages/shared/assets";
+import { assetFormValuesToInput, type AssetFormValues } from "@/pages/shared/assetForm";
 import {
   DEFAULT_DEPARTMENT,
   departmentSelectOptions,
@@ -14,7 +15,6 @@ import {
   normalizeDepartmentList,
 } from "@/pages/shared/departments";
 import {
-  FinancialResidualMode,
   assetPurchaseDateText,
   calculateFinancialResidualValue,
   financialResidualMode,
@@ -33,13 +33,8 @@ export interface AssetSettingsPanelProps {
   onArchive: (asset: Asset) => void;
 }
 
-export type AssetSettingsValues = AssetInput & {
-  orderTime?: string;
-  financialResidualMode?: FinancialResidualMode;
-};
-
 export const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, onArchive }: AssetSettingsPanelProps) => {
-  const [form] = Form.useForm<AssetSettingsValues>();
+  const [form] = Form.useForm<AssetFormValues>();
   const settingsQuery = useQuery(["v3-settings"], getSettings, { staleTime: 60_000 });
   const settingsHardware = assetHardwareContext(asset);
   const primaryIp = firstText(settingsHardware.extracted.primaryIp, settingsHardware.manualHardware.ip);
@@ -49,12 +44,8 @@ export const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, o
   );
   const watchedPurchasePrice = Form.useWatch("purchasePrice", form);
   const watchedPurchaseDate = Form.useWatch("orderTime", form);
-  const watchedFinancialResidualValue = Form.useWatch("financialResidualValue", form);
   const watchedFinancialResidualMode = Form.useWatch("financialResidualMode", form);
-  const purchasePrice = Number(watchedPurchasePrice ?? asset.purchasePrice ?? 0);
-  const financialResidualValue = Number(watchedFinancialResidualValue ?? asset.financialResidualValue ?? 0);
-  const residualRate = purchasePrice > 0 ? Math.round((financialResidualValue / purchasePrice) * 100) : 0;
-  const depreciationRate = purchasePrice > 0 ? Math.max(0, 100 - residualRate) : 0;
+  const purchasePrice = Number(watchedPurchasePrice || 0);
   const estimatedFinancialResidual = useMemo(() => {
     const settings = settingsQuery.data;
     if (!settings) {
@@ -62,45 +53,13 @@ export const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, o
     }
     return calculateFinancialResidualValue(
       purchasePrice,
-      String(watchedPurchaseDate || asset.createdAt),
+      String(watchedPurchaseDate || ""),
       settings.depreciationPeriodMonths,
       settings.defaultResidualRate
     );
-  }, [asset.createdAt, purchasePrice, settingsQuery.data, watchedPurchaseDate]);
-  useEffect(() => {
-    if (watchedFinancialResidualMode === "auto" && estimatedFinancialResidual !== null) {
-      form.setFieldValue("financialResidualValue", estimatedFinancialResidual);
-    }
-  }, [estimatedFinancialResidual, form, watchedFinancialResidualMode]);
+  }, [purchasePrice, settingsQuery.data, watchedPurchaseDate]);
   const updateMutation = useMutation(
-    (values: AssetSettingsValues) => {
-      const metadata = getRecord(asset.metadata);
-      const existingPurchase = getRecord(metadata.purchase);
-      const existingFinance = getRecord(metadata.finance);
-      return updateAsset(asset.uuid, {
-        assetNumber: values.assetNumber,
-        name: values.name ?? asset.name,
-        ownerName: values.ownerName,
-        department: values.department,
-        status: values.status,
-        category: values.category,
-        purchasePrice: Number(values.purchasePrice || 0),
-        secondHandMarketValue: Number(values.secondHandMarketValue || 0),
-        financialResidualValue: Number(values.financialResidualValue || 0),
-        metadata: {
-          ...metadata,
-          purchase: {
-            ...existingPurchase,
-            order_time: values.orderTime || "",
-            total: Number(values.purchasePrice || 0),
-          },
-          finance: {
-            ...existingFinance,
-            financial_residual_mode: values.financialResidualMode || "auto",
-          },
-        },
-      });
-    },
+    (values: AssetFormValues) => updateAsset(asset.uuid, assetFormValuesToInput(values, asset, settingsQuery.data)),
     {
       onSuccess: (updated) => {
         onUpdated(updated);
@@ -144,14 +103,7 @@ export const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, o
           <div className="npcink-v3-settings-grid npcink-v3-settings-grid-three">
             <Form.Item
               name="department"
-              label={(
-                <span className="npcink-v3-form-label-with-help">
-                  部门
-                  <Tooltip title="只能选择设置中维护的部门；未选择时会归入未分配。">
-                    <InfoCircleOutlined tabIndex={0} aria-label="部门填写说明" />
-                  </Tooltip>
-                </span>
-              )}
+              label={<HelpLabel label="部门" description="只能选择设置中维护的部门；未选择时会归入未分配。" />}
               rules={[
                 {
                   validator: async (_, value) => {
@@ -170,7 +122,10 @@ export const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, o
                 filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())}
               />
             </Form.Item>
-            <Form.Item name="status" label="状态" extra="选择报废后，将保留采购价，并把二手市场价和账面净值调整为 0。">
+            <Form.Item
+              name="status"
+              label={<HelpLabel label="状态" description="选择报废后，将保留采购价，并把二手市场价和账面净值调整为 0。" />}
+            >
               <Select options={EDITABLE_STATUS_OPTIONS} />
             </Form.Item>
             <Form.Item name="category" label="设备类型">
@@ -196,8 +151,8 @@ export const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, o
             <Form.Item name="financialResidualMode" label="账面净值方式">
               <Radio.Group options={[{ label: "自动计算", value: "auto" }, { label: "手动设置", value: "manual" }]} />
             </Form.Item>
-            <Form.Item name="financialResidualValue" label={watchedFinancialResidualMode === "manual" ? "手动账面净值" : "自动账面净值"}>
-              <InputNumber disabled={watchedFinancialResidualMode !== "manual"} min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
+            <Form.Item name="financialResidualValue" label="手动账面净值" hidden={watchedFinancialResidualMode !== "manual"}>
+              <InputNumber min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
             </Form.Item>
             <Form.Item
               name="orderTime"
@@ -217,11 +172,7 @@ export const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, o
             </Form.Item>
           </div>
           <div className="npcink-v3-finance-summary">
-            <span>折旧率：{depreciationRate}%</span>
-            <span>账面净值：{formatMoney(financialResidualValue)}</span>
-            <span>账面净值率：{residualRate}%</span>
             <span>系统估算：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}</span>
-            <span>当前采用：{watchedFinancialResidualMode === "manual" ? "手动值" : "系统估算值"}</span>
           </div>
         </div>
 
@@ -238,43 +189,19 @@ export const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, o
   );
 };
 
-export interface CustomAssetSettingsValues {
-  name?: string;
-  assetNumber?: string;
-  category?: string;
-  status?: string;
-  ownerName?: string;
-  purpose?: string;
-  purchasePrice?: number;
-  secondHandMarketValue?: number;
-  financialResidualValue?: number;
-  financialResidualMode?: FinancialResidualMode;
-  numbers?: number;
-  purchaser?: string;
-  platform?: string;
-  order?: string;
-  payMethod?: string;
-  orderTime?: string;
-  link?: string;
-}
-
 export const CUSTOM_PLATFORM_EDIT_OPTIONS = ["京东", "淘宝", "闲鱼", "微信", "支付宝", "其他"].map((value) => ({
   label: value,
   value,
 }));
 
 export const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetSettingsPanelProps) => {
-  const [form] = Form.useForm<CustomAssetSettingsValues>();
+  const [form] = Form.useForm<AssetFormValues>();
   const settingsQuery = useQuery(["v3-settings"], getSettings, { staleTime: 60_000 });
   const info = useMemo(() => customAssetInfo(asset), [asset]);
   const watchedPurchasePrice = Form.useWatch("purchasePrice", form);
   const watchedPurchaseDate = Form.useWatch("orderTime", form);
-  const watchedFinancialResidualValue = Form.useWatch("financialResidualValue", form);
   const watchedFinancialResidualMode = Form.useWatch("financialResidualMode", form);
-  const purchasePrice = Number(watchedPurchasePrice ?? asset.purchasePrice ?? 0);
-  const financialResidualValue = Number(watchedFinancialResidualValue ?? asset.financialResidualValue ?? 0);
-  const residualRate = purchasePrice > 0 ? Math.round((financialResidualValue / purchasePrice) * 100) : 0;
-  const depreciationRate = purchasePrice > 0 ? Math.max(0, 100 - residualRate) : 0;
+  const purchasePrice = Number(watchedPurchasePrice || 0);
   const estimatedFinancialResidual = useMemo(() => {
     const settings = settingsQuery.data;
     if (!settings) {
@@ -282,16 +209,11 @@ export const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetS
     }
     return calculateFinancialResidualValue(
       purchasePrice,
-      String(watchedPurchaseDate || asset.createdAt),
+      String(watchedPurchaseDate || ""),
       settings.depreciationPeriodMonths,
       settings.defaultResidualRate
     );
-  }, [asset.createdAt, purchasePrice, settingsQuery.data, watchedPurchaseDate]);
-  useEffect(() => {
-    if (watchedFinancialResidualMode === "auto" && estimatedFinancialResidual !== null) {
-      form.setFieldValue("financialResidualValue", estimatedFinancialResidual);
-    }
-  }, [estimatedFinancialResidual, form, watchedFinancialResidualMode]);
+  }, [purchasePrice, settingsQuery.data, watchedPurchaseDate]);
   const categoryOptions = useMemo(
     () =>
       Array.from(new Set([...DEFAULT_CUSTOM_CATEGORIES, asset.category].map((item) => String(item || "").trim()).filter(Boolean)))
@@ -300,41 +222,7 @@ export const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetS
     [asset.category]
   );
   const updateMutation = useMutation(
-    (values: CustomAssetSettingsValues) => {
-      const metadata = getRecord(asset.metadata);
-      const existingPurchase = getRecord(metadata.purchase);
-      const existingFinance = getRecord(metadata.finance);
-      return updateAsset(asset.uuid, {
-        name: values.name,
-        assetNumber: values.assetNumber,
-        ownerName: values.ownerName,
-        status: values.status,
-        category: values.category,
-        purchasePrice: Number(values.purchasePrice || 0),
-        secondHandMarketValue: Number(values.secondHandMarketValue || 0),
-        financialResidualValue: Number(values.financialResidualValue || 0),
-        metadata: {
-          ...metadata,
-          purpose: values.purpose || "",
-          purchase: {
-            ...existingPurchase,
-            title: values.name || "",
-            total: Number(values.purchasePrice || 0),
-            numbers: Number(values.numbers || 0),
-            purchaser: values.purchaser || "",
-            platform: values.platform || "",
-            order: values.order || "",
-            pay_method: values.payMethod || "",
-            order_time: values.orderTime || "",
-            link: values.link || "",
-          },
-          finance: {
-            ...existingFinance,
-            financial_residual_mode: values.financialResidualMode || "auto",
-          },
-        },
-      });
-    },
+    (values: AssetFormValues) => updateAsset(asset.uuid, assetFormValuesToInput(values, asset, settingsQuery.data)),
     {
       onSuccess: (updated) => {
         onUpdated(updated);
@@ -345,13 +233,13 @@ export const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetS
 
   useEffect(() => {
     form.setFieldsValue({
-      name: info.title,
+      name: asset.name,
       assetNumber: info.number,
-      category: info.category,
+      category: asset.category,
       status: asset.status,
       ownerName: info.usage,
       purpose: info.purpose,
-      purchasePrice: Number(info.total || asset.purchasePrice || 0),
+      purchasePrice: asset.purchasePrice,
       secondHandMarketValue: asset.secondHandMarketValue,
       financialResidualValue: asset.financialResidualValue,
       financialResidualMode: financialResidualMode(asset),
@@ -392,7 +280,10 @@ export const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetS
                 }}
               />
             </Form.Item>
-            <Form.Item name="status" label="当前状态" extra="选择报废后，将保留采购价，并把二手市场价和账面净值调整为 0。">
+            <Form.Item
+              name="status"
+              label={<HelpLabel label="当前状态" description="选择报废后，将保留采购价，并把二手市场价和账面净值调整为 0。" />}
+            >
               <Select options={EDITABLE_STATUS_OPTIONS} />
             </Form.Item>
             <Form.Item name="ownerName" label="使用人 / 责任人">
@@ -416,8 +307,8 @@ export const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetS
             <Form.Item name="financialResidualMode" label="账面净值方式">
               <Radio.Group options={[{ label: "自动计算", value: "auto" }, { label: "手动设置", value: "manual" }]} />
             </Form.Item>
-            <Form.Item name="financialResidualValue" label={watchedFinancialResidualMode === "manual" ? "手动账面净值" : "自动账面净值"}>
-              <InputNumber disabled={watchedFinancialResidualMode !== "manual"} min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
+            <Form.Item name="financialResidualValue" label="手动账面净值" hidden={watchedFinancialResidualMode !== "manual"}>
+              <InputNumber min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
             </Form.Item>
             <Form.Item name="numbers" label="采购数量">
               <InputNumber min={0} precision={0} className="npcink-v3-number" />
@@ -427,11 +318,7 @@ export const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetS
             </Form.Item>
           </div>
           <div className="npcink-v3-finance-summary">
-            <span>折旧率：{depreciationRate}%</span>
-            <span>账面净值：{formatMoney(financialResidualValue)}</span>
-            <span>账面净值率：{residualRate}%</span>
             <span>系统估算：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}</span>
-            <span>当前采用：{watchedFinancialResidualMode === "manual" ? "手动值" : "系统估算值"}</span>
           </div>
         </div>
 

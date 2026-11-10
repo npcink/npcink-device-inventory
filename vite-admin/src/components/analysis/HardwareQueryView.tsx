@@ -1,5 +1,5 @@
-import { QuestionCircleOutlined } from "@ant-design/icons";
-import { Button, Empty, Input, InputNumber, Radio, Select, Table, Tooltip, Typography } from "antd";
+import { HelpLabel } from "@/components/HelpLabel";
+import { Button, Empty, Input, InputNumber, Radio, Select, Table, Typography } from "antd";
 import type { ReactNode } from "react";
 import type { Asset } from "@/type/v3";
 import type { HardwareQueryItem, HardwareQueryState } from "./analysisTypes";
@@ -52,15 +52,15 @@ export const HardwareQueryView = ({
     <div className="npcink-v3-analysis-grid">
       <section className="npcink-v3-analysis-panel is-wide">
         <div className="npcink-v3-analysis-panel-head">
-          <div><Title level={4}>组合查询条件</Title><Text type="secondary">不同字段之间为 AND；部门、状态、显卡和 CPU 的多个值在字段内部为 OR。</Text></div>
+          <div><Title level={4}><HelpLabel label="组合查询条件" description="不同字段之间为 AND；部门、状态、显卡和 CPU 的多个值在字段内部为 OR。" /></Title></div>
           {conditions.length ? <Button onClick={onReset}>重置条件</Button> : null}
         </div>
         <div className="npcink-v3-hardware-query-controls">
           <div><Text type="secondary">部门</Text><Select mode="multiple" allowClear showSearch placeholder="选择部门" options={departmentOptions} value={query.departments} onChange={(departments) => onQueryChange((value) => ({ ...value, departments }))} filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())} /></div>
           <div><Text type="secondary">状态</Text><Select mode="multiple" allowClear placeholder="选择状态" options={[{ label: "在用", value: "active" }, { label: "闲置", value: "inactive" }, { label: "维护", value: "maintenance" }, { label: "报废", value: "retired" }]} value={query.statuses} onChange={(statuses) => onQueryChange((value) => ({ ...value, statuses }))} /></div>
           <div><Text type="secondary">使用人</Text><Select allowClear placeholder="全部使用人" options={[{ label: "已分配", value: "assigned" }, { label: "未分配", value: "unassigned" }]} value={query.ownerMode} onChange={(ownerMode) => onQueryChange((value) => ({ ...value, ownerMode }))} /></div>
-          <div><div className="npcink-v3-query-label"><Text type="secondary">显卡</Text><Tooltip title="系列包含会忽略 NVIDIA、GeForce 等常见厂商词；精确型号要求规范化后的完整型号一致。"><QuestionCircleOutlined /></Tooltip></div><Select mode="tags" allowClear showSearch placeholder="例如：4060" options={graphicsOptions} value={query.graphicsTerms} onChange={(graphicsTerms) => onQueryChange((value) => ({ ...value, graphicsTerms }))} filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())} /><Radio.Group size="small" optionType="button" buttonStyle="solid" options={[{ label: "系列包含", value: "contains" }, { label: "精确型号", value: "exact" }]} value={query.graphicsMode} onChange={(event) => onQueryChange((value) => ({ ...value, graphicsMode: event.target.value }))} /></div>
-          <div><div className="npcink-v3-query-label"><Text type="secondary">CPU</Text><Tooltip title="可输入多个 CPU 系列或型号；多个值之间按 OR 匹配。"><QuestionCircleOutlined /></Tooltip></div><Select mode="tags" allowClear showSearch placeholder="例如：i5-12400 或 Ryzen 7" options={cpuOptions} value={query.cpuTerms} onChange={(cpuTerms) => onQueryChange((value) => ({ ...value, cpuTerms }))} filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())} /><Radio.Group size="small" optionType="button" buttonStyle="solid" options={[{ label: "系列包含", value: "contains" }, { label: "精确型号", value: "exact" }]} value={query.cpuMode} onChange={(event) => onQueryChange((value) => ({ ...value, cpuMode: event.target.value }))} /></div>
+          <div><div className="npcink-v3-query-label"><Text type="secondary"><HelpLabel label="显卡" description="系列包含会忽略 NVIDIA、GeForce 等常见厂商词；精确型号要求规范化后的完整型号一致。" /></Text></div><Select mode="tags" allowClear showSearch placeholder="例如：4060" options={graphicsOptions} value={query.graphicsTerms} onChange={(graphicsTerms) => onQueryChange((value) => ({ ...value, graphicsTerms }))} filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())} /><Radio.Group size="small" optionType="button" buttonStyle="solid" options={[{ label: "系列包含", value: "contains" }, { label: "精确型号", value: "exact" }]} value={query.graphicsMode} onChange={(event) => onQueryChange((value) => ({ ...value, graphicsMode: event.target.value }))} /></div>
+          <div><div className="npcink-v3-query-label"><Text type="secondary"><HelpLabel label="CPU" description="可输入多个 CPU 系列或型号；多个值之间按 OR 匹配。" /></Text></div><Select mode="tags" allowClear showSearch placeholder="例如：i5-12400 或 Ryzen 7" options={cpuOptions} value={query.cpuTerms} onChange={(cpuTerms) => onQueryChange((value) => ({ ...value, cpuTerms }))} filterOption={(input, option) => String(option?.label || "").toLowerCase().includes(input.toLowerCase())} /><Radio.Group size="small" optionType="button" buttonStyle="solid" options={[{ label: "系列包含", value: "contains" }, { label: "精确型号", value: "exact" }]} value={query.cpuMode} onChange={(event) => onQueryChange((value) => ({ ...value, cpuMode: event.target.value }))} /></div>
           <div><Text type="secondary">使用人姓名</Text><Input allowClear placeholder="姓名包含关键词" value={query.ownerKeyword} onChange={(event) => onQueryChange((value) => ({ ...value, ownerKeyword: event.target.value }))} /></div>
           <div><Text type="secondary">最低内存</Text><InputNumber min={1} max={1024} placeholder="不限" addonAfter="GB" value={query.minMemoryGb} onChange={(value) => onQueryChange((queryValue) => ({ ...queryValue, minMemoryGb: value || undefined }))} /></div>
           <div><Text type="secondary">最低硬盘</Text><InputNumber min={1} max={16384} placeholder="不限" addonAfter="GB" value={query.minDiskGb} onChange={(value) => onQueryChange((queryValue) => ({ ...queryValue, minDiskGb: value || undefined }))} /></div>
@@ -75,7 +75,7 @@ export const HardwareQueryView = ({
       </section>
       <section className="npcink-v3-analysis-panel is-wide npcink-v3-query-distribution"><Title level={4}>命中部门分布</Title><AnalysisDistribution rows={departmentRows} onSelect={(row: AnalysisDistributionRow) => onOpenDrillDown(`${row.label}命中设备`, matchedItems.filter((item) => (item.asset.department || "未填写") === row.label).map((item) => item.asset))} emptyText="暂无命中部门" /></section>
       <section className="npcink-v3-analysis-panel is-wide">
-        <div className="npcink-v3-analysis-panel-head"><div><Title level={4}>命中人员与设备</Title><Text type="secondary">点击资产编号可在当前分析页查看只读详情。</Text></div><Text type="secondary">共 {matchedItems.length} 台</Text></div>
+        <div className="npcink-v3-analysis-panel-head"><div><Title level={4}><HelpLabel label="命中人员与设备" description="点击资产编号可在当前分析页查看只读详情。" /></Title></div><Text type="secondary">共 {matchedItems.length} 台</Text></div>
         <Table<HardwareQueryItem>
           rowKey={(item) => item.asset.uuid}
           size="middle"
