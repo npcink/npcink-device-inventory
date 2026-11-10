@@ -1,7 +1,7 @@
 mod config;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local, Utc};
+use chrono::Local;
 use npcink_device_agent::{collector, upload};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -10,9 +10,6 @@ use std::io::{Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-#[cfg(target_os = "windows")]
-use std::thread;
 use std::time::{Duration, Instant};
 use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
 use tauri::Emitter;
@@ -27,7 +24,6 @@ const APP_LOG_MAX_BYTES: u64 = 1024 * 1024;
 const SNAPSHOT_CACHE_FILE: &str = "upload-snapshot.json";
 const SNAPSHOT_CACHE_TTL: Duration = Duration::from_secs(600);
 const DIAGNOSTICS_LOG_TAIL_BYTES: u64 = 256 * 1024;
-const DIAGNOSTICS_COMMAND_TIMEOUT: Duration = Duration::from_secs(12);
 const DIAGNOSTICS_PROGRESS_EVENT: &str = "diagnostics-progress";
 const PROJECT_URL: &str = "https://github.com/npcink/npcink-device-inventory";
 const MENU_CHECK_UPDATE: &str = "check_for_updates";
@@ -267,38 +263,6 @@ fn write_cached_device_snapshot(snapshot: &DeviceSnapshot) -> Result<()> {
 }
 
 #[tauri::command]
-async fn collect_runtime_status() -> Result<Value, String> {
-    let result = tauri::async_runtime::spawn_blocking(collect_runtime_status_inner).await;
-    match result {
-        Ok(status) => status,
-        Err(error) => {
-            let message = error.to_string();
-            write_app_log("error", "runtime.collect_task_failed", &message);
-            Err(message)
-        }
-    }
-}
-
-fn collect_runtime_status_inner() -> Result<Value, String> {
-    match collector::collect_runtime_status() {
-        Ok(status) => Ok(status),
-        Err(error) => {
-            let message = error.to_string();
-            write_app_log("error", "runtime.collect_failed", &message);
-            Err(message)
-        }
-    }
-}
-
-#[tauri::command]
-fn get_runtime_history(range_minutes: Option<u64>) -> Value {
-    json!({
-        "summary": collector::runtime_history_summary(range_minutes),
-        "chart": collector::runtime_chart(range_minutes, 60),
-    })
-}
-
-#[tauri::command]
 async fn submit_device_data(config: AgentConfig, data: Value) -> Result<Value, String> {
     let result =
         tauri::async_runtime::spawn_blocking(move || submit_device_data_inner(config, data)).await;
@@ -412,53 +376,6 @@ fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-const WINDBG_URL: &str = "https://learn.microsoft.com/zh-cn/windows-hardware/drivers/debugger/";
-
-#[cfg(any(target_os = "windows", test))]
-fn diagnostic_tool_spec(tool: &str) -> Result<(&'static str, &'static [&'static str]), String> {
-    match tool {
-        "device_manager" => Ok(("mmc.exe", &["devmgmt.msc"])),
-        "event_viewer" => Ok(("mmc.exe", &["eventvwr.msc"])),
-        "directx" => Ok(("dxdiag.exe", &[])),
-        "reliability" => Ok(("perfmon.exe", &["/rel"])),
-        _ => Err("不支持的排障工具".into()),
-    }
-}
-
-#[tauri::command]
-fn open_diagnostic_tool(app: tauri::AppHandle, tool: String) -> Result<(), String> {
-    if tool == "windbg" {
-        return app
-            .opener()
-            .open_url(WINDBG_URL, None::<&str>)
-            .map_err(|error| error.to_string());
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let (program, args) = diagnostic_tool_spec(&tool)?;
-        let system =
-            PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()))
-                .join("System32");
-        let args = args
-            .iter()
-            .map(|arg| {
-                if arg.ends_with(".msc") {
-                    system.join(arg).into_os_string()
-                } else {
-                    (*arg).into()
-                }
-            })
-            .collect::<Vec<_>>();
-        Command::new(system.join(program))
-            .args(args)
-            .spawn()
-            .map_err(|error| format!("无法打开系统工具：{error}"))?;
-        Ok(())
-    }
-    #[cfg(not(target_os = "windows"))]
-    Err("这些系统工具仅支持 Windows".into())
-}
-
 #[tauri::command]
 fn append_app_log(input: AppLogInput) {
     let level = input.level.as_deref().unwrap_or("info");
@@ -482,14 +399,11 @@ pub fn run() {
             verify_upload_config,
             collect_device_snapshot,
             get_cached_device_snapshot,
-            collect_runtime_status,
-            get_runtime_history,
             submit_device_data,
             export_hardware_feedback,
             generate_diagnostics_package,
             open_path,
             open_url,
-            open_diagnostic_tool,
             append_app_log
         ])
         .run(tauri::generate_context!())
@@ -724,145 +638,67 @@ fn hardware_feedback_payload(snapshot: &DeviceSnapshot, exported_at: &str) -> Va
 }
 
 fn create_diagnostics_package(app: tauri::AppHandle) -> Result<DiagnosticsPackage> {
-    let mut progress = DiagnosticsProgressEmitter::new(app, diagnostics_progress_total());
-    progress.step("准备排障包", "创建本地排障目录");
-    let stamp = Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let mut progress = DiagnosticsProgressEmitter::new(app, 5);
+    progress.step("准备上传排障包", "创建本地排障目录");
+    let stamp = Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
     let directory_path = diagnostics_base_dir()?.join(format!("NpcinkDiagnostics-{stamp}"));
-    fs::create_dir_all(&directory_path).with_context(|| {
-        format!(
-            "failed to create diagnostics dir {}",
-            directory_path.display()
-        )
-    })?;
-
-    let privilege_info = diagnostics_privilege_info();
+    let mut directory = fs::DirBuilder::new();
+    #[cfg(unix)]
+    directory.mode(0o700);
+    directory
+        .create(&directory_path)
+        .context("failed to create diagnostics directory")?;
+    progress.step("采集硬件信息", "读取硬件事实、身份检查和采集状态");
+    let data = collector::collect_static_data()
+        .unwrap_or_else(|error| json!({"error": error.to_string()}));
+    progress.step("保存采集结果", "写入脱敏硬件、身份检查和配置摘要");
+    write_support_snapshots(&directory_path, data)?;
+    write_config_snapshot(&directory_path)?;
+    progress.step("收集客户端日志", "保存本地应用日志尾部");
+    write_app_log_snapshot(&directory_path)?;
     write_text(
         &directory_path.join("README.txt"),
-        &format!(
-            "Npcink Device Agent diagnostics package\n生成时间: {}\n平台: {}\n运行身份: {}\n\n此排障包由本机生成，用于管理员排查问题。分享前请先确认文件内容。\n",
-            Local::now().to_rfc3339(),
-            std::env::consts::OS,
-            privilege_label(&privilege_info),
-        ),
+        "Npcink Device Agent 上传排障包\n包含脱敏硬件、身份检查、采集状态、配置摘要和客户端日志。\n仅保存在本机；发送前请检查内容。完整身份核对请另行导出硬件信息。\n",
     )?;
-    write_json(&directory_path.join("privilege-info.json"), &privilege_info)?;
-    progress.step("采集硬件信息", "读取本机静态硬件、系统和设备标识");
-    let static_data =
-        redact_sensitive_json(collector::collect_static_data().unwrap_or_else(|error| {
-            json!({
-                "error": error.to_string(),
-            })
-        }));
-    progress.step("采集运行状态", "记录 CPU、内存、磁盘和本次会话监控");
-    let runtime_status =
-        redact_sensitive_json(collector::collect_runtime_status().unwrap_or_else(|error| {
-            json!({
-                "error": error.to_string(),
-            })
-        }));
-    let runtime_history = redact_sensitive_json(collector::runtime_history(None));
-    let runtime_history_summary = collector::runtime_history_summary(None);
-    let runtime_history_coverage = runtime_history_coverage(&runtime_history_summary);
-    progress.step("写入基础快照", "保存配置、硬件、运行状态和监控历史");
+    let mut files = package_file_list(&directory_path)?;
+    files.push("diagnostics-summary.json".into());
     write_json(
-        &directory_path.join("device-static-data.json"),
-        &static_data,
+        &directory_path.join("diagnostics-summary.json"),
+        &json!({
+            "schema": "npcink-agent-support-v1",
+            "version": env!("CARGO_PKG_VERSION"),
+            "generated_at": Local::now().to_rfc3339(),
+            "platform": std::env::consts::OS,
+            "package_files": files,
+        }),
     )?;
-    write_json(
-        &directory_path.join("identity-check.json"),
-        &static_data
-            .get("identityDiagnostics")
-            .cloned()
-            .unwrap_or(json!({"decision": "unavailable"})),
-    )?;
-    write_json(
-        &directory_path.join("hardware-probes.json"),
-        &static_data
-            .get("hardwareProbeAttempts")
-            .cloned()
-            .unwrap_or(json!([])),
-    )?;
-    write_text(&directory_path.join("tools-guide.txt"), &format!(
-        "设备身份：查看 identity-check.json 和 device-static-data.json。\n硬件采集：查看 hardware-probes.json，区分成功、空结果和查询失败。\n系统工具：设备管理器、事件查看器、DirectX 诊断、可靠性监视器，可从客户端排障页打开。\nWinDbg 官方安装说明（分析蓝屏转储）：{WINDBG_URL}\n"
-    ))?;
-    write_json(&directory_path.join("runtime-status.json"), &runtime_status)?;
-    write_json(
-        &directory_path.join("runtime-history.json"),
-        &runtime_history,
-    )?;
-    write_json(
-        &directory_path.join("runtime-history-summary.json"),
-        &runtime_history_summary,
-    )?;
-    write_json(
-        &directory_path.join("runtime-history-coverage.json"),
-        &runtime_history_coverage,
-    )?;
-    write_config_snapshot(&directory_path)?;
-    collect_platform_diagnostics(&directory_path, &mut progress)?;
-    progress.step("收集应用日志", "保存软件本地日志尾部");
-    write_app_log_snapshot(&directory_path)?;
-    progress.step("生成摘要", "汇总排障包内容和关键状态");
-    let config = read_config().unwrap_or_default();
-    write_diagnostics_summary(
-        &directory_path,
-        &static_data,
-        &runtime_status,
-        &runtime_history_summary,
-        &runtime_history_coverage,
-        &privilege_info,
-        &config,
-    )?;
-
-    progress.step("压缩排障包", "生成可发送的 zip 文件");
+    progress.step("压缩上传排障包", "生成可发送的 zip 文件");
     let zip_path = directory_path.with_extension("zip");
-    zip_directory(&directory_path, &zip_path)
-        .with_context(|| format!("failed to create zip {}", zip_path.display()))?;
-
+    zip_directory(&directory_path, &zip_path)?;
     Ok(DiagnosticsPackage {
         directory_path: directory_path.to_string_lossy().to_string(),
         zip_path: zip_path.to_string_lossy().to_string(),
     })
 }
 
-fn runtime_history_coverage(runtime_history_summary: &Value) -> Value {
-    let sample_count = value_u64(runtime_history_summary, "/sample_count").unwrap_or(0);
-    let started_at = value_text(runtime_history_summary, "/started_at");
-    let ended_at = value_text(runtime_history_summary, "/ended_at");
-    let duration_seconds = match (
-        DateTime::parse_from_rfc3339(&started_at),
-        DateTime::parse_from_rfc3339(&ended_at),
-    ) {
-        (Ok(start), Ok(end)) => Some(
-            end.with_timezone(&Utc)
-                .signed_duration_since(start.with_timezone(&Utc))
-                .num_seconds()
-                .max(0),
-        ),
-        _ => None,
-    };
-    let recommended_seconds = 300;
-    let quality = if sample_count == 0 {
-        "missing"
-    } else if duration_seconds.unwrap_or(0) < recommended_seconds {
-        "short"
-    } else {
-        "usable"
-    };
-
-    json!({
-        "quality": quality,
-        "sample_count": sample_count,
-        "started_at": empty_label(&started_at),
-        "ended_at": empty_label(&ended_at),
-        "duration_seconds": duration_seconds,
-        "recommended_minimum_seconds": recommended_seconds,
-        "note": match quality {
-            "missing" => "未记录到运行历史；只能分析生成排障包时的单次快照。",
-            "short" => "运行历史覆盖时间偏短，适合初筛当前负载；偶发卡顿建议让软件运行 5-15 分钟后重新生成排障包。",
-            _ => "运行历史覆盖时间可用于初步分析性能波动。",
-        },
-    })
+fn write_support_snapshots(out: &Path, data: Value) -> Result<()> {
+    // Identity diagnostics were calculated before identifiers are redacted.
+    let data = redact_sensitive_json(data);
+    write_json(
+        &out.join("identity-check.json"),
+        &data
+            .get("identityDiagnostics")
+            .cloned()
+            .unwrap_or(json!({"decision": "unavailable"})),
+    )?;
+    write_json(
+        &out.join("hardware-probes.json"),
+        &data
+            .get("hardwareProbeAttempts")
+            .cloned()
+            .unwrap_or(json!([])),
+    )?;
+    write_json(&out.join("device-static-data.json"), &data)
 }
 
 impl DiagnosticsProgressEmitter {
@@ -888,90 +724,6 @@ impl DiagnosticsProgressEmitter {
     }
 }
 
-fn diagnostics_progress_total() -> usize {
-    7 + platform_diagnostics_step_count()
-}
-
-fn privilege_label(info: &Value) -> &'static str {
-    match info.get("is_admin").and_then(Value::as_bool) {
-        Some(true) => "管理员权限",
-        Some(false) => "普通权限",
-        None => "未知",
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn diagnostics_privilege_info() -> Value {
-    let command = "$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { 'true' } else { 'false' }";
-    let output = powershell_stdout(command, Duration::from_secs(5));
-    let is_admin = output
-        .as_deref()
-        .map(str::trim)
-        .map(|text| text.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-
-    json!({
-        "is_admin": is_admin,
-        "label": if is_admin { "管理员权限" } else { "普通权限" },
-        "source": "windows-principal",
-        "note": if is_admin {
-            "已使用管理员权限运行，磁盘可靠性、电源唤醒和 dump 相关信息更完整。"
-        } else {
-            "当前为普通权限运行，部分磁盘可靠性、电源唤醒和 dump 相关信息可能不完整。"
-        },
-        "detection_error": output.is_none(),
-    })
-}
-
-#[cfg(not(target_os = "windows"))]
-fn diagnostics_privilege_info() -> Value {
-    let is_admin = command_stdout("id", &["-u"], Duration::from_secs(5))
-        .as_deref()
-        .map(str::trim)
-        .map(|text| text == "0")
-        .unwrap_or(false);
-    json!({
-        "is_admin": is_admin,
-        "label": if is_admin { "管理员权限" } else { "普通权限" },
-        "source": "posix-euid",
-        "note": if is_admin {
-            "已使用管理员权限运行。"
-        } else {
-            "当前为普通权限运行。"
-        },
-    })
-}
-
-#[cfg(target_os = "windows")]
-fn powershell_stdout(command: &str, timeout: Duration) -> Option<String> {
-    let args = powershell_utf8_args(command);
-    let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-    command_stdout("powershell", &arg_refs, timeout)
-}
-
-fn command_stdout(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
-    let output = command_output_with_timeout(program, args, timeout).ok()?;
-    if !output.status.success() || output.timed_out || output.stdout_truncated {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-#[cfg(target_os = "windows")]
-fn platform_diagnostics_step_count() -> usize {
-    9
-}
-
-#[cfg(target_os = "macos")]
-fn platform_diagnostics_step_count() -> usize {
-    3
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-fn platform_diagnostics_step_count() -> usize {
-    3
-}
-
 fn write_config_snapshot(out: &Path) -> Result<()> {
     let config = read_config().unwrap_or_default();
     write_json(
@@ -993,528 +745,6 @@ fn write_app_log_snapshot(out: &Path) -> Result<()> {
         Err(error) => format!("app log path unavailable: {error}\n"),
     };
     write_text(&out.join(APP_LOG_FILE), &redact_diagnostics_text(&content))
-}
-
-fn write_diagnostics_summary(
-    out: &Path,
-    static_data: &Value,
-    runtime_status: &Value,
-    runtime_history_summary: &Value,
-    runtime_history_coverage: &Value,
-    privilege_info: &Value,
-    config: &AgentConfig,
-) -> Result<()> {
-    let recent_error_lines = count_log_payload_lines(&out.join("recent-errors.log"));
-    let diagnostic_report_count = count_matching_lines(
-        &out.join("recent-diagnostic-reports.txt"),
-        &[".crash", ".panic", ".ips"],
-    );
-    let cbs_repair_line_count = count_log_payload_lines(&out.join("cbs-recent-errors.txt"));
-    let minidump_count = count_payload_matching_lines(&out.join("minidump-copy.txt"), &[".dmp"]);
-    let wer_report_count =
-        count_payload_matching_lines(&out.join("wer-report-summary.txt"), &["name "]);
-    let app_log_included = out.join(APP_LOG_FILE).exists();
-    let mut package_files = package_file_list(out)?;
-    package_files.push("diagnostics-summary.json".to_string());
-    package_files.sort();
-
-    write_json(
-        &out.join("diagnostics-summary.json"),
-        &json!({
-            "schema": "npcink-diagnostics-summary-v1",
-            "generated_at": Local::now().to_rfc3339(),
-            "app": {
-                "name": APP_NAME,
-                "version": env!("CARGO_PKG_VERSION"),
-                "project_url": PROJECT_URL,
-            },
-            "platform": std::env::consts::OS,
-            "privilege": privilege_info,
-            "config": {
-                "configured": !config.site.trim().is_empty() && !config.token.trim().is_empty(),
-                "preset_label": empty_label(&config.preset_label),
-                "site": redact_url_for_log(&config.site),
-                "token": if config.token.trim().is_empty() { "missing" } else { "redacted" },
-            },
-            "device": {
-                "computer_name": value_text(static_data, "/os/hostname"),
-                "system": join_non_empty(&[
-                    value_text(static_data, "/os/distro"),
-                    value_text(static_data, "/os/release"),
-                ]),
-                "model": join_non_empty(&[
-                    value_text(static_data, "/system/manufacturer"),
-                    value_text(static_data, "/system/model"),
-                ]),
-                "cpu": join_non_empty(&[
-                    value_text(static_data, "/cpu/manufacturer"),
-                    value_text(static_data, "/cpu/brand"),
-                ]),
-                "memory_total_bytes": value_u64(static_data, "/mem/total"),
-                "disk_total_bytes": value_u64(runtime_status, "/disk/total"),
-                "disk_available_bytes": value_u64(runtime_status, "/disk/available"),
-                "disk_mount": value_text(runtime_status, "/disk/mount"),
-            },
-            "runtime": {
-                "collected_at": value_text(runtime_status, "/collected_at"),
-                "cpu_usage_percent": value_f64(runtime_status, "/cpu/usage_percent"),
-                "memory_used_bytes": value_u64(runtime_status, "/memory/used"),
-                "memory_total_bytes": value_u64(runtime_status, "/memory/total"),
-                "disk_used_bytes": value_u64(runtime_status, "/disk/used"),
-                "disk_total_bytes": value_u64(runtime_status, "/disk/total"),
-                "primary_temperature": primary_temperature_summary(runtime_status),
-                "advanced": runtime_status.get("advanced").cloned().unwrap_or(Value::Null),
-                "history_summary": runtime_history_summary,
-                "history_coverage": runtime_history_coverage,
-            },
-            "signals": {
-                "recent_error_lines": recent_error_lines,
-                "diagnostic_report_count": diagnostic_report_count,
-                "cbs_repair_line_count": cbs_repair_line_count,
-                "minidump_count": minidump_count,
-                "wer_report_count": wer_report_count,
-                "app_log_included": app_log_included,
-            },
-            "package_files": package_files,
-            "privacy": {
-                "token_redacted": true,
-                "identity_fields_redacted": true,
-                "home_path_redacted": true,
-            },
-        }),
-    )
-}
-
-#[cfg(target_os = "windows")]
-fn collect_platform_diagnostics(
-    out: &Path,
-    progress: &mut DiagnosticsProgressEmitter,
-) -> Result<()> {
-    progress.step(
-        "收集 Windows 事件",
-        "读取系统、应用、安装、更新和可靠性记录",
-    );
-    let event_commands = [
-        (
-            "system-relevant-events.txt",
-            "Get-WinEvent -FilterHashtable @{LogName='System'; StartTime=(Get-Date).AddDays(-14); Id=41,1001,6008,6005,6006,1074,7,11,15,51,55,57,129,153,157,161,17,18,19,219,7000,7001,7009,7011,7022,7023,7024,7031,7034} -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,MachineName,Message | Format-List",
-        ),
-        (
-            "system-relevant-events.csv",
-            "Get-WinEvent -FilterHashtable @{LogName='System'; StartTime=(Get-Date).AddDays(-14); Id=41,1001,6008,6005,6006,1074,7,11,15,51,55,57,129,153,157,161,17,18,19,46,47,219,7000,7001,7009,7011,7022,7023,7024,7031,7034} -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,MachineName,Message | ConvertTo-Csv -NoTypeInformation",
-        ),
-        (
-            "application-crash-events.txt",
-            "Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddDays(-14); Id=1000,1001,1002,1005,1026} -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,MachineName,Message | Format-List",
-        ),
-        (
-            "application-crash-events.csv",
-            "Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddDays(-14); Id=1000,1001,1002,1005,1026} -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,MachineName,Message | ConvertTo-Csv -NoTypeInformation",
-        ),
-        (
-            "setup-events.csv",
-            "Get-WinEvent -FilterHashtable @{LogName='Setup'; StartTime=(Get-Date).AddDays(-14)} -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,Message | ConvertTo-Csv -NoTypeInformation",
-        ),
-        (
-            "windows-update-events.csv",
-            "Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-WindowsUpdateClient/Operational'; StartTime=(Get-Date).AddDays(-14)} -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,Message | ConvertTo-Csv -NoTypeInformation",
-        ),
-        (
-            "reliability-records.txt",
-            "Get-CimInstance -ClassName Win32_ReliabilityRecords -ErrorAction SilentlyContinue | Where-Object { $_.TimeGenerated -ge (Get-Date).AddDays(-14) } | Select-Object TimeGenerated,SourceName,EventIdentifier,ProductName,Message | Format-List",
-        ),
-        (
-            "reliability-records.csv",
-            "Get-CimInstance -ClassName Win32_ReliabilityRecords -ErrorAction SilentlyContinue | Where-Object { $_.TimeGenerated -ge (Get-Date).AddDays(-14) } | Select-Object TimeGenerated,SourceName,EventIdentifier,ProductName,Message | ConvertTo-Csv -NoTypeInformation",
-        ),
-    ];
-    run_command_group(out, &event_commands)?;
-    diagnostics_group_pause();
-
-    progress.step("收集硬件明细", "读取 BIOS、主板、内存、显卡和整机信息");
-    let hardware_commands = [
-        ("computer-info.txt", "Get-ComputerInfo | Format-List"),
-        (
-            "hardware-info.txt",
-            "$classes='Win32_BIOS','Win32_BaseBoard','Win32_SystemEnclosure','Win32_Processor','Win32_PhysicalMemory','Win32_VideoController','Win32_DesktopMonitor','Win32_DiskDrive','Win32_Battery'; foreach ($class in $classes) { \"===== $class =====\"; Get-CimInstance -ClassName $class -ErrorAction SilentlyContinue | Format-List * }; \"===== root\\wmi:WmiMonitorID =====\"; Get-CimInstance -Namespace root\\wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | Select-Object InstanceName,Active,ManufacturerName,UserFriendlyName,SerialNumberID,YearOfManufacture,WeekOfManufacture | Format-List *",
-        ),
-    ];
-    run_command_group(out, &hardware_commands)?;
-    diagnostics_group_pause();
-
-    progress.step("收集驱动信息", "读取已签名驱动、PnP 驱动和异常设备");
-    let driver_commands = [
-        (
-            "signed-drivers.txt",
-            "Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue | Select-Object DeviceName,Manufacturer,DriverVersion,DriverDate,InfName,IsSigned | Sort-Object DeviceName | Format-Table -AutoSize",
-        ),
-        (
-            "signed-drivers.csv",
-            "Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue | Select-Object DeviceName,Manufacturer,DriverVersion,DriverDate,InfName,IsSigned | Sort-Object DeviceName | ConvertTo-Csv -NoTypeInformation",
-        ),
-        (
-            "pnputil-enum-drivers.txt",
-            "pnputil /enum-drivers",
-        ),
-        (
-            "problem-devices.txt",
-            "Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue | Where-Object { $_.Status -ne 'OK' -or $_.ConfigManagerErrorCode -ne 0 } | Format-List *",
-        ),
-    ];
-    run_command_group(out, &driver_commands)?;
-    diagnostics_group_pause();
-
-    progress.step("收集磁盘与电源", "读取磁盘、分区、SMART、卷和电源状态");
-    let storage_commands = [
-        (
-            "physical-disk.txt",
-            "Get-PhysicalDisk -ErrorAction SilentlyContinue | Format-List *",
-        ),
-        (
-            "storage-reliability-counter.txt",
-            "Get-PhysicalDisk -ErrorAction SilentlyContinue | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue | Format-List *",
-        ),
-        (
-            "smart-failure-predict-status.txt",
-            "Get-CimInstance -Namespace root\\wmi -ClassName MSStorageDriver_FailurePredictStatus -ErrorAction SilentlyContinue | Format-List *",
-        ),
-        (
-            "wmic-diskdrive-status.txt",
-            "$wmic=Get-Command wmic.exe -ErrorAction SilentlyContinue; if ($wmic) { & $wmic.Source diskdrive get model,serialnumber,status,size,interfacetype /format:list } else { 'wmic.exe is not available on this Windows installation. Disk data was collected via Get-PhysicalDisk and Win32_DiskDrive instead.' }",
-        ),
-        ("volumes.txt", "Get-Volume -ErrorAction SilentlyContinue | Format-Table -AutoSize"),
-        ("partitions.txt", "Get-Partition -ErrorAction SilentlyContinue | Format-Table -AutoSize"),
-        (
-            "powercfg.txt",
-            "powercfg /a; powercfg /lastwake; powercfg /waketimers",
-        ),
-    ];
-    run_command_group(out, &storage_commands)?;
-    diagnostics_group_pause();
-
-    progress.step("收集网络信息", "读取网卡、IP、DNS、路由、代理和连接状态");
-    let network_commands = [
-        ("ipconfig-all.txt", "ipconfig /all"),
-        ("network-routes.txt", "route print"),
-        (
-            "network-configuration.txt",
-            "Get-NetIPConfiguration -ErrorAction SilentlyContinue | Format-List *; Get-DnsClientServerAddress -ErrorAction SilentlyContinue | Format-Table -AutoSize; Get-NetAdapter -ErrorAction SilentlyContinue | Select-Object Name,InterfaceDescription,Status,LinkSpeed,MacAddress | Format-Table -AutoSize; netsh winhttp show proxy",
-        ),
-        (
-            "network-connections.txt",
-            "Get-NetTCPConnection -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess | Sort-Object State,LocalPort | Format-Table -AutoSize",
-        ),
-    ];
-    run_command_group(out, &network_commands)?;
-    diagnostics_group_pause();
-
-    progress.step("收集进程快照", "读取 CPU 和内存占用最高的进程");
-    let process_commands = [
-        (
-            "process-top-cpu.txt",
-            "Get-Process -ErrorAction SilentlyContinue | Sort-Object CPU -Descending | Select-Object -First 40 Name,Id,CPU,WorkingSet64,StartTime,Path | Format-Table -AutoSize",
-        ),
-        (
-            "process-top-memory.txt",
-            "Get-Process -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First 40 Name,Id,CPU,WorkingSet64,StartTime,Path | Format-Table -AutoSize",
-        ),
-    ];
-    run_command_group(out, &process_commands)?;
-    diagnostics_group_pause();
-
-    progress.step("收集更新与启动项", "读取补丁、启动项和服务状态");
-    let system_commands = [
-        ("hotfixes.txt", "Get-HotFix -ErrorAction SilentlyContinue | Sort-Object InstalledOn -Descending | Format-Table -AutoSize"),
-        (
-            "startup-commands.csv",
-            "Get-CimInstance Win32_StartupCommand -ErrorAction SilentlyContinue | Select-Object Name,Command,Location,User | ConvertTo-Csv -NoTypeInformation",
-        ),
-        ("services.txt", "Get-Service | Sort-Object Status,Name | Format-Table -AutoSize"),
-        (
-            "memory-dump-info.txt",
-            "Get-Item C:\\Windows\\MEMORY.DMP -ErrorAction SilentlyContinue | Select-Object FullName,Length,LastWriteTime | Format-List",
-        ),
-    ];
-    run_command_group(out, &system_commands)?;
-    diagnostics_group_pause();
-
-    progress.step("收集系统修复线索", "读取 CBS、DISM 和 WER 报告摘要");
-    let repair_commands = [
-        (
-            "cbs-log-tail.txt",
-            "$path='C:\\Windows\\Logs\\CBS\\CBS.log'; if (Test-Path $path) { Get-Content -LiteralPath $path -Tail 400 -ErrorAction SilentlyContinue } else { 'CBS.log not found.' }",
-        ),
-        (
-            "cbs-recent-errors.txt",
-            "$path='C:\\Windows\\Logs\\CBS\\CBS.log'; if (Test-Path $path) { Get-Content -LiteralPath $path -Tail 5000 -ErrorAction SilentlyContinue | Select-String -Pattern '\\[SR\\]','error','failed','corrupt','repair' -CaseSensitive:$false | Select-Object -Last 200 } else { 'CBS.log not found.' }",
-        ),
-        (
-            "dism-log-tail.txt",
-            "$path='C:\\Windows\\Logs\\DISM\\dism.log'; if (Test-Path $path) { Get-Content -LiteralPath $path -Tail 400 -ErrorAction SilentlyContinue } else { 'DISM log not found.' }",
-        ),
-        (
-            "wer-report-summary.txt",
-            "$roots=@('C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive','C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportQueue'); foreach ($root in $roots) { \"===== $root =====\"; if (Test-Path $root) { Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 40 Name,FullName,CreationTime,LastWriteTime | Format-List } else { 'not found' } }",
-        ),
-    ];
-    run_command_group(out, &repair_commands)?;
-    diagnostics_group_pause();
-
-    progress.step("收集 dump 信息", "复制 Minidump 并尝试自动分析");
-    let minidump_dir = out.join("Minidump");
-    fs::create_dir_all(&minidump_dir)?;
-    write_powershell_output(
-        &out.join("minidump-copy.txt"),
-        &format!(
-            "Copy-Item 'C:\\Windows\\Minidump\\*.dmp' '{}' -ErrorAction SilentlyContinue; Get-ChildItem '{}' -ErrorAction SilentlyContinue | Select-Object FullName,Length,LastWriteTime | Format-Table -AutoSize",
-            minidump_dir.to_string_lossy(),
-            minidump_dir.to_string_lossy(),
-        ),
-    )?;
-    diagnostics_group_pause();
-
-    let dump_analysis_dir = out.join("DumpAnalysis");
-    fs::create_dir_all(&dump_analysis_dir)?;
-    write_powershell_output(
-        &out.join("dump-analysis.txt"),
-        &windows_dump_analysis_command(&minidump_dir, &dump_analysis_dir),
-    )?;
-
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn diagnostics_group_pause() {
-    thread::sleep(Duration::from_millis(80));
-}
-
-#[cfg(target_os = "windows")]
-fn run_command_group(out: &Path, commands: &[(&str, &str)]) -> Result<()> {
-    for (file_name, command) in commands {
-        write_powershell_output(&out.join(file_name), command)?;
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn write_powershell_output(path: &Path, command: &str) -> Result<()> {
-    let args = powershell_utf8_args(command);
-    let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-    write_command_output(path, "powershell", &arg_refs)
-}
-
-#[cfg(target_os = "windows")]
-fn powershell_utf8_args(command: &str) -> Vec<String> {
-    let wrapped = format!(
-        "$utf8 = New-Object System.Text.UTF8Encoding $false; try {{ [Console]::InputEncoding = $utf8; [Console]::OutputEncoding = $utf8 }} catch {{ }} $OutputEncoding = $utf8; chcp.com 65001 > $null; & {{ {command} }}"
-    );
-    vec![
-        "-NoProfile".to_string(),
-        "-NonInteractive".to_string(),
-        "-ExecutionPolicy".to_string(),
-        "Bypass".to_string(),
-        "-Command".to_string(),
-        wrapped,
-    ]
-}
-
-#[cfg(target_os = "windows")]
-fn windows_dump_analysis_command(dump_dir: &Path, analysis_dir: &Path) -> String {
-    let dump_dir = powershell_single_quoted_path(dump_dir);
-    let analysis_dir = powershell_single_quoted_path(analysis_dir);
-    format!(
-        r#"
-$DumpDir = {dump_dir}
-$AnalysisDir = {analysis_dir}
-$SymbolPath = 'srv*C:\Symbols*https://msdl.microsoft.com/download/symbols'
-New-Item -ItemType Directory -Force -Path $AnalysisDir | Out-Null
-
-function Find-Exe {{
-  param([string]$ExeName, [string[]]$CandidatePaths)
-  $cmd = Get-Command $ExeName -ErrorAction SilentlyContinue
-  if ($cmd) {{ return $cmd.Source }}
-  foreach ($path in $CandidatePaths) {{
-    $resolvedPaths = Resolve-Path -Path $path -ErrorAction SilentlyContinue
-    foreach ($resolved in $resolvedPaths) {{
-      if (Test-Path -LiteralPath $resolved.ProviderPath) {{ return $resolved.ProviderPath }}
-    }}
-    if (Test-Path -LiteralPath $path) {{ return $path }}
-  }}
-  return $null
-}}
-
-if (!(Test-Path $DumpDir)) {{
-  'No dump directory found.' | Out-File (Join-Path $AnalysisDir 'no-dump.txt') -Encoding utf8
-  exit 0
-}}
-
-$dumps = Get-ChildItem $DumpDir -Filter '*.dmp' -ErrorAction SilentlyContinue
-if (!$dumps -or $dumps.Count -eq 0) {{
-  'No .dmp files found.' | Out-File (Join-Path $AnalysisDir 'no-dump.txt') -Encoding utf8
-  exit 0
-}}
-
-$cdb = Find-Exe 'cdb.exe' @(
-  'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe',
-  'C:\Program Files\Windows Kits\10\Debuggers\x64\cdb.exe',
-  'C:\Program Files (x86)\Windows Kits\11\Debuggers\x64\cdb.exe',
-  'C:\Program Files\Windows Kits\11\Debuggers\x64\cdb.exe'
-)
-
-if ($cdb) {{
-  "Using cdb.exe: $cdb" | Out-File (Join-Path $AnalysisDir 'debugger-used.txt') -Encoding utf8
-  foreach ($dump in $dumps) {{
-    $log = Join-Path $AnalysisDir ($dump.BaseName + '-analyze.txt')
-    & $cdb -z $dump.FullName -y $SymbolPath -c '.reload; !analyze -v; lm; q' | Out-File $log -Encoding utf8
-  }}
-  exit 0
-}}
-
-$windbgx = Find-Exe 'windbgx.exe' @(
-  "$env:LOCALAPPDATA\Microsoft\WindowsApps\windbgx.exe",
-  "$env:ProgramFiles\WindowsApps\Microsoft.WinDbg_*\windbgx.exe"
-)
-
-if ($windbgx) {{
-  "Using windbgx.exe: $windbgx" | Out-File (Join-Path $AnalysisDir 'debugger-used.txt') -Encoding utf8
-  foreach ($dump in $dumps) {{
-    $log = Join-Path $AnalysisDir ($dump.BaseName + '-analyze.txt')
-    & $windbgx -z $dump.FullName -logo $log -c '.symfix; .reload; !analyze -v; lm; q'
-  }}
-  exit 0
-}}
-
-@'
-No debugger found.
-
-Minidump files were collected, but automatic dump analysis was not run.
-
-Recommended install:
-  winget install --id Microsoft.WinDbg -e
-
-Alternative install:
-  Install Windows SDK Debugging Tools, then ensure cdb.exe is available.
-
-After installing, generate this diagnostics package again. The agent will detect
-cdb.exe or windbgx.exe and run:
-  !analyze -v
-  lm
-
-Manual WinDbg flow:
-  windbgx.exe -z C:\Path\To\Minidump\file.dmp
-  .symfix
-  .reload
-  !analyze -v
-  lm
-'@ | Out-File (Join-Path $AnalysisDir 'debugger-not-found.txt') -Encoding utf8
-"Debugger not found. Install Microsoft.WinDbg with winget, then rerun diagnostics." | Out-File (Join-Path $AnalysisDir 'windbg-install-hint.txt') -Encoding utf8
-"winget install --id Microsoft.WinDbg -e" | Out-File (Join-Path $AnalysisDir 'windbg-install-command.txt') -Encoding utf8
-"#,
-    )
-}
-
-#[cfg(target_os = "windows")]
-fn powershell_single_quoted_path(path: &Path) -> String {
-    format!("'{}'", path.to_string_lossy().replace('\'', "''"))
-}
-
-#[cfg(target_os = "macos")]
-fn collect_platform_diagnostics(
-    out: &Path,
-    progress: &mut DiagnosticsProgressEmitter,
-) -> Result<()> {
-    progress.step(
-        "收集系统概况",
-        "读取 macOS 硬件、软件、电源、存储和显示信息",
-    );
-    let commands = [(
-        "system-profiler.txt",
-        "system_profiler",
-        vec![
-            "SPHardwareDataType",
-            "SPSoftwareDataType",
-            "SPPowerDataType",
-            "SPStorageDataType",
-            "SPNVMeDataType",
-            "SPSerialATADataType",
-            "SPDisplaysDataType",
-        ],
-    )];
-    for (file_name, program, args) in commands {
-        write_command_output(&out.join(file_name), program, &args)?;
-    }
-
-    progress.step("收集磁盘与电源", "读取磁盘和电源状态");
-    let commands = [
-        ("diskutil-list.txt", "diskutil", vec!["list"]),
-        ("diskutil-info-root.txt", "diskutil", vec!["info", "/"]),
-        (
-            "pmset.txt",
-            "sh",
-            vec!["-c", "pmset -g; pmset -g batt; pmset -g assertions"],
-        ),
-    ];
-    for (file_name, program, args) in commands {
-        write_command_output(&out.join(file_name), program, &args)?;
-    }
-
-    progress.step("收集系统日志", "读取最近错误和诊断报告列表");
-    let commands = [
-        (
-            "recent-errors.log",
-            "sh",
-            vec![
-                "-c",
-                "log show --last 2h --style compact --predicate 'messageType == \"Error\" OR messageType == \"Fault\"' 2>/dev/null | tail -400",
-            ],
-        ),
-        (
-            "recent-diagnostic-reports.txt",
-            "sh",
-            vec![
-                "-c",
-                "find \"$HOME/Library/Logs/DiagnosticReports\" /Library/Logs/DiagnosticReports -type f \\( -name '*.crash' -o -name '*.panic' -o -name '*.ips' \\) -mtime -14 2>/dev/null | sort | tail -80",
-            ],
-        ),
-    ];
-
-    for (file_name, program, args) in commands {
-        write_command_output(&out.join(file_name), program, &args)?;
-    }
-
-    Ok(())
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-fn collect_platform_diagnostics(
-    out: &Path,
-    progress: &mut DiagnosticsProgressEmitter,
-) -> Result<()> {
-    progress.step("收集系统信息", "读取系统版本");
-    let commands = [("uname.txt", "uname", vec!["-a"])];
-    for (file_name, program, args) in commands {
-        write_command_output(&out.join(file_name), program, &args)?;
-    }
-
-    progress.step("收集磁盘信息", "读取文件系统空间");
-    let commands = [("df.txt", "df", vec!["-h"])];
-    for (file_name, program, args) in commands {
-        write_command_output(&out.join(file_name), program, &args)?;
-    }
-
-    progress.step("收集系统日志", "读取内核和 journal 警告");
-    let commands = [
-        ("dmesg-tail.txt", "sh", vec!["-c", "dmesg 2>/dev/null | tail -300"]),
-        (
-            "journal-errors.txt",
-            "sh",
-            vec!["-c", "journalctl -p warning..alert --since '24 hours ago' --no-pager 2>/dev/null | tail -500"],
-        ),
-    ];
-    for (file_name, program, args) in commands {
-        write_command_output(&out.join(file_name), program, &args)?;
-    }
-    Ok(())
 }
 
 fn write_text(path: &Path, content: &str) -> Result<()> {
@@ -1657,51 +887,6 @@ fn redact_url_for_log(url: &str) -> String {
         .unwrap_or_else(|| trimmed.to_string())
 }
 
-fn count_log_payload_lines(path: &Path) -> usize {
-    let Ok(content) = fs::read_to_string(path) else {
-        return 0;
-    };
-    content
-        .lines()
-        .filter(|line| is_command_payload_line(line))
-        .count()
-}
-
-fn count_payload_matching_lines(path: &Path, patterns: &[&str]) -> usize {
-    let Ok(content) = fs::read_to_string(path) else {
-        return 0;
-    };
-    content
-        .lines()
-        .filter(|line| is_command_payload_line(line))
-        .filter(|line| {
-            let lower = line.to_lowercase();
-            patterns.iter().any(|pattern| lower.contains(pattern))
-        })
-        .count()
-}
-
-fn count_matching_lines(path: &Path, patterns: &[&str]) -> usize {
-    let Ok(content) = fs::read_to_string(path) else {
-        return 0;
-    };
-    content
-        .lines()
-        .filter(|line| {
-            let lower = line.to_lowercase();
-            patterns.iter().any(|pattern| lower.contains(pattern))
-        })
-        .count()
-}
-
-fn is_command_payload_line(line: &str) -> bool {
-    let line = line.trim();
-    !line.is_empty()
-        && !line.starts_with("command:")
-        && !line.starts_with("status:")
-        && !line.starts_with("---")
-}
-
 fn package_file_list(out: &Path) -> Result<Vec<String>> {
     let mut files = Vec::new();
     collect_package_files(out, out, &mut files)?;
@@ -1725,109 +910,6 @@ fn collect_package_files(base: &Path, current: &Path, files: &mut Vec<String>) -
     }
     Ok(())
 }
-
-fn value_text(value: &Value, pointer: &str) -> String {
-    value
-        .pointer(pointer)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .unwrap_or("unknown")
-        .to_string()
-}
-
-fn value_u64(value: &Value, pointer: &str) -> Option<u64> {
-    value.pointer(pointer).and_then(Value::as_u64)
-}
-
-fn value_f64(value: &Value, pointer: &str) -> Option<f64> {
-    value.pointer(pointer).and_then(Value::as_f64)
-}
-
-fn join_non_empty(items: &[String]) -> String {
-    let joined = items
-        .iter()
-        .map(|item| item.trim())
-        .filter(|item| !item.is_empty() && *item != "unknown")
-        .collect::<Vec<_>>()
-        .join(" ");
-    if joined.is_empty() {
-        "unknown".to_string()
-    } else {
-        joined
-    }
-}
-
-fn primary_temperature_summary(runtime_status: &Value) -> Value {
-    runtime_status
-        .get("temperatures")
-        .and_then(Value::as_array)
-        .and_then(|items| {
-            items.iter().find_map(|item| {
-                let temperature = item.get("temperature_c")?.as_f64()?;
-                Some(json!({
-                    "label": item.get("label").and_then(Value::as_str).unwrap_or("sensor"),
-                    "temperature_c": temperature,
-                }))
-            })
-        })
-        .unwrap_or(Value::Null)
-}
-
-fn write_command_output(path: &Path, program: &str, args: &[&str]) -> Result<()> {
-    let output = command_output_with_timeout(program, args, DIAGNOSTICS_COMMAND_TIMEOUT);
-    let content = match output {
-        Ok(output) => {
-            let mut text = String::new();
-            text.push_str(&format!("command: {} {}\n", program, args.join(" ")));
-            text.push_str(&format!(
-                "status: {}\nstdout_truncated: {}\nstderr_truncated: {}\n",
-                output.status, output.stdout_truncated, output.stderr_truncated
-            ));
-            if output.timed_out {
-                text.push_str(&format!(
-                    "timed_out: true after {} seconds\n",
-                    DIAGNOSTICS_COMMAND_TIMEOUT.as_secs()
-                ));
-            }
-            text.push('\n');
-            text.push_str("--- stdout ---\n");
-            text.push_str(&String::from_utf8_lossy(&output.stdout));
-            text.push_str("\n--- stderr ---\n");
-            text.push_str(&String::from_utf8_lossy(&output.stderr));
-            text
-        }
-        Err(error) => format!("command: {} {}\nfailed: {error}\n", program, args.join(" ")),
-    };
-    write_text(path, &redact_diagnostics_text(&content.replace('\0', "")))
-}
-
-use npcink_device_agent::command::TimedCommandOutput;
-
-fn command_output_with_timeout(
-    program: &str,
-    args: &[&str],
-    timeout: Duration,
-) -> std::io::Result<TimedCommandOutput> {
-    npcink_device_agent::command::output_with_timeout(new_command(program).args(args), timeout)
-}
-
-fn new_command(program: &str) -> Command {
-    let mut command = Command::new(program);
-    configure_command_window(&mut command);
-    command
-}
-
-#[cfg(target_os = "windows")]
-fn configure_command_window(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
-}
-
-#[cfg(not(target_os = "windows"))]
-fn configure_command_window(_command: &mut Command) {}
 
 fn redact_sensitive_json(mut value: Value) -> Value {
     redact_sensitive_json_in_place(&mut value, None);
@@ -2062,25 +1144,6 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn diagnostics_launches_only_fixed_system_tools() {
-        assert_eq!(
-            diagnostic_tool_spec("device_manager").unwrap(),
-            ("mmc.exe", &["devmgmt.msc"][..])
-        );
-        for tool in ["event_viewer", "directx", "reliability"] {
-            assert!(diagnostic_tool_spec(tool).is_ok());
-        }
-        for input in [
-            "cmd.exe",
-            "directx & calc.exe",
-            "../powershell.exe",
-            "https://example.org",
-        ] {
-            assert!(diagnostic_tool_spec(input).is_err());
-        }
-    }
-
-    #[test]
     fn snapshot_cache_requires_new_identity_collection_and_current_version() {
         let mut snapshot = DeviceSnapshot {
             data: json!({"collector": {"schema": "npcink-hardware-inventory-v3", "version": env!("CARGO_PKG_VERSION"), "observation_id": "cdb0d10b-858d-49aa-a8d4-bcb29f0cdd0e"}, "uuid": {"hardware": "valid-test-hardware"}}),
@@ -2169,20 +1232,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_history_coverage_marks_short_sessions() {
-        let coverage = runtime_history_coverage(&json!({
-            "sample_count": 8,
-            "started_at": "2026-07-03T01:54:09Z",
-            "ended_at": "2026-07-03T01:54:43Z",
-        }));
-
-        assert_eq!(coverage["quality"], "short");
-        assert_eq!(coverage["duration_seconds"], 34);
-        assert_eq!(coverage["recommended_minimum_seconds"], 300);
-    }
-
-    #[test]
-    fn diagnostics_runtime_status_json_redacts_network_identity() {
+    fn diagnostics_json_redacts_network_identity() {
         let redacted = redact_sensitive_json(json!({
             "network": {
                 "iface": "以太网",
@@ -2266,6 +1316,48 @@ mod tests {
     }
 
     #[test]
+    fn upload_support_snapshots_preserve_identity_status_and_redact_identifiers() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let out =
+            std::env::temp_dir().join(format!("npcink-support-{}-{unique}", std::process::id()));
+        fs::create_dir_all(&out).unwrap();
+        let identity =
+            json!({"decision": "ready", "systemUuid": "valid", "permanentPciMacCount": 0});
+        let probes = json!([{"source": "graphics_memory", "status": "partial"}]);
+        write_support_snapshots(
+            &out,
+            json!({
+                "uuid": {"hardware": "private-uuid"}, "baseboard": {"serial": "private-serial"},
+                "identityDiagnostics": identity, "hardwareProbeAttempts": probes,
+            }),
+        )
+        .unwrap();
+        let hardware = fs::read_to_string(out.join("device-static-data.json")).unwrap();
+        assert!(!hardware.contains("private-uuid"));
+        assert!(!hardware.contains("private-serial"));
+        let saved_identity: Value =
+            serde_json::from_str(&fs::read_to_string(out.join("identity-check.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved_identity, identity);
+        let saved_probes: Value =
+            serde_json::from_str(&fs::read_to_string(out.join("hardware-probes.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved_probes, probes);
+        assert_eq!(
+            package_file_list(&out).unwrap(),
+            vec![
+                "device-static-data.json",
+                "hardware-probes.json",
+                "identity-check.json"
+            ]
+        );
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[test]
     fn zip_directory_creates_archive() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2298,97 +1390,5 @@ mod tests {
         assert!(message.contains("[upload-token-redacted]"));
         assert!(!message.contains("mda_abc123_secret"));
         assert!(!message.contains('\n'));
-    }
-
-    #[test]
-    fn diagnostics_summary_file_is_written() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let out = std::env::temp_dir().join(format!(
-            "npcink-diagnostics-summary-test-{}-{unique}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&out).unwrap();
-        fs::write(
-            out.join("recent-errors.log"),
-            "command: log show\n--- stdout ---\nerror one\n",
-        )
-        .unwrap();
-        fs::write(
-            out.join("recent-diagnostic-reports.txt"),
-            "/tmp/report.crash\n/tmp/report.ips\n",
-        )
-        .unwrap();
-        fs::write(out.join(APP_LOG_FILE), "{}\n").unwrap();
-
-        let static_data = json!({
-            "os": {
-                "hostname": "[redacted]",
-                "distro": "MacOS",
-                "release": "26.5.1"
-            },
-            "system": {
-                "manufacturer": "Apple",
-                "model": "MacBook Air"
-            },
-            "cpu": {
-                "manufacturer": "Apple",
-                "brand": "M5"
-            },
-            "mem": {
-                "total": 17179869184_u64
-            }
-        });
-        let runtime_status = json!({
-            "collected_at": "2026-07-01T00:00:00Z",
-            "cpu": { "usage_percent": 12.5 },
-            "memory": { "used": 8_u64, "total": 16_u64 },
-            "disk": { "used": 400_u64, "total": 500_u64, "available": 100_u64, "mount": "/" },
-            "temperatures": [{ "label": "sensor", "temperature_c": 55.0 }]
-        });
-        let runtime_history_summary = json!({
-            "sample_count": 1,
-            "cpu": { "average_percent": 12.5, "max_percent": 12.5 },
-        });
-        let runtime_history_coverage = json!({
-            "quality": "short",
-            "sample_count": 1,
-            "duration_seconds": 0,
-        });
-        let privilege_info = json!({
-            "is_admin": false,
-            "label": "普通权限",
-            "source": "test",
-        });
-
-        write_diagnostics_summary(
-            &out,
-            &static_data,
-            &runtime_status,
-            &runtime_history_summary,
-            &runtime_history_coverage,
-            &privilege_info,
-            &AgentConfig::default(),
-        )
-        .unwrap();
-        let summary: Value = serde_json::from_str(
-            &fs::read_to_string(out.join("diagnostics-summary.json")).unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(summary["schema"], "npcink-diagnostics-summary-v1");
-        assert_eq!(summary["privilege"]["is_admin"], false);
-        assert_eq!(summary["runtime"]["history_coverage"]["quality"], "short");
-        assert_eq!(summary["signals"]["recent_error_lines"], 1);
-        assert_eq!(summary["signals"]["diagnostic_report_count"], 2);
-        assert!(summary["package_files"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item == "diagnostics-summary.json"));
-
-        fs::remove_dir_all(out).unwrap();
     }
 }

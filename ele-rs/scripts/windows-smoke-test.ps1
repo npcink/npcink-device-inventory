@@ -98,10 +98,6 @@ function Invoke-CargoJson {
                     $metrics.hardware_query_status_counts[$group.Name] = $group.Count
                 }
             }
-        } elseif ($Name -eq "runtime.monitor") {
-            if ($payload.cpu.cores -lt 1 -or $payload.memory.total -le 0 -or [string]::IsNullOrWhiteSpace($payload.collected_at)) {
-                throw "Missing runtime CPU, memory or collection time"
-            }
         }
     } catch {
         $script:Steps.Add((New-StepResult -Name $Name -Status "failed" -ExitCode 0 -Log $jsonPath -Message $_.Exception.Message))
@@ -124,34 +120,6 @@ function Invoke-Probe {
     $exitCode = $result.exit_code
     $status = if ($exitCode -eq 0) { "passed" } else { "failed_allowed" }
     $script:Steps.Add((New-StepResult -Name "diagnostics.$Name" -Status $status -ExitCode $exitCode -Log $probePath -Message $result.failure))
-}
-
-function Write-WinDbgInstallHint {
-    $hintPath = Join-Path $script:DiagnosticsDir "windbg-install-hint.txt"
-    $cdb = Get-Command cdb.exe -ErrorAction SilentlyContinue
-    $windbgx = Get-Command windbgx.exe -ErrorAction SilentlyContinue
-
-    if ($cdb) {
-        "Detected cdb.exe: $($cdb.Source)" | Out-File -FilePath $hintPath -Encoding utf8
-        $script:Steps.Add((New-StepResult -Name "diagnostics.windbg-hint" -Status "passed" -Log $hintPath))
-        return
-    }
-
-    if ($windbgx) {
-        "Detected windbgx.exe: $($windbgx.Source)" | Out-File -FilePath $hintPath -Encoding utf8
-        $script:Steps.Add((New-StepResult -Name "diagnostics.windbg-hint" -Status "passed" -Log $hintPath))
-        return
-    }
-
-    @"
-No debugger was detected.
-
-Install Microsoft WinDbg to enable automatic minidump analysis:
-  winget install --id Microsoft.WinDbg -e
-
-After installing, rerun this smoke test or regenerate the app diagnostics package.
-"@ | Out-File -FilePath $hintPath -Encoding utf8
-    $script:Steps.Add((New-StepResult -Name "diagnostics.windbg-hint" -Status "info" -Log $hintPath))
 }
 
 function Assert-Command {
@@ -199,7 +167,7 @@ $summary = [ordered]@{
 
 try {
     if (-not $summary.platform.is_windows) {
-        throw "This smoke test must run on Windows to exercise Windows hardware, runtime, and diagnostics paths."
+        throw "This smoke test must run on Windows to exercise Windows hardware and identity paths."
     }
 
     Assert-Command "node"
@@ -229,7 +197,6 @@ try {
 
     Invoke-CargoJson -Name "hardware.inspect" -Arguments @("run", "--locked", "--quiet", "--", "inspect", "--pretty") -JsonName "inspect.json"
     Invoke-CargoJson -Name "hardware.upload-inspect" -Arguments @("run", "--locked", "--quiet", "--", "upload-inspect", "--pretty") -JsonName "upload-inspect.json"
-    Invoke-CargoJson -Name "runtime.monitor" -Arguments @("run", "--locked", "--quiet", "--", "runtime", "--pretty") -JsonName "runtime.json"
 
     $deviceIdPath = Join-Path $script:ReportDir "device-id.txt"
     $deviceIdErrPath = Join-Path $script:ReportDir "device-id.stderr.txt"
@@ -259,21 +226,9 @@ try {
     if ($SkipDiagnostics) {
         $script:Steps.Add((New-StepResult -Name "diagnostics.probes" -Status "skipped" -Log ""))
     } else {
-        Invoke-Probe -Name "system-events" -OutputName "system-relevant-events.txt" -Command "Get-WinEvent -FilterHashtable @{LogName='System'; StartTime=(Get-Date).AddDays(-14); Id=41,1001,6008,6005,6006,1074,7,11,15,51,55,57,129,153,157,161,17,18,19,219,7000,7001,7009,7011,7022,7023,7024,7031,7034} -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,MachineName,Message | Format-List"
-        Invoke-Probe -Name "system-events-csv" -OutputName "system-relevant-events.csv" -Command "Get-WinEvent -FilterHashtable @{LogName='System'; StartTime=(Get-Date).AddDays(-14); Id=41,1001,6008,6005,6006,1074,7,11,15,51,55,57,129,153,157,161,17,18,19,46,47,219,7000,7001,7009,7011,7022,7023,7024,7031,7034} -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,MachineName,Message | ConvertTo-Csv -NoTypeInformation"
-        Invoke-Probe -Name "application-crashes" -OutputName "application-crash-events.txt" -Command "Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddDays(-14); Id=1000,1001,1002,1005,1026} -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,MachineName,Message | Format-List"
-        Invoke-Probe -Name "setup-events" -OutputName "setup-events.csv" -Command "Get-WinEvent -FilterHashtable @{LogName='Setup'; StartTime=(Get-Date).AddDays(-14)} -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,Message | ConvertTo-Csv -NoTypeInformation"
-        Invoke-Probe -Name "windows-update-events" -OutputName "windows-update-events.csv" -Command "Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-WindowsUpdateClient/Operational'; StartTime=(Get-Date).AddDays(-14)} -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,Message | ConvertTo-Csv -NoTypeInformation"
-        Invoke-Probe -Name "reliability-records" -OutputName "reliability-records.txt" -Command "Get-CimInstance -ClassName Win32_ReliabilityRecords -ErrorAction SilentlyContinue | Where-Object { `$_.TimeGenerated -ge (Get-Date).AddDays(-14) } | Select-Object TimeGenerated,SourceName,EventIdentifier,ProductName,Message | Format-List"
         Invoke-Probe -Name "hardware-info" -OutputName "hardware-info.txt" -Command "`$classes='Win32_BIOS','Win32_BaseBoard','Win32_SystemEnclosure','Win32_Processor','Win32_PhysicalMemory','Win32_VideoController','Win32_DesktopMonitor','Win32_DiskDrive','Win32_Battery'; foreach (`$class in `$classes) { `"===== `$class =====`"; Get-CimInstance -ClassName `$class -ErrorAction SilentlyContinue | Format-List * }; `"===== root\wmi:WmiMonitorID =====`"; Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | Select-Object InstanceName,Active,ManufacturerName,UserFriendlyName,SerialNumberID,YearOfManufacture,WeekOfManufacture | Format-List *"
-        Invoke-Probe -Name "driverquery" -OutputName "driverquery.csv" -Command "driverquery /v /fo csv"
-        Invoke-Probe -Name "pnputil" -OutputName "pnputil-enum-drivers.txt" -Command "pnputil /enum-drivers"
         Invoke-Probe -Name "problem-devices" -OutputName "problem-devices.txt" -Command "Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue | Where-Object { `$_.Status -ne 'OK' -or `$_.ConfigManagerErrorCode -ne 0 } | Format-List *"
         Invoke-Probe -Name "storage-reliability" -OutputName "storage-reliability.txt" -Command "Get-PhysicalDisk -ErrorAction SilentlyContinue | Format-List *; Get-PhysicalDisk -ErrorAction SilentlyContinue | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue | Format-List *; Get-CimInstance -Namespace root\wmi -ClassName MSStorageDriver_FailurePredictStatus -ErrorAction SilentlyContinue | Format-List *"
-        Invoke-Probe -Name "wmic-diskdrive" -OutputName "wmic-diskdrive-status.txt" -Command "`$wmic=Get-Command wmic.exe -ErrorAction SilentlyContinue; if (`$wmic) { & `$wmic.Source diskdrive get model,serialnumber,status,size,interfacetype /format:list } else { 'wmic.exe is not available on this Windows installation.' }"
-        Invoke-Probe -Name "powercfg" -OutputName "powercfg.txt" -Command "powercfg /a; powercfg /lastwake; powercfg /waketimers"
-        Invoke-Probe -Name "debugger-presence" -OutputName "debugger-presence.txt" -Command "`$cdb=Get-Command cdb.exe -ErrorAction SilentlyContinue; `$windbgx=Get-Command windbgx.exe -ErrorAction SilentlyContinue; if (`$cdb) { `"cdb.exe: `$(`$cdb.Source)`" } elseif (`$windbgx) { `"windbgx.exe: `$(`$windbgx.Source)`" } else { 'No debugger detected.' }"
-        Write-WinDbgInstallHint
     }
 
     if ($OpenDev) {

@@ -57,14 +57,6 @@
             case "clear_saved_config": config = { site: "", token: "", name: "" }; return null;
             case "get_cached_device_snapshot": return null;
             case "collect_device_snapshot": return structuredClone(snapshot);
-            case "collect_runtime_status": return {
-              collected_at: new Date().toISOString(),
-              cpu: { usage_percent: 12, cores: 6 },
-              memory: { used: 6442450944, total: 17179869184 },
-              disk: { used: 128000000000, total: 512110190592, mount: "C:" },
-              temperatures: [],
-            };
-            case "get_runtime_history": return { summary: { sample_count: 0 } };
             default: throw new Error("当前为网页外观预览，此操作需在桌面客户端执行。");
           }
         },

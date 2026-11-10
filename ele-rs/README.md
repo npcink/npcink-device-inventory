@@ -99,7 +99,6 @@ src-tauri/target/release/bundle/dmg/*.dmg
 
 ```bash
 cargo run -- inspect --pretty
-cargo run -- runtime --pretty
 cargo run -- device-id
 cargo run -- submit --site "https://example.com" --token "后台生成的完整授权码" --note "张三"
 ```
@@ -113,9 +112,9 @@ scripts\windows-smoke-test.bat -SkipSubmit
 scripts\windows-smoke-test.bat -Site "https://example.com/wp-json/npcink-device-inventory/v1/device-observations" -Token "后台生成的完整授权码" -Note "Windows开发测试"
 ```
 
-脚本会运行前端构建、Rust 测试、硬件采集、运行监控、device id 检查、可选上传，以及 Windows 诊断探针。BAT 保留当前调用者权限，不主动提权；普通用户先跑一轮，再另开管理员终端对照。脚本使用 Node 以原始字节保存 stdout/stderr，正常 stderr 不算执行失败；每个命令有超时和进程树清理。`-SkipSubmit` 必须显式传入，否则必须提供 HTTPS Site 与 Token。报告总状态 `completed` 仅指已请求的源码烟测结束，另列跳过、可选失败、手工步骤，安装、平台签名及自动更新始终待单独验收。报告输出到 `smoke-reports\windows-<时间>\windows-smoke-report.json`。采集烟测会检查 v2 身份、Windows/CPU/内存基础字段、完整上传结构和运行监控。CI 使用 `-SkipBuild -SkipCargoTest -SkipSubmit -SkipDiagnostics`，仅保存步骤摘要；不提交采集数据，不上传原始硬件和事件日志。托管 Windows runner 的结果不能替代真实设备安装和签名更新验收。
+脚本会运行前端构建、Rust 测试、硬件采集、device id 检查、可选上传，以及 Windows 诊断探针。BAT 保留当前调用者权限，不主动提权；普通用户先跑一轮，再另开管理员终端对照。脚本使用 Node 以原始字节保存 stdout/stderr，正常 stderr 不算执行失败；每个命令有超时和进程树清理。`-SkipSubmit` 必须显式传入，否则必须提供 HTTPS Site 与 Token。报告总状态 `completed` 仅指已请求的源码烟测结束，另列跳过、可选失败、手工步骤，安装、平台签名及自动更新始终待单独验收。报告输出到 `smoke-reports\windows-<时间>\windows-smoke-report.json`。采集烟测会检查 v2 身份、Windows/CPU/内存基础字段、完整上传结构。CI 使用 `-SkipBuild -SkipCargoTest -SkipSubmit -SkipDiagnostics`，仅保存步骤摘要；不提交采集数据，不上传原始硬件和事件日志。托管 Windows runner 的结果不能替代真实设备安装和签名更新验收。
 
-排障包会检测 WinDbg/cdb 是否已安装。已安装时会尝试分析 `C:\Windows\Minidump\*.dmp`；未安装时会生成 `DumpAnalysis\debugger-not-found.txt` 和 WinDbg 安装提示，不会自动安装系统组件。
+上传排障包仅包含脱敏硬件、身份检查、采集状态、配置摘要和客户端日志；完整身份核对使用独立的硬件 JSON 导出。客户端不再采样运行历史、依赖 macmon、读取系统事件/进程/驱动或复制分析 dump。
 
 ## 桌面客户端结构
 
@@ -160,10 +159,10 @@ npm run tauri:dev
 
 ## 0.4.5 候选验收
 
-- rc.2 将概览合并到设置页本机信息：十项字段、两列布局，窄窗口切换单列；显卡和显示器支持多条换行。保留设置、运行、排障、技术详情四个 TAB。
+- rc.2 将概览合并到设置页本机信息：十项字段、两列布局，窄窗口切换单列；显卡和显示器支持多条换行。当前保留设置、排障、技术详情三个 TAB；运行监控已按 [ADR-019](../docs/decisions/ADR-019-focus-on-inventory-and-upload.md) 移除。
 
 - 普通采集、上传和硬件导出均使用完整硬件采集入口；导出重新采集且不改写上传缓存。
 - 技术详情同时显示显卡和显示器，无有效电池字段时隐藏电池入口。
-- 排障页提供身份自检、Windows 设备管理器/事件查看器/DirectX 诊断/可靠性监视器及 WinDbg 官方安装说明。工具参数在 Rust 中固定，不接收任意命令。
-- 深度排障包增加身份检查摘要、硬件查询状态和工具说明。身份摘要使用脱敏前已计算的状态，不重新从脱敏标识推导身份。
+- 排障页保留身份自检、硬件 JSON 导出和上传排障包；系统工具启动器已移除。
+- 上传排障包保留身份检查摘要、硬件查询状态和客户端日志；身份摘要在脱敏前计算，不从脱敏标识反推。
 - 本地外观与合成测试已完成，Windows实机尚待执行；正式制品先构建草稿候选，验收后人工发布同一批字节。详见[发布流程](../docs/github-release.md)。

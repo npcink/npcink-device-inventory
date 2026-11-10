@@ -1,11 +1,16 @@
 [CmdletBinding()]
 param(
     [string]$AssetNumber = "",
-    [string]$OutputPath = ""
+    [string]$OutputPath = "",
+    [switch]$PromptForAssetNumber
 )
 
 $ErrorActionPreference = "Stop"
 $script:ProbeErrors = @()
+
+if ($PromptForAssetNumber -and [string]::IsNullOrWhiteSpace($AssetNumber)) {
+    $AssetNumber = Read-Host "Asset number (leave blank if unknown)"
+}
 
 trap {
     $lineNumber = $_.InvocationInfo.ScriptLineNumber
@@ -263,7 +268,7 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     if ([string]::IsNullOrWhiteSpace($defaultDirectory)) {
         $defaultDirectory = (Get-Location).Path
     }
-    $filePrefix = if ([string]::IsNullOrWhiteSpace($AssetNumber)) { "device" } else { $AssetNumber.Trim() }
+    $filePrefix = if ([string]::IsNullOrWhiteSpace($AssetNumber)) { "device" } else { $AssetNumber.Trim() -replace '[^\p{L}\p{N}_-]', '_' }
     $OutputPath = Join-Path $defaultDirectory "$filePrefix-windows-hardware-identity-probe.json"
 }
 

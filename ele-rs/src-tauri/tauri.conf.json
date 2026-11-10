@@ -37,7 +37,7 @@
       "icons/icon.ico"
     ],
     "shortDescription": "Device collection and upload tool",
-    "longDescription": "Collects local hardware and runtime information and submits it to Npcink Device Inventory.",
+    "longDescription": "Collects local hardware inventory and submits it to Npcink Device Inventory.",
     "windows": {
       "nsis": {
         "languages": ["SimpChinese"],
