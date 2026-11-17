@@ -1405,7 +1405,9 @@ mod tests {
             "https://example.invalid",
             "{}",
             vec![],
-            Duration::from_secs(1),
+            // Windows may take over one second to report a closed loopback port.
+            // Allow the refusal to arrive instead of testing a request timeout.
+            Duration::from_secs(5),
             true,
         )
         .unwrap_err();
