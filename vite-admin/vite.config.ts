@@ -73,17 +73,6 @@ export default defineConfig(({ mode }) => {
     //配置路径别名
     resolve: {
       alias: [
-        ...(isProd
-          ? [
-              {
-                find: "@/utils/demoConfig",
-                replacement: path.resolve(
-                  projectDir,
-                  "src/utils/demoConfig.prod.ts"
-                ),
-              },
-            ]
-          : []),
         { find: "@", replacement: path.resolve(projectDir, "src") },
       ],
     },

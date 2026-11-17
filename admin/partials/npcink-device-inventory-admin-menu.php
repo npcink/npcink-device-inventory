@@ -69,30 +69,6 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Menu')) {
         }
 
         /**
-         * Admin labels used by the bundled React app.
-         *
-         * WordPress.org will handle gettext translations for PHP strings after release.
-         * The bundled app receives a small locale-aware label map so the first admin
-         * screen is usable in both English and Simplified Chinese immediately.
-         */
-        private static function admin_labels()
-        {
-            $locale = determine_locale();
-            if (0 === strpos($locale, 'zh_')) {
-                return array(
-                    'assets' => '资产台账',
-                    'client_tokens' => '客户端令牌',
-                    'settings' => '设置',
-                );
-            }
-
-            return array(
-                'assets' => __('Assets', 'npcink-device-inventory'),
-                'client_tokens' => __('Client Tokens', 'npcink-device-inventory'),
-                'settings' => __('Settings', 'npcink-device-inventory'),
-            );
-        }
-        /**
          * 加载资源
          */
         public static function load_admin_script($hook)
@@ -121,8 +97,6 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Menu')) {
 	                    'rest_url' => esc_url_raw(rest_url('npcink-device-inventory/v1')),
 	                    'rest_nonce' => wp_create_nonce('wp_rest'),
 	                    'ajax_url' => esc_url_raw(admin_url('admin-ajax.php')),
-	                    'locale' => determine_locale(),
-	                    'labels' => self::admin_labels(),
 	                    'initial_assets' => self::initial_assets_payload(),
 	                )
 	            );

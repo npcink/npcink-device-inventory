@@ -105,24 +105,8 @@ const responseInterceptor = (response: any) => {
 const friendlyErrorCodeMap: Record<string, string> = {
   duplicate_number: "设备编号已存在，请换一个编号再保存",
   forbidden: "权限不足，请联系管理员",
-  missing_uuid: "缺少设备标识，请刷新页面后重试",
-  not_found: "资源不存在或已被删除",
-  invalid_data: "提交的数据格式不正确，请检查后重试",
-  invalid_fields: "没有可更新的字段，请检查表单内容",
-  missing_params: "缺少必要参数，请补全后重试",
-  missing_id: "缺少记录ID，请刷新页面后重试",
-  invalid_table: "表名不合法，请重新选择",
-  invalid_route: "路由格式不合法，请重新填写",
-  route_exists: "页面已存在，请换一个路由",
-  json_encode_failed: "数据处理失败，请稍后重试",
-  insert_failed: "保存失败，请稍后重试",
-  update_failed: "保存失败，请稍后重试",
-  delete_failed: "删除失败，请稍后重试",
-  db_error: "数据库错误，请联系管理员",
   rest_forbidden: "权限不足或登录已过期，请刷新页面重试",
   rest_cookie_invalid_nonce: "登录已过期，请刷新页面重试",
-  rest_cannot_edit: "没有权限修改该资源",
-  rest_cannot_delete: "没有权限删除该资源",
 };
 
 const friendlyStatusMap: Record<number, string> = {
@@ -135,12 +119,6 @@ const friendlyStatusMap: Record<number, string> = {
   429: "操作过于频繁，请稍后重试",
   500: "服务器开小差了，请稍后再试",
   503: "服务暂不可用，请稍后再试",
-};
-
-const friendlyErrorTextMap: Record<string, string> = {
-  非法请求: "登录已过期，请刷新页面重试",
-  权限不足: "权限不足，请联系管理员",
-  设备编号已存在: "设备编号已存在，请换一个编号再保存",
 };
 
 const errorInterceptor = (error: any) => {
@@ -158,9 +136,6 @@ const errorInterceptor = (error: any) => {
       data?.data?.message ||
       data?.message ||
       data?.error;
-
-    const isEnglishText =
-      typeof rawText === "string" && /^[\x00-\x7F]+$/.test(rawText);
 
     if (code === "rest_cookie_invalid_nonce") {
       const config = error.config as RequestConfig | undefined;
@@ -182,23 +157,10 @@ const errorInterceptor = (error: any) => {
       errorMessage = friendlyErrorCodeMap.rest_cookie_invalid_nonce;
     } else if (code && friendlyErrorCodeMap[code]) {
       errorMessage = friendlyErrorCodeMap[code];
-    } else if (rawText && !isEnglishText) {
-      // Prefer REST-provided localized messages.
-      errorMessage = rawText;
-    } else if (rawText && friendlyErrorTextMap[rawText]) {
-      errorMessage = friendlyErrorTextMap[rawText];
-    } else if (rawText) {
+    } else if (typeof rawText === "string" && rawText) {
       errorMessage = rawText;
     } else if (status && friendlyStatusMap[status]) {
       errorMessage = friendlyStatusMap[status];
-    } else if (data && data.data && data.data.message) {
-      // 优先使用服务器返回的错误消息
-      errorMessage = data.data.message;
-    } else if (data && data.data && data.data.error) {
-      // 其次使用服务器返回的错误信息
-      errorMessage = data.data.error;
-    } else if (data && data.message) {
-      errorMessage = data.message;
     } else {
       // 默认使用状态文本
       errorMessage = `请求失败: ${status} ${error.response.statusText}`;
@@ -224,23 +186,6 @@ const errorInterceptor = (error: any) => {
 };
 
 restInstance.interceptors.response.use(responseInterceptor, errorInterceptor);
-
-/**
- * 检查它们的值是否为 undefined 并据此决定是否将它们添加到 URLSearchParams 实例中
- * 默认情况下，若不传值，则会输出 undefined字符串
- * @param params 实例
- * @param key 关键词
- * @param value 值
- */
-export const addParamIfDefined = (
-  params: URLSearchParams,
-  key: string,
-  value: any
-) => {
-  if (value !== undefined) {
-    params.append(key, value);
-  }
-};
 
 export type RequestConfig = AxiosRequestConfig & {
   showSuccessMessage?: boolean;
