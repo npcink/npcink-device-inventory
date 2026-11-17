@@ -4,7 +4,7 @@ import { RestUrl } from "@/utils/index";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Form, Input, Modal, Space, Switch, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   buildClientImportConfig,
   buildClientSubmitCommand,
@@ -26,6 +26,7 @@ export const TokenModal = ({ open, onClose }: TokenModalProps) => {
   const [createdToken, setCreatedToken] = useState<CreatedClientToken | null>(null);
   const queryClient = useQueryClient();
   const settingsQuery = useQuery(["v3-settings"], getSettings, { enabled: open });
+  const settingsReady = Boolean(settingsQuery.data) && !settingsQuery.isError;
   const createMutation = useMutation(createClientToken, {
     onSuccess: (token) => {
       setCreatedToken(token);
@@ -49,12 +50,19 @@ export const TokenModal = ({ open, onClose }: TokenModalProps) => {
       },
     }
   );
-  const tokens = settingsQuery.data?.clientTokens || [];
+  useEffect(() => {
+    if (!open) {
+      setCreatedToken(null);
+      form.resetFields();
+    }
+  }, [form, open]);
+
+  const tokens = settingsReady ? settingsQuery.data?.clientTokens || [] : [];
   const uploadEndpoint = buildClientUploadEndpoint(settingsQuery.data?.clientUploadBaseUrl || RestUrl);
 
   const columns: ColumnsType<ClientToken> = [
     { title: "名称", dataIndex: "name" },
-    { title: "Token ID", dataIndex: "id", width: 160 },
+    { title: "令牌编号", dataIndex: "id", width: 160 },
     {
       title: "状态",
       dataIndex: "enabled",
@@ -73,6 +81,7 @@ export const TokenModal = ({ open, onClose }: TokenModalProps) => {
           checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="关闭"
+          disabled={!settingsReady || tokenStatusMutation.isLoading || deleteMutation.isLoading}
           loading={tokenStatusMutation.isLoading && tokenStatusMutation.variables?.id === token.id}
           onChange={(checked) => tokenStatusMutation.mutate({ id: token.id, enabled: checked })}
         />
@@ -92,13 +101,14 @@ export const TokenModal = ({ open, onClose }: TokenModalProps) => {
           <Button
             size="small"
             danger
+            disabled={!settingsReady || deleteMutation.isLoading || tokenStatusMutation.isLoading}
             onClick={() =>
               Modal.confirm({
                 title: "确认删除这个客户端令牌？",
                 content: (
                   <Space direction="vertical" size={4}>
                     <Text>删除后，使用该令牌的客户端将无法继续上传数据。</Text>
-                    <Text type="secondary">Token ID：{token.id}</Text>
+                    <Text type="secondary">令牌编号：{token.id}</Text>
                   </Space>
                 ),
                 okText: "确认删除",
@@ -119,12 +129,21 @@ export const TokenModal = ({ open, onClose }: TokenModalProps) => {
     <Modal
       title="客户端接入"
       open={open}
-      onCancel={onClose}
+      onCancel={() => { if (!createMutation.isLoading) onClose(); }}
+      closable={!createMutation.isLoading}
+      maskClosable={!createMutation.isLoading}
+      keyboard={!createMutation.isLoading}
       footer={null}
       width={900}
       destroyOnClose
     >
-      <div className="npcink-v3-token-endpoint">
+      {settingsQuery.isError ? <Alert
+        type="error"
+        showIcon
+        message="客户端令牌加载失败"
+        action={<Button onClick={() => settingsQuery.refetch()}>重试</Button>}
+      /> : null}
+      {settingsReady ? <div className="npcink-v3-token-endpoint">
         <div>
           <Text strong>客户端上传地址</Text>
           <Text type="secondary">授权码可供多台可信设备提交采集信息和验证连接，不授予台账读取或管理权限。请妥善保管。</Text>
@@ -132,7 +151,7 @@ export const TokenModal = ({ open, onClose }: TokenModalProps) => {
         <Text copyable code>
           {uploadEndpoint}
         </Text>
-      </div>
+      </div> : null}
       <Alert
         type="info"
         showIcon
@@ -146,8 +165,9 @@ export const TokenModal = ({ open, onClose }: TokenModalProps) => {
       />
       <Form
         form={form}
+        disabled={!settingsReady || createMutation.isLoading}
         className="npcink-v3-token-form"
-        onFinish={({ name }) => createMutation.mutate(name)}
+        onFinish={({ name }) => { if (settingsReady) createMutation.mutate(name); }}
       >
         <div className="npcink-v3-token-create-row">
           <Form.Item
@@ -157,7 +177,7 @@ export const TokenModal = ({ open, onClose }: TokenModalProps) => {
           >
             <Input placeholder="例如：财务部采集客户端" />
           </Form.Item>
-          <Button type="primary" htmlType="submit" loading={createMutation.isLoading}>
+          <Button type="primary" htmlType="submit" disabled={!settingsReady} loading={createMutation.isLoading}>
             创建令牌
           </Button>
         </div>
@@ -198,7 +218,9 @@ export const TokenModal = ({ open, onClose }: TokenModalProps) => {
         size="small"
         columns={columns}
         dataSource={tokens}
-        loading={settingsQuery.isLoading}
+        loading={settingsQuery.isFetching}
+        locale={{ emptyText: settingsQuery.isError ? null : "暂无客户端令牌" }}
+        scroll={{ x: 780 }}
         pagination={false}
       />
     </Modal>

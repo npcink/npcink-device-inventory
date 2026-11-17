@@ -32,6 +32,7 @@ export const SettingsWorkspace = () => {
   const cleanupMutation = useMutation(cleanupObservations, {
     onSuccess: (result) => {
       queryClient.invalidateQueries(["v3-observations"]);
+      queryClient.invalidateQueries(["v3-asset-observations"]);
       queryClient.invalidateQueries(["v3-analysis-observations"]);
       queryClient.invalidateQueries(["v3-analysis-collection-trends"]);
       message.success(result.deleted ? `已清理 ${result.deleted} 条过期采集快照` : "没有需要清理的过期快照");
@@ -51,18 +52,23 @@ export const SettingsWorkspace = () => {
       return;
     }
     form.setFieldValue("departments", normalizeDepartmentList([...departments, department]));
+    setHasUnsavedChanges(true);
     setNewDepartment("");
   };
 
+  const setSettingValue = (field: "depreciationPeriodMonths" | "defaultResidualRate", value: number) => {
+    form.setFieldValue(field, value);
+    setHasUnsavedChanges(true);
+  };
+
   useEffect(() => {
-    if (settingsQuery.data) {
+    if (settingsQuery.data && !hasUnsavedChanges) {
       form.setFieldsValue({
         ...settingsQuery.data,
         departments: normalizeDepartmentList(settingsQuery.data.departments),
       });
-      setHasUnsavedChanges(false);
     }
-  }, [form, settingsQuery.data]);
+  }, [form, hasUnsavedChanges, settingsQuery.data]);
 
   return (
     <div className="npcink-v3-section">
@@ -84,15 +90,17 @@ export const SettingsWorkspace = () => {
       <div className="npcink-v3-settings-panel">
         <Form
           form={form}
+          disabled={settingsQuery.isError || settingsQuery.isLoading || settingsMutation.isLoading}
           className="npcink-v3-global-settings-form"
           layout="vertical"
           onValuesChange={() => setHasUnsavedChanges(true)}
-          onFinish={(values) =>
+          onFinish={(values) => {
+            if (!settingsQuery.data || settingsQuery.isError || settingsMutation.isLoading) return;
             settingsMutation.mutate({
               ...values,
               departments: normalizeDepartmentList(values.departments),
-            })
-          }
+            });
+          }}
         >
           <div className="npcink-v3-settings-section">
             <div className="npcink-v3-settings-section-head">
@@ -147,11 +155,11 @@ export const SettingsWorkspace = () => {
             </div>
             <Space wrap>
               <Text type="secondary">快捷设置：</Text>
-              <Button size="small" onClick={() => form.setFieldValue("depreciationPeriodMonths", 36)}>3 年</Button>
-              <Button size="small" onClick={() => form.setFieldValue("depreciationPeriodMonths", 60)}>5 年</Button>
-              <Button size="small" onClick={() => form.setFieldValue("depreciationPeriodMonths", 96)}>8 年</Button>
-              <Button size="small" onClick={() => form.setFieldValue("defaultResidualRate", 3)}>残值率 3%</Button>
-              <Button size="small" onClick={() => form.setFieldValue("defaultResidualRate", 5)}>残值率 5%</Button>
+              <Button size="small" onClick={() => setSettingValue("depreciationPeriodMonths", 36)}>3 年</Button>
+              <Button size="small" onClick={() => setSettingValue("depreciationPeriodMonths", 60)}>5 年</Button>
+              <Button size="small" onClick={() => setSettingValue("depreciationPeriodMonths", 96)}>8 年</Button>
+              <Button size="small" onClick={() => setSettingValue("defaultResidualRate", 3)}>残值率 3%</Button>
+              <Button size="small" onClick={() => setSettingValue("defaultResidualRate", 5)}>残值率 5%</Button>
             </Space>
           </div>
           <div className="npcink-v3-settings-section">
@@ -195,7 +203,10 @@ export const SettingsWorkspace = () => {
                   maxLength={80}
                   placeholder="输入新部门名称，例如：财务部"
                   onChange={(event) => setNewDepartment(event.target.value)}
-                  onPressEnter={addDepartment}
+                  onPressEnter={(event) => {
+                    event.preventDefault();
+                    addDepartment();
+                  }}
                 />
                 <Button type="primary" icon={<PlusOutlined />} onClick={addDepartment}>
                   添加部门
@@ -220,7 +231,7 @@ export const SettingsWorkspace = () => {
           <div className="npcink-v3-settings-actions">
             {hasUnsavedChanges ? <Text type="warning">有未保存的更改</Text> : null}
             <Button type="primary" htmlType="submit" disabled={settingsQuery.isError || settingsQuery.isLoading} loading={settingsMutation.isLoading}>
-              {hasUnsavedChanges ? "保存设置（含部门变更）" : "保存设置"}
+              保存设置
             </Button>
           </div>
         </Form>

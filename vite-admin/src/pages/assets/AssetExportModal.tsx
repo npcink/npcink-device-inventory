@@ -2,7 +2,7 @@ import { HelpLabel } from "@/components/HelpLabel";
 import { getAssets, getSettings } from "@/services/v3";
 import type { Asset, AssetListParams } from "@/type/v3";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Checkbox, Empty, Modal, Radio, Space, Typography, message } from "antd";
+import { Alert, Button, Checkbox, Empty, Modal, Radio, Space, Typography, message } from "antd";
 import { useEffect, useState } from "react";
 import { fetchAllAssets } from "@/pages/shared/assets";
 import {
@@ -40,7 +40,7 @@ export const AssetExportModal = ({
   selectedAssets = [],
   onClose,
 }: AssetExportModalProps) => {
-  const settingsQuery = useQuery(["v3-settings"], getSettings, { staleTime: 60_000 });
+  const settingsQuery = useQuery(["v3-settings"], getSettings, { enabled: open, staleTime: 60_000 });
   const [scope, setScope] = useState<AssetExportScope>("current-filter");
   const [fieldKeys, setFieldKeys] = useState<AssetExportFieldKey[]>(DEFAULT_ASSET_EXPORT_FIELD_KEYS);
   const [format, setFormat] = useState<AssetExportFormat>("xlsx");
@@ -81,13 +81,18 @@ export const AssetExportModal = ({
     { enabled: open && previewOpen && scope !== "selected", staleTime: 30_000 }
   );
   const selectedExportAssets = exportableAssets(selectedAssets);
-  const previewAssets = exportableAssets(scope === "selected" ? selectedAssets : previewQuery.data?.data || []).slice(0, 30);
+  const previewLoading = scope !== "selected" && previewQuery.isFetching;
+  const previewError = scope !== "selected" && previewQuery.isError;
+  const previewAssets = exportableAssets(scope === "selected" ? selectedAssets : previewError || previewLoading ? [] : previewQuery.data?.data || []).slice(0, 30);
   const previewFields = selectedAssetExportFields(fieldKeys);
+  const needsSettings = fieldKeys.includes("financialResidualValue");
+  const settingsReady = !needsSettings || Boolean(settingsQuery.data) && !settingsQuery.isError;
 
   const toggleField = (key: AssetExportFieldKey, checked: boolean) => {
     setFieldKeys((keys) => checked ? [...keys, key] : keys.filter((item) => item !== key));
   };
   const exportAssets = async () => {
+    if (!settingsReady || exporting) return;
     if (!fieldKeys.length) {
       message.warning("请至少选择一个导出字段");
       return;
@@ -104,7 +109,7 @@ export const AssetExportModal = ({
       if (format === "xlsx") {
         await exportAssetWorkbook(assets, fieldKeys, settingsQuery.data);
       } else {
-        downloadCsvFile(`电脑设备-${Date.now()}.csv`, assetsToCsv(assets, fieldKeys, settingsQuery.data));
+        downloadCsvFile(`资产台账-${Date.now()}.csv`, assetsToCsv(assets, fieldKeys, settingsQuery.data));
       }
       message.success(`已导出 ${assets.length} 条资产`);
       setPreviewOpen(false);
@@ -117,7 +122,7 @@ export const AssetExportModal = ({
   };
   const currentFilterCountText =
     typeof currentTotal === "number" ? `${currentTotal} 条` : "导出时计算";
-  const previewTotalText = scope === "current-filter"
+  const previewTotalText = previewError ? "数量暂不可用" : previewLoading ? "正在加载" : scope === "current-filter"
     ? currentFilterCountText
     : scope === "selected"
       ? `${selectedExportAssets.length} 条`
@@ -145,11 +150,18 @@ export const AssetExportModal = ({
       className="npcink-v3-export-modal"
       footer={[
         <Button key="cancel" onClick={onClose}>取消</Button>,
-        <Button key="preview" disabled={!fieldKeys.length} onClick={() => setPreviewOpen(true)}>预览表格</Button>,
-        <Button key="export" type="primary" loading={exporting} disabled={!fieldKeys.length} onClick={exportAssets}>{format === "xlsx" ? "导出 Excel" : "导出 CSV"}</Button>,
+        <Button key="preview" disabled={!fieldKeys.length || !settingsReady} onClick={() => setPreviewOpen(true)}>预览表格</Button>,
+        <Button key="export" type="primary" loading={exporting} disabled={!fieldKeys.length || !settingsReady} onClick={exportAssets}>{format === "xlsx" ? "导出 Excel" : "导出 CSV"}</Button>,
       ]}
     >
       <div className="npcink-v3-export-config">
+        {needsSettings && settingsQuery.isError ? <Alert
+          type="error"
+          showIcon
+          message="折旧设置加载失败"
+          description="重试成功后才能预览和导出账面净值，也可取消选择该字段。"
+          action={<Button onClick={() => settingsQuery.refetch()}>重试</Button>}
+        /> : needsSettings && !settingsQuery.data ? <Text role="status">正在加载折旧设置…</Text> : null}
         <section>
           <Text strong><HelpLabel label="文件格式" description="Excel 按固定配色标记状态单元格；CSV 不保存颜色和单元格样式，预览窗口仅展示数据内容。" /></Text>
           <Radio.Group
@@ -205,21 +217,33 @@ export const AssetExportModal = ({
       destroyOnHidden
       footer={[
         <Button key="back" onClick={() => setPreviewOpen(false)}>返回修改</Button>,
-        <Button key="export" type="primary" loading={exporting} onClick={exportAssets}>{format === "xlsx" ? "确认导出 Excel" : "确认导出 CSV"}</Button>,
+        <Button key="export" type="primary" loading={exporting} disabled={!fieldKeys.length || !settingsReady || previewLoading || previewError} onClick={exportAssets}>{format === "xlsx" ? "确认导出 Excel" : "确认导出 CSV"}</Button>,
       ]}
     >
       <div className="npcink-v3-export-preview-summary">
-        <div><Text strong>{previewScopeLabel}</Text><Text type="secondary">预览前 {previewAssets.length} 条，导出时包含范围内全部数据。</Text></div>
+        <div><Text strong>{previewScopeLabel}</Text>{!previewLoading && !previewError ? <Text type="secondary">预览前 {previewAssets.length} 条，导出时包含范围内全部数据。</Text> : null}</div>
         <Text type="secondary">{previewTotalText} · {fieldKeys.length} 列 · {format === "xlsx" ? "Excel" : "CSV"}{format === "xlsx" ? " · 状态单元格着色" : ""}</Text>
       </div>
+      {needsSettings && settingsQuery.isError ? <Alert
+        type="error"
+        showIcon
+        message="折旧设置加载失败"
+        action={<Button onClick={() => settingsQuery.refetch()}>重试</Button>}
+      /> : null}
+      {previewError ? <Alert
+        type="error"
+        showIcon
+        message="导出预览加载失败"
+        action={<Button onClick={() => previewQuery.refetch()}>重试</Button>}
+      /> : previewLoading ? <div className="npcink-v3-export-preview-loading" role="status">正在加载预览…</div> : (
       <div className="npcink-v3-export-preview-table is-fullscreen">
-        {fieldKeys.length ? <table><thead><tr>{previewFields.map((field) => <th key={field.key}>{field.label}</th>)}</tr></thead><tbody>{previewAssets.map((asset) => <tr key={asset.uuid}>{previewFields.map((field) => {
+        {fieldKeys.length && settingsReady && previewAssets.length ? <table><thead><tr>{previewFields.map((field) => <th key={field.key}>{field.label}</th>)}</tr></thead><tbody>{previewAssets.map((asset) => <tr key={asset.uuid}>{previewFields.map((field) => {
           const color = format === "xlsx" && field.key === "status" ? ASSET_EXPORT_STATUS_COLORS[asset.status] : undefined;
           const value = String(field.value(asset, settingsQuery.data) ?? "");
           return <td key={field.key} style={color ? { backgroundColor: color } : undefined} title={value}>{value || "-"}</td>;
-        })}</tr>)}</tbody></table> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择至少一个导出字段" />}
-        {previewQuery.isLoading && scope !== "selected" ? <div className="npcink-v3-export-preview-loading">正在加载预览…</div> : null}
+        })}</tr>)}</tbody></table> : settingsReady ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={fieldKeys.length ? "当前范围没有可导出的未归档资产" : "请选择至少一个导出字段"} /> : null}
       </div>
+      )}
     </Modal>
     </>
   );

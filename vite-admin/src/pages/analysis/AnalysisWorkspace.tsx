@@ -45,7 +45,7 @@ import {
   issueGroup,
 } from "@/utils/hardwareAudit";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Modal, Radio, Table, Tabs, Tag, Typography } from "antd";
+import { Alert, Button, Modal, Radio, Spin, Table, Tabs, Tag, Typography } from "antd";
 import { useMemo, useState, type ReactNode } from "react";
 import { fetchAllAssets } from "@/pages/shared/assets";
 import { normalizeDepartmentList } from "@/pages/shared/departments";
@@ -93,12 +93,17 @@ export const AnalysisWorkspace = () => {
     () => fetchAllAssets({ assetScope: "all" }),
     { staleTime: 60_000 }
   );
-  const trendsQuery = useQuery(["v3-analysis-collection-trends"], getCollectionTrends, { staleTime: 60_000 });
+  const trendsQuery = useQuery(["v3-analysis-collection-trends"], getCollectionTrends, { enabled: analysisViewKey === "summary", staleTime: 60_000 });
   const settingsQuery = useQuery(["v3-settings"], getSettings, { staleTime: 60_000 });
   const observationsQuery = useQuery(["v3-analysis-observations"], ({ signal }) => fetchComparisonObservations(signal), {
     enabled: analysisViewKey === "changes",
     staleTime: 60_000,
   });
+  const needsSettings = analysisViewKey === "value" || analysisViewKey === "renewal";
+  const analysisContentReady = assetsQuery.isSuccess && (!needsSettings || settingsQuery.isSuccess);
+  const analysisLoading = assetsQuery.isFetching || (needsSettings && settingsQuery.isFetching);
+  const canExportAnalysis = analysisContentReady && !analysisLoading &&
+    (analysisViewKey !== "changes" || (observationsQuery.isSuccess && !observationsQuery.isFetching));
   const allAssets = useMemo(
     () => (assetsQuery.data || []).filter((asset) => asset.status !== "deleted"),
     [assetsQuery.data]
@@ -311,6 +316,7 @@ export const AnalysisWorkspace = () => {
     : hardwareChangeRows;
   const hardwareChangeTypes = Array.from(new Set(hardwareChangeRows.map((row) => row.field))).map((value) => ({ label: value, value }));
   const exportAnalysisCsv = () => {
+    if (!canExportAnalysis) return;
     let filename = `设备分析-${analysisViewKey}-${formatDateInput(new Date().toISOString())}.csv`;
     let rows: string[][];
     if (analysisViewKey === "query") {
@@ -345,16 +351,16 @@ export const AnalysisWorkspace = () => {
             只读统计当前资产与采集快照，不写回问题状态，也不在分析页修改资产。
           </Text>
         </div>
-        <Button onClick={exportAnalysisCsv}>导出当前分析</Button>
+        <Button disabled={!canExportAnalysis} onClick={exportAnalysisCsv}>导出当前分析</Button>
       </div>
       {assetsQuery.isError ? (
-        <Alert type="error" showIcon message="分析数据加载失败" description="请刷新页面后重试。" />
+        <Alert type="error" showIcon message="分析数据加载失败" action={<Button onClick={() => assetsQuery.refetch()}>重试</Button>} />
       ) : null}
       <div className="npcink-v3-simple-kpis" aria-label="电脑资产概览">
         {[
           { label: "电脑总数", value: assets.length },
           { label: "已接入采集", value: connectedCount },
-          { label: "待处理问题", value: issues.length },
+          { label: "发现的问题", value: issues.length },
           { label: "重复风险组", value: duplicateRiskGroups },
         ].map((item) => (
           <div key={item.label}>
@@ -405,14 +411,21 @@ export const AnalysisWorkspace = () => {
           ) : null}
         </div>
       ) : null}
+      {needsSettings && settingsQuery.isError ? (
+        <Alert type="error" showIcon message="分析参数加载失败" action={<Button onClick={() => settingsQuery.refetch()}>重试</Button>} />
+      ) : null}
+      {assetsQuery.isLoading || (needsSettings && settingsQuery.isLoading) ? (
+        <div role="status">正在加载分析数据…</div>
+      ) : null}
+      {analysisContentReady ? <Spin spinning={analysisLoading}>
       {analysisViewKey === "summary" ? (
         <div className="npcink-v3-analysis-grid">
           <section className="npcink-v3-analysis-panel is-wide">
             <div className="npcink-v3-analysis-panel-head">
               <div><Title level={4}><HelpLabel label="近 30 天采集趋势" description="按客户端采集时间统计接收快照数量。" /></Title></div>
-              <strong>{trend.reduce((total, item) => total + item.count, 0)} 次</strong>
+              <strong>{trendsQuery.isLoading || trendsQuery.isError ? "-" : trend.reduce((total, item) => total + item.count, 0)} 次</strong>
             </div>
-            {trendsQuery.isError ? <Alert type="error" showIcon message="采集趋势加载失败" /> : (
+            {trendsQuery.isLoading ? <div role="status">正在加载采集趋势…</div> : trendsQuery.isError ? <Alert type="error" showIcon message="采集趋势加载失败" action={<Button onClick={() => trendsQuery.refetch()}>重试</Button>} /> : (
               <div className="npcink-v3-analysis-trend" aria-label="近 30 天采集数量">
                 {trend.map((item, index) => (
                   <div key={item.date} title={`${item.date}：${item.count} 次`}>
@@ -423,7 +436,7 @@ export const AnalysisWorkspace = () => {
               </div>
             )}
           </section>
-          <section className="npcink-v3-analysis-panel"><Title level={4}>全部资产部门分布</Title><Text type="secondary">统计 {allAssets.length} 条未归档电脑和自定义资产。</Text><AnalysisDistribution rows={departmentRows.slice(0, 8)} onSelect={(row) => openDrillDown(`${row.label}资产`, allAssets.filter((asset) => (asset.department.trim() || "未填写") === row.label))} /></section>
+          <section className="npcink-v3-analysis-panel"><Title level={4}>全部资产部门分布</Title><Text type="secondary">统计 {allAssets.length} 条未归档电脑和自定义资产。</Text><AnalysisDistribution rows={departmentRows} onSelect={(row) => openDrillDown(`${row.label}资产`, allAssets.filter((asset) => (asset.department.trim() || "未填写") === row.label))} /></section>
           <section className="npcink-v3-analysis-panel"><Title level={4}><HelpLabel label="全部资产状态" description="与左侧部门分布使用相同口径。" /></Title><AnalysisDistribution rows={statusRows} onSelect={(row) => openDrillDown(`${row.label}资产`, allAssets.filter((asset) => (STATUS_OPTIONS.find((item) => item.value === asset.status)?.label || asset.status) === row.label))} /></section>
         </div>
       ) : null}
@@ -523,6 +536,7 @@ export const AnalysisWorkspace = () => {
       {analysisViewKey === "value" ? (
         <ValueOverviewView {...valueSummary} totalCount={allAssets.length} formatMoney={formatMoney} />
       ) : null}
+      </Spin> : null}
       <Modal
         title={drillDown?.title || "分析下钻"}
         open={Boolean(drillDown)}
@@ -535,7 +549,7 @@ export const AnalysisWorkspace = () => {
           rowKey="uuid"
           size="middle"
           dataSource={drillDown?.assets || []}
-          pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
+          pagination={{ defaultPageSize: 10, responsive: true, showTotal: (total) => `共 ${total} 条` }}
           columns={[
             { title: "资产", render: (_, asset) => analysisAssetLink(asset) },
             { title: "名称", dataIndex: "name" },

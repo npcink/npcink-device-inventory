@@ -31,8 +31,8 @@ export const HardwareChangesView = ({ rows, types, selectedType, loading, error,
         rowKey="key"
         size="middle"
         loading={loading}
-        dataSource={rows}
-        pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 项变化` }}
+        dataSource={error ? [] : rows}
+        pagination={error ? false : { defaultPageSize: 10, responsive: true, showTotal: (total) => `共 ${total} 项变化` }}
         columns={[
           { title: "资产", width: 130, render: (_value, row) => assetLink(row.asset) },
           { title: "部门", width: 120, render: (_value, row) => row.asset.department || "-" },
@@ -42,7 +42,7 @@ export const HardwareChangesView = ({ rows, types, selectedType, loading, error,
           { title: "采集时间", dataIndex: "observedAt", width: 180, render: formatDate },
         ]}
         scroll={{ x: 900 }}
-        locale={{ emptyText: <Empty description="最近两次采集未发现可确认的硬件变化" /> }}
+        locale={{ emptyText: error ? null : <Empty description="最近两次采集未发现可确认的硬件变化" /> }}
       />
     </section>
   </div>

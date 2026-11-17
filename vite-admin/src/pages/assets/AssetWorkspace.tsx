@@ -14,6 +14,7 @@ import {
   Pagination,
   Select,
   Space,
+  Spin,
   Table,
   Tag,
   Typography,
@@ -22,8 +23,8 @@ import {
 import type { ColumnsType, TablePaginationConfig } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import { AssetCard } from "@/pages/assets/AssetCard";
-import { AssetLayoutMode, bulkUpdateChanges, countStatus } from "@/pages/shared/assets";
-import { initialAssetsForParams } from "@/pages/shared/cache";
+import { AssetLayoutMode, bulkUpdateChanges } from "@/pages/shared/assets";
+import { initialAssetsForParams, invalidateAssetViews } from "@/pages/shared/cache";
 import { normalizeDepartmentList } from "@/pages/shared/departments";
 import { assetUpdateDateText, isComputerAsset } from "@/pages/shared/finance";
 import {
@@ -126,15 +127,13 @@ export const AssetWorkspace = ({
     onSuccess: (asset) => {
       setAssetModalOpen(false);
       setSelectedUuid(asset.uuid);
-      queryClient.invalidateQueries(["v3-assets"]);
+      invalidateAssetViews(queryClient);
       message.success("资产已创建");
     },
   });
   const archiveMutation = useMutation(archiveAsset, {
-    onSuccess: (asset) => {
-      queryClient.invalidateQueries(["v3-assets"]);
-      queryClient.invalidateQueries(["v3-asset", asset.uuid]);
-      queryClient.invalidateQueries(["v3-asset-events", asset.uuid]);
+    onSuccess: () => {
+      invalidateAssetViews(queryClient);
       message.success("资产已归档");
     },
   });
@@ -147,7 +146,7 @@ export const AssetWorkspace = ({
     },
     {
       onSuccess: () => {
-        queryClient.invalidateQueries(["v3-assets"]);
+        invalidateAssetViews(queryClient);
         setSelectedUuids(new Set());
         setBatchMode(false);
         message.success("已归档所选资产");
@@ -179,8 +178,7 @@ export const AssetWorkspace = ({
         if (changedCount === 0) {
           return;
         }
-        queryClient.invalidateQueries(["v3-assets"]);
-        queryClient.invalidateQueries(["v3-events"]);
+        invalidateAssetViews(queryClient);
         queryClient.invalidateQueries(["v3-analysis-observations"]);
         setBulkModalOpen(false);
         setSelectedUuids(new Set());
@@ -192,6 +190,13 @@ export const AssetWorkspace = ({
 
   const assets = assetsQuery.data?.data || [];
   const pagination = assetsQuery.data?.pagination;
+  const assetListUnavailable = assetsQuery.isFetching || assetsQuery.isError;
+  const hasAssetFilters = Boolean(search || status || category || assetType || purchasePlatform || financialDataStatus);
+  const emptyAssetDescription = hasAssetFilters
+    ? "没有符合当前筛选条件的资产，请调整筛选条件或搜索关键词"
+    : assetScope === "other"
+      ? "暂无自定义资产，可新增自定义资产或在数据工具中导入标准表格"
+      : "暂无电脑资产，可在数据工具中导入标准表格或等待客户端采集";
   const departmentOptions = useMemo(
     () => normalizeDepartmentList(settingsQuery.data?.departments || []),
     [settingsQuery.data?.departments]
@@ -199,8 +204,6 @@ export const AssetWorkspace = ({
   const selectedCount = selectedUuids.size;
   const allSelected = assets.length > 0 && assets.every((asset) => selectedUuids.has(asset.uuid));
   const compactLayout = assetLayoutMode === "compact";
-  const activeCount = countStatus(assets, "active");
-  const maintenanceCount = countStatus(assets, "maintenance");
   const activeScopeLabel =
     title || ASSET_SCOPE_OPTIONS.find((item) => item.value === assetScope)?.label || "资产";
   const workspaceSavedFilters = savedFilters.filter((filter) => filter.assetScope === initialScope);
@@ -423,9 +426,7 @@ export const AssetWorkspace = ({
       <div className="npcink-v3-toolbar-shell is-plain">
         <div className="npcink-v3-toolbar-title">
           <Text strong>{activeScopeLabel}</Text>
-          <Text type="secondary">
-            共 {pagination?.totalItems ?? "-"} 条，当前页在用 {activeCount}，维护 {maintenanceCount}
-          </Text>
+          <Tag bordered={false}>共 {assetsQuery.isError || assetsQuery.isPreviousData ? "-" : pagination?.totalItems ?? "-"} 条</Tag>
         </div>
         <div className="npcink-v3-toolbar">
           <Select
@@ -572,21 +573,21 @@ export const AssetWorkspace = ({
         <div className="npcink-v3-batch-actions">
           <Space wrap>
             <Text type="secondary">已选 {selectedCount} 条</Text>
-            <Button onClick={toggleSelectAll} disabled={!assets.length}>
+            <Button onClick={toggleSelectAll} disabled={assetListUnavailable || !assets.length}>
               {allSelected ? "取消全选" : "全选当前页"}
             </Button>
             <Button
               danger
-              disabled={selectedCount === 0}
+              disabled={assetListUnavailable || selectedCount === 0}
               loading={batchArchiveMutation.isLoading}
               onClick={confirmBatchArchive}
             >
               归档已选
             </Button>
-            <Button disabled={selectedCount === 0} onClick={() => setBulkModalOpen(true)}>
+            <Button disabled={assetListUnavailable || selectedCount === 0} onClick={() => setBulkModalOpen(true)}>
               批量修改
             </Button>
-            <Button disabled={selectedCount === 0} onClick={() => setExportModalOpen(true)}>
+            <Button disabled={assetListUnavailable || selectedCount === 0} onClick={() => setExportModalOpen(true)}>
               导出已选
             </Button>
             <Button onClick={() => setBatchMode(false)}>退出批量</Button>
@@ -599,62 +600,61 @@ export const AssetWorkspace = ({
           type="error"
           showIcon
           message={`${activeScopeLabel}加载失败`}
-          description="当前页面不能判断是否真的没有资产，也不会开放批量操作。"
+          description="请重试加载资产列表。"
           action={<Button onClick={() => assetsQuery.refetch()}>重试</Button>}
         />
       ) : null}
 
       {!assetsQuery.isError && viewMode === "card" ? (
-        <div className="npcink-v3-card-surface">
-          {assetsQuery.isLoading && !assets.length ? (
-            <Table loading pagination={false} showHeader={false} />
-          ) : assets.length ? (
-            <div className="npcink-v3-card-grid">
-              {assets.map((asset) => (
-                <AssetCard
-                  key={asset.uuid}
-                  asset={asset}
-                  searchKeyword={search}
-                  onOpen={() => setSelectedUuid(asset.uuid)}
-                  selectable={batchMode}
-                  selected={selectedUuids.has(asset.uuid)}
-                  onSelect={() => toggleSelect(asset.uuid)}
+        <Spin spinning={assetsQuery.isFetching}>
+          <div className="npcink-v3-card-surface">
+            {assetsQuery.isLoading && !assets.length ? (
+              <div className="npcink-v3-empty-state" role="status">正在加载资产…</div>
+            ) : assets.length ? (
+              <div className="npcink-v3-card-grid">
+                {assets.map((asset) => (
+                  <AssetCard
+                    key={asset.uuid}
+                    asset={asset}
+                    searchKeyword={search}
+                    onOpen={() => setSelectedUuid(asset.uuid)}
+                    selectable={batchMode}
+                    selected={selectedUuids.has(asset.uuid)}
+                    onSelect={() => toggleSelect(asset.uuid)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="npcink-v3-empty-state">
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={emptyAssetDescription}
                 />
-              ))}
-            </div>
-          ) : (
-            <div className="npcink-v3-empty-state">
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={
-                  assetScope === "other"
-                    ? "暂无自定义资产，可新增自定义资产或在数据工具中导入标准表格"
-                    : "暂无电脑资产，可在数据工具中导入标准表格或等待客户端采集"
-                }
+              </div>
+            )}
+            <div className="npcink-v3-card-pagination">
+              <Pagination
+                current={page}
+                pageSize={pageSize}
+                total={pagination?.totalItems || 0}
+                showSizeChanger
+                responsive
+                disabled={assetsQuery.isFetching}
+                onChange={(nextPage, nextPageSize) => {
+                  setPage(nextPage);
+                  setPageSize(nextPageSize);
+                }}
               />
             </div>
-          )}
-          <div className="npcink-v3-card-pagination">
-            <Text type="secondary">共 {pagination?.totalItems || 0} 条资产</Text>
-            <Pagination
-              current={page}
-              pageSize={pageSize}
-              total={pagination?.totalItems || 0}
-              showSizeChanger
-              onChange={(nextPage, nextPageSize) => {
-                setPage(nextPage);
-                setPageSize(nextPageSize);
-              }}
-            />
           </div>
-        </div>
+        </Spin>
       ) : !assetsQuery.isError ? (
         <Table
           rowKey="uuid"
           size="middle"
           columns={columns}
           dataSource={assets}
-          loading={assetsQuery.isLoading && !assets.length}
+          loading={assetsQuery.isFetching}
           onChange={handleTableChange}
           rowSelection={
             batchMode
@@ -679,9 +679,10 @@ export const AssetWorkspace = ({
             pageSize,
             total: pagination?.totalItems || 0,
             showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 条资产`,
+            responsive: true,
+            disabled: assetsQuery.isFetching,
           }}
-          locale={{ emptyText: <Empty description="暂无资产" /> }}
+          locale={{ emptyText: <Empty description={emptyAssetDescription} /> }}
         />
       ) : null}
 

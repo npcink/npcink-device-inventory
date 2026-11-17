@@ -73,7 +73,7 @@ export const HardwareInventoryView = ({
         size="middle"
         loading={loading}
         dataSource={visibleRows}
-        pagination={{ pageSize: 20, showTotal: (total) => `共 ${total} 项` }}
+        pagination={{ defaultPageSize: 20, responsive: true, showTotal: (total) => `共 ${total} 项` }}
         columns={[
           { title: inventoryKey === "memory" ? "整机容量" : "型号", dataIndex: "label", render: (value, row) => <Button type="link" className="npcink-v3-link npcink-v3-inventory-model-link" onClick={() => onOpenDrillDown(`${value} 设备`, row.assets)}>{value}</Button> },
           { title: "补充信息", dataIndex: "detail", width: 220, render: (value) => value || <Text type="secondary">-</Text> },

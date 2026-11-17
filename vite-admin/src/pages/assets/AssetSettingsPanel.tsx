@@ -154,6 +154,8 @@ export const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, o
             <Form.Item name="financialResidualValue" label="手动账面净值" hidden={watchedFinancialResidualMode !== "manual"}>
               <InputNumber min={0} precision={2} className="npcink-v3-number" addonAfter="¥" />
             </Form.Item>
+          </div>
+          <div className="npcink-v3-settings-grid npcink-v3-settings-grid-three">
             <Form.Item
               name="orderTime"
               label="购置日期"
@@ -170,9 +172,9 @@ export const AssetSettingsPanel = ({ asset, departmentOptions = [], onUpdated, o
                 className="npcink-v3-date-picker"
               />
             </Form.Item>
-          </div>
-          <div className="npcink-v3-finance-summary">
-            <span>系统估算：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}</span>
+            <div className="npcink-v3-finance-summary npcink-v3-finance-summary-inline">
+              <span>系统估算：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}</span>
+            </div>
           </div>
         </div>
 
@@ -317,9 +319,6 @@ export const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetS
               <Input placeholder="采购同事" />
             </Form.Item>
           </div>
-          <div className="npcink-v3-finance-summary">
-            <span>系统估算：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}</span>
-          </div>
         </div>
 
         <div className="npcink-v3-custom-settings-section">
@@ -346,9 +345,22 @@ export const CustomAssetSettingsPanel = ({ asset, onUpdated, onArchive }: AssetS
             <Form.Item name="payMethod" label="支付方式">
               <Input placeholder="例如：支付宝" />
             </Form.Item>
-            <Form.Item name="orderTime" label="下单时间">
-              <Input placeholder="例如：2024-12-27" />
+          </div>
+          <div className="npcink-v3-custom-settings-grid">
+            <Form.Item
+              name="orderTime"
+              label="购置日期"
+              normalize={(value) => value ? value.format("YYYY-MM-DD") : ""}
+              getValueProps={(value) => {
+                const date = value ? dayjs(value) : null;
+                return { value: date?.isValid() ? date : null };
+              }}
+            >
+              <DatePicker format="YYYY-MM-DD" placeholder="选择购置日期" allowClear className="npcink-v3-date-picker" />
             </Form.Item>
+            <div className="npcink-v3-finance-summary npcink-v3-finance-summary-inline">
+              <span>系统估算：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}</span>
+            </div>
             <Form.Item name="link" label="商品链接" className="npcink-v3-custom-settings-wide">
               <Input placeholder="商品链接或备注" />
             </Form.Item>

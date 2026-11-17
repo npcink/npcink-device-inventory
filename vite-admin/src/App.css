@@ -429,9 +429,14 @@
 
 .npcink-v3-toolbar-title {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 180px;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.npcink-v3-toolbar-title .ant-tag {
+  margin-inline-end: 0;
 }
 
 .npcink-v3-toolbar {
@@ -751,7 +756,7 @@
 .npcink-v3-card-pagination {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 14px;
   margin-top: 22px;
   padding-top: 0;
@@ -1713,10 +1718,9 @@
 }
 
 .npcink-v3-export-preview-loading {
-  position: absolute;
-  inset: 0;
   display: grid;
   place-items: center;
+  min-height: 160px;
   color: #667085;
   background: rgb(255 255 255 / 78%);
 }
@@ -2190,6 +2194,18 @@
   color: #1f2328;
   font-size: 13px;
   font-weight: 500;
+}
+
+.npcink-v3-finance-summary-inline {
+  align-self: end;
+  align-items: center;
+  min-height: 36px;
+  margin-bottom: 10px;
+  padding: 6px 12px;
+}
+
+.npcink-v3-asset-form .npcink-v3-finance-summary-inline {
+  margin-bottom: 18px;
 }
 
 .npcink-v3-settings-actions {

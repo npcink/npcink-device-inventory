@@ -4,9 +4,6 @@ import { firstText, getRecord, inferredGraphicsForFallbackDriver } from "@/utils
 import { assetPurchaseRecord, isComputerAsset } from "@/pages/shared/finance";
 import { assetTypeLabel, fieldText, statusLabel } from "@/pages/shared/presentation";
 
-export const countStatus = (assets: Asset[], status: string) =>
-  assets.filter((asset) => asset.status === status).length;
-
 export const fetchAllAssets = async (params: AssetListParams = {}) => {
   const first = await getAssets({ ...params, page: 1, pageSize: 100 });
   const assets = [...first.data];

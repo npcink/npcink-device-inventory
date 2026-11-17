@@ -81,7 +81,7 @@ export const HardwareQueryView = ({
           size="middle"
           loading={loading}
           dataSource={matchedItems}
-          pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 台` }}
+          pagination={{ defaultPageSize: 10, responsive: true, showTotal: (total) => `共 ${total} 台` }}
           columns={[
             { title: "使用人", width: 120, render: (_value, item) => item.asset.ownerName || <Text type="secondary">未分配</Text> },
             { title: "部门", width: 120, render: (_value, item) => item.asset.department || "未填写" },

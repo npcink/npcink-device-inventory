@@ -1,5 +1,5 @@
 import type { Asset } from "@/type/v3";
-import { Empty, Table, Tabs } from "antd";
+import { Alert, Button, Empty, Table, Tabs, Typography } from "antd";
 import { CustomAssetSettingsPanel } from "@/pages/assets/AssetSettingsPanel";
 import { customAssetInfo } from "@/pages/shared/assets";
 import { AutoChangeRow } from "@/pages/shared/events";
@@ -11,6 +11,10 @@ export interface CustomAssetDetailProps {
   onUpdated: (asset: Asset) => void;
   onArchive: (asset: Asset) => void;
   readOnly?: boolean;
+  recordsLoading?: boolean;
+  recordsError?: boolean;
+  recordsTruncated?: boolean;
+  onRetryRecords?: () => void;
 }
 
 export const CustomAssetDetail = ({
@@ -19,6 +23,10 @@ export const CustomAssetDetail = ({
   onUpdated,
   onArchive,
   readOnly = false,
+  recordsLoading = false,
+  recordsError = false,
+  recordsTruncated = false,
+  onRetryRecords,
 }: CustomAssetDetailProps) => {
   const info = customAssetInfo(asset);
   const productLink = /^https?:\/\//i.test(info.link) ? info.link : "";
@@ -84,7 +92,11 @@ export const CustomAssetDetail = ({
           key: "records",
           label: "自动记录",
           children: (
+            <>
+            {recordsError ? <Alert type="error" showIcon message="变更记录加载失败" action={<Button onClick={onRetryRecords}>重试</Button>} /> : null}
+            {recordsTruncated ? <Typography.Text type="secondary">此处展示最近 30 条记录中的自动变更；更多历史请到“变更数据”查看。</Typography.Text> : null}
             <Table
+              loading={recordsLoading}
               rowKey="key"
               size="small"
               className="npcink-v3-auto-table"
@@ -114,10 +126,11 @@ export const CustomAssetDetail = ({
                   render: formatDate,
                 },
               ]}
-              dataSource={autoRecordRows}
-              pagination={{ pageSize: 10, hideOnSinglePage: true }}
-              locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无自动变更记录" /> }}
+              dataSource={recordsError ? [] : autoRecordRows}
+              pagination={{ defaultPageSize: 10, responsive: true, hideOnSinglePage: true }}
+              locale={{ emptyText: recordsError ? null : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无自动变更记录" /> }}
             />
+            </>
           ),
         },
         ...(!readOnly ? [{

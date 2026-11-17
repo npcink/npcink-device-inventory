@@ -29,7 +29,7 @@ export const CollectionHealthView = ({ collectionRows, collectionBandRows, depar
         rowKey={(row) => row.asset.uuid}
         size="middle"
         dataSource={collectionRows.filter((row) => !["fresh", "aging"].includes(row.band))}
-        pagination={{ pageSize: 10, showTotal: (total) => `共 ${total} 条` }}
+        pagination={{ defaultPageSize: 10, responsive: true, showTotal: (total) => `共 ${total} 条` }}
         columns={[
           { title: "资产", render: (_value, row) => assetLink(row.asset) },
           { title: "部门", render: (_value, row) => row.asset.department || "-", width: 150 },

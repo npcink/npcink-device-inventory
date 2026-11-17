@@ -2,7 +2,8 @@ import { HelpLabel } from "@/components/HelpLabel";
 import { getSettings } from "@/services/v3";
 import type { AssetInput } from "@/type/v3";
 import { useQuery } from "@tanstack/react-query";
-import { Form, Input, InputNumber, Modal, Radio, Select } from "antd";
+import { DatePicker, Form, Input, InputNumber, Modal, Radio, Select } from "antd";
+import dayjs from "dayjs";
 import { useEffect, useMemo } from "react";
 import { assetFormValuesToInput, type AssetFormValues } from "@/pages/shared/assetForm";
 import {
@@ -164,9 +165,6 @@ export const AssetFormModal = ({ open, departmentOptions = [], onClose, onSubmit
             <Form.Item name="order" label="单号">
               <Input />
             </Form.Item>
-            <Form.Item name="orderTime" label="时间">
-              <Input placeholder="例如：2026-06-26" />
-            </Form.Item>
             <Form.Item name="platform" label="平台">
               <Input placeholder="例如：淘宝、京东、闲鱼" />
             </Form.Item>
@@ -174,12 +172,22 @@ export const AssetFormModal = ({ open, departmentOptions = [], onClose, onSubmit
               <Input placeholder="例如：支付宝、微信" />
             </Form.Item>
           </div>
-        </div>
-        <div className="npcink-v3-finance-summary">
-          <span>
-            系统估算账面净值：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}
-          </span>
-          <span>当前方式：{watchedFinancialResidualMode === "manual" ? "手动设置" : "自动计算"}</span>
+          <div className="npcink-v3-asset-form-grid">
+            <Form.Item
+              name="orderTime"
+              label="购置日期"
+              normalize={(value) => value ? value.format("YYYY-MM-DD") : ""}
+              getValueProps={(value) => {
+                const date = value ? dayjs(value) : null;
+                return { value: date?.isValid() ? date : null };
+              }}
+            >
+              <DatePicker format="YYYY-MM-DD" placeholder="选择购置日期" allowClear className="npcink-v3-date-picker" />
+            </Form.Item>
+            <div className="npcink-v3-finance-summary npcink-v3-finance-summary-inline">
+              <span>系统估算：{estimatedFinancialResidual === null ? "需要采购价和购置日期" : formatMoney(estimatedFinancialResidual)}</span>
+            </div>
+          </div>
         </div>
       </Form>
     </Modal>

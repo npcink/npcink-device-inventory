@@ -1,7 +1,18 @@
 import type { Asset, AssetListParams, PaginatedResult } from "@/type/v3";
 import { InitialAssets } from "@/utils/index";
+import type { QueryClient } from "@tanstack/react-query";
 
 const ASSET_LIST_CACHE_PREFIX = "npcinkDeviceInventoryAssetList:";
+
+export const invalidateAssetViews = (queryClient: QueryClient) => Promise.all([
+  "v3-assets",
+  "v3-analysis-assets",
+  "v3-assets-import-index",
+  "v3-export-preview",
+  "v3-asset",
+  "v3-asset-events",
+  "v3-events",
+].map((key) => queryClient.invalidateQueries([key])));
 
 export const normalizedAssetListParams = (params: AssetListParams) => ({
   page: params.page || 1,

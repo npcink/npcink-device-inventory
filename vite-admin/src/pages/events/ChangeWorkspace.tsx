@@ -28,13 +28,6 @@ export const ChangeWorkspace = () => {
   });
   const events = eventsQuery.data?.data || [];
   const pagination = eventsQuery.data?.pagination;
-  const typeFilters = useMemo(
-    () =>
-      Array.from(new Set(events.map((event) => changeTypeLabel(event)).filter((value) => value && value !== "-")))
-        .sort((a, b) => a.localeCompare(b, "zh-CN"))
-        .map((value) => ({ text: value, value })),
-    [events]
-  );
 
   const columns: ColumnsType<AssetEvent> = [
     {
@@ -55,8 +48,6 @@ export const ChangeWorkspace = () => {
     {
       title: "类型",
       width: 140,
-      filters: typeFilters,
-      onFilter: (value, event) => changeTypeLabel(event) === value,
       render: (_, event) => changeTypeLabel(event),
     },
     {
@@ -80,9 +71,6 @@ export const ChangeWorkspace = () => {
       title: "日期",
       dataIndex: "createdAt",
       width: 190,
-      defaultSortOrder: "descend",
-      sorter: (a, b) =>
-        new Date(a.createdAt.replace(" ", "T")).getTime() - new Date(b.createdAt.replace(" ", "T")).getTime(),
       render: formatDate,
     },
   ];
@@ -129,11 +117,12 @@ export const ChangeWorkspace = () => {
         dataSource={eventsQuery.isError ? [] : events}
         loading={eventsQuery.isLoading || eventsQuery.isFetching}
         scroll={{ x: 980 }}
-        pagination={{
+        pagination={eventsQuery.isError ? false : {
           current: page,
           pageSize,
           total: pagination?.totalItems || 0,
           showSizeChanger: true,
+          responsive: true,
           showTotal: (total) => `共 ${total} 条变更记录`,
         }}
         onChange={(nextPagination) => {

@@ -1,5 +1,6 @@
 import { lazy } from "react";
 import { DeferredPanel } from "@/components/DeferredPanel";
+import { invalidateAssetViews } from "@/pages/shared/cache";
 import { BackupManagementPanels, BackupRestoreModal } from "@/components/backup-management";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Typography } from "antd";
@@ -39,8 +40,7 @@ export const DataToolsWorkspace = () => {
         open={importModalOpen}
         onClose={() => setImportModalOpen(false)}
         onImported={() => {
-          queryClient.invalidateQueries(["v3-assets"]);
-          queryClient.invalidateQueries(["v3-assets-import-index"]);
+          invalidateAssetViews(queryClient);
         }}
       />
       </DeferredPanel>
@@ -48,9 +48,9 @@ export const DataToolsWorkspace = () => {
         open={backupImportModalOpen}
         onClose={() => setBackupImportModalOpen(false)}
         onImported={() => {
-          queryClient.invalidateQueries(["v3-assets"]);
-          queryClient.invalidateQueries(["v3-assets-import-index"]);
-          queryClient.invalidateQueries(["v3-events"]);
+          invalidateAssetViews(queryClient);
+          queryClient.invalidateQueries(["v3-asset-identities"]);
+          queryClient.invalidateQueries(["v3-asset-observations"]);
           queryClient.invalidateQueries(["v3-observations"]);
           queryClient.invalidateQueries(["v3-analysis-observations"]);
           queryClient.invalidateQueries(["v3-analysis-collection-trends"]);

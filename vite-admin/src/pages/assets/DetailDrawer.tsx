@@ -10,7 +10,8 @@ import type { Asset, AssetEvent, AssetEventInput, AssetIdentity, AssetObservatio
 import { assetHardwareContext, firstText, formatBytes, hardwareMemoryBytes } from "@/utils/hardwareAudit";
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Checkbox, Collapse, Empty, Input, Modal, Space, Table, Tabs, Tag, Typography, message } from "antd";
+import { invalidateAssetViews } from "@/pages/shared/cache";
+import { Alert, Button, Checkbox, Collapse, Empty, Input, Modal, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Fragment, useMemo, useState } from "react";
 import { AssetSettingsPanel } from "@/pages/assets/AssetSettingsPanel";
@@ -59,7 +60,7 @@ export interface DetailDrawerProps {
   onNavigate?: (asset: Asset) => void;
 }
 
-export const DetailDrawer = ({
+const DetailDrawerContent = ({
   uuid,
   open,
   initialAsset = null,
@@ -79,21 +80,26 @@ export const DetailDrawer = ({
   const [activeDetailKey, setActiveDetailKey] = useState("processor");
   const [showEmptyDetailFields, setShowEmptyDetailFields] = useState(false);
   const [autoRecordSearch, setAutoRecordSearch] = useState("");
+  const [activeTab, setActiveTab] = useState("overview");
+  const [debugPanels, setDebugPanels] = useState<string[]>([]);
+  const [observationPage, setObservationPage] = useState(1);
   const enabled = Boolean(uuid && open);
   const assetQuery = useQuery(["v3-asset", uuid], () => getAsset(uuid || ""), {
     enabled,
     initialData: initialAsset || undefined,
   });
-  const settingsQuery = useQuery(["v3-settings"], getSettings, { staleTime: 60_000 });
+  const asset = assetQuery.data || null;
+  const debugEnabled = enabled && isComputerAsset(asset) && activeTab === "debug";
+  const settingsQuery = useQuery(["v3-settings"], getSettings, { enabled, staleTime: 60_000 });
   const identitiesQuery = useQuery(
     ["v3-asset-identities", uuid],
     () => getAssetIdentities(uuid || ""),
-    { enabled }
+    { enabled: debugEnabled && debugPanels.includes("identities") }
   );
   const observationsQuery = useQuery(
-    ["v3-asset-observations", uuid],
-    () => getAssetObservations(uuid || "", 1, 20),
-    { enabled }
+    ["v3-asset-observations", uuid, observationPage],
+    () => getAssetObservations(uuid || "", observationPage, 20),
+    { enabled: debugEnabled && debugPanels.includes("observations") }
   );
   const eventsQuery = useQuery(
     ["v3-asset-events", uuid],
@@ -101,7 +107,6 @@ export const DetailDrawer = ({
     { enabled }
   );
 
-  const asset = assetQuery.data || null;
   const observations = observationsQuery.data?.data || [];
   const events = eventsQuery.data?.data || [];
   const hardwareContext = assetHardwareContext(asset);
@@ -180,8 +185,7 @@ export const DetailDrawer = ({
 
   const handleAssetUpdated = (updated: Asset) => {
     queryClient.setQueryData(["v3-asset", updated.uuid], updated);
-    queryClient.invalidateQueries(["v3-assets"]);
-    queryClient.invalidateQueries(["v3-asset-events", updated.uuid]);
+    invalidateAssetViews(queryClient);
   };
 
   const identityColumns: ColumnsType<AssetIdentity> = [
@@ -257,12 +261,19 @@ export const DetailDrawer = ({
       className="npcink-v3-detail-modal"
       destroyOnHidden
     >
+      {assetQuery.isError ? (
+        <Alert type="error" showIcon message="资产详情加载失败" action={<Button onClick={() => assetQuery.refetch()}>重试</Button>} />
+      ) : null}
       {assetQuery.isLoading ? (
         <Table loading pagination={false} showHeader={false} />
       ) : asset && !isComputerAsset(asset) ? (
         <CustomAssetDetail
           asset={asset}
           autoRecordRows={autoRecordRows}
+          recordsLoading={eventsQuery.isFetching}
+          recordsError={eventsQuery.isError}
+          recordsTruncated={(eventsQuery.data?.pagination.totalPages || 0) > 1}
+          onRetryRecords={() => eventsQuery.refetch()}
           onUpdated={handleAssetUpdated}
           onArchive={onArchive}
           readOnly={readOnly}
@@ -309,7 +320,8 @@ export const DetailDrawer = ({
             </div>
           </div>
           <Tabs
-            defaultActiveKey="overview"
+            activeKey={activeTab}
+            onChange={setActiveTab}
             items={[
             {
               key: "overview",
@@ -412,6 +424,8 @@ export const DetailDrawer = ({
               label: "自动记录",
               children: (
                 <Space direction="vertical" size={12} className="npcink-v3-detail-stack">
+                  {eventsQuery.isError ? <Alert type="error" showIcon message="变更记录加载失败" action={<Button onClick={() => eventsQuery.refetch()}>重试</Button>} /> : null}
+                  {(eventsQuery.data?.pagination.totalPages || 0) > 1 ? <Text type="secondary">此处展示最近 30 条记录中的自动变更；更多历史请到“变更数据”查看。</Text> : null}
                   <Text type="secondary">
                     自动记录字段：姓名、状态、编号、部门、IP、采购价、二手市场价、账面净值
                   </Text>
@@ -461,12 +475,14 @@ export const DetailDrawer = ({
                         render: formatDate,
                       },
                     ]}
-                    dataSource={autoRecordRows}
+                    dataSource={eventsQuery.isError ? [] : autoRecordRows}
+                    loading={eventsQuery.isFetching}
                     pagination={{
-                      pageSize: 10,
+                      defaultPageSize: 10,
+                      responsive: true,
                       showSizeChanger: true,
                     }}
-                    locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无自动变更记录" /> }}
+                    locale={{ emptyText: eventsQuery.isError ? null : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无自动变更记录" /> }}
                   />
                 </Space>
               ),
@@ -476,6 +492,8 @@ export const DetailDrawer = ({
               label: "手动记录",
               children: (
                 <Space direction="vertical" size={12} className="npcink-v3-detail-stack">
+                  {eventsQuery.isError ? <Alert type="error" showIcon message="变更记录加载失败" action={<Button onClick={() => eventsQuery.refetch()}>重试</Button>} /> : null}
+                  {(eventsQuery.data?.pagination.totalPages || 0) > 1 ? <Text type="secondary">此处展示最近 30 条记录中的手动记录；更多历史请到“变更数据”查看。</Text> : null}
                   <div className="npcink-v3-manual-record-toolbar">
                     <Input
                       allowClear
@@ -502,10 +520,10 @@ export const DetailDrawer = ({
                     rowKey="id"
                     size="small"
                     columns={eventColumns}
-                    dataSource={filteredManualRecords}
-                    loading={eventsQuery.isLoading}
+                    dataSource={eventsQuery.isError ? [] : filteredManualRecords}
+                    loading={eventsQuery.isFetching}
                     pagination={false}
-                    locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无记录" /> }}
+                    locale={{ emptyText: eventsQuery.isError ? null : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无记录" /> }}
                   />
                 </Space>
               ),
@@ -516,19 +534,25 @@ export const DetailDrawer = ({
               children: (
                 <Collapse
                   size="small"
+                  activeKey={debugPanels}
+                  onChange={(keys) => setDebugPanels(Array.isArray(keys) ? keys : [keys])}
                   items={[
                     {
                       key: "identities",
-                      label: `身份标识 ${(identitiesQuery.data || []).length}`,
+                      label: identitiesQuery.isSuccess ? `身份标识 ${identitiesQuery.data.length}` : "身份标识",
                       children: (
-                        <Table
-                          rowKey="id"
-                          size="small"
-                          columns={identityColumns}
-                          dataSource={identitiesQuery.data || []}
-                          loading={identitiesQuery.isLoading}
-                          pagination={false}
-                        />
+                        <Space direction="vertical" className="npcink-v3-detail-stack">
+                          {identitiesQuery.isError ? <Alert type="error" showIcon message="身份标识加载失败" action={<Button onClick={() => identitiesQuery.refetch()}>重试</Button>} /> : null}
+                          <Table
+                            rowKey="id"
+                            size="small"
+                            columns={identityColumns}
+                            dataSource={identitiesQuery.isError ? [] : identitiesQuery.data || []}
+                            loading={identitiesQuery.isFetching}
+                            pagination={false}
+                            locale={{ emptyText: identitiesQuery.isError ? null : "暂无身份标识" }}
+                          />
+                        </Space>
                       ),
                     },
                     {
@@ -564,35 +588,47 @@ export const DetailDrawer = ({
                     },
                     {
                       key: "observations",
-                      label: `采集记录 ${observations.length}`,
+                      label: observationsQuery.isSuccess ? `采集记录 ${observationsQuery.data.pagination.totalItems} 条` : "采集记录",
                       children: (
-                        <Table
-                          rowKey="id"
-                          size="small"
-                          columns={observationColumns}
-                          dataSource={observations}
-                          loading={observationsQuery.isLoading}
-                          pagination={false}
-                          expandable={{
-                            expandedRowRender: (observation) => (
-                              <Collapse
-                                size="small"
-                                items={[
-                                  {
-                                    key: "hardware",
-                                    label: "硬件明细",
-                                    children: renderJsonBlock(observation.hardware),
-                                  },
-                                  {
-                                    key: "raw",
-                                    label: "原始数据",
-                                    children: renderJsonBlock(observation.raw),
-                                  },
-                                ]}
-                              />
-                            ),
-                          }}
-                        />
+                        <Space direction="vertical" className="npcink-v3-detail-stack">
+                          {observationsQuery.isError ? <Alert type="error" showIcon message="采集记录加载失败" action={<Button onClick={() => observationsQuery.refetch()}>重试</Button>} /> : null}
+                          <Table
+                            key={observationPage}
+                            rowKey="id"
+                            size="small"
+                            columns={observationColumns}
+                            dataSource={observationsQuery.isError ? [] : observations}
+                            loading={observationsQuery.isFetching}
+                            locale={{ emptyText: observationsQuery.isError ? null : "暂无采集记录" }}
+                            pagination={{
+                              current: observationPage,
+                              pageSize: 20,
+                              total: observationsQuery.data?.pagination.totalItems || 0,
+                              showSizeChanger: false,
+                              showTotal: (total) => `共 ${total} 条`,
+                              onChange: setObservationPage,
+                            }}
+                            expandable={{
+                              expandedRowRender: (observation) => (
+                                <Collapse
+                                  size="small"
+                                  items={[
+                                    {
+                                      key: "hardware",
+                                      label: "硬件明细",
+                                      children: renderJsonBlock(observation.hardware),
+                                    },
+                                    {
+                                      key: "raw",
+                                      label: "原始数据",
+                                      children: renderJsonBlock(observation.raw),
+                                    },
+                                  ]}
+                                />
+                              ),
+                            }}
+                          />
+                        </Space>
                       ),
                     },
                   ]}
@@ -629,3 +665,8 @@ export const DetailDrawer = ({
     </Modal>
   );
 };
+
+// Remount local navigation and searches when switching assets or reopening details.
+export const DetailDrawer = (props: DetailDrawerProps) => (
+  <DetailDrawerContent key={`${props.uuid || "none"}:${props.open}`} {...props} />
+);
