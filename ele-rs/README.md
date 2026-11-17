@@ -85,6 +85,18 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
+### macOS M 系列安装包
+
+```bash
+npm ci
+npm run tauri:build:macos
+npm run check:macos-bundle -- src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+```
+
+macOS 默认对完整 `.app` 做 ad-hoc 签名，封装 `Info.plist` 和资源清单，避免只保留链接器的二进制签名而被报告为“已损坏”。校验脚本会只读挂载 DMG，检查镜像完整性、版本、arm64 架构和完整包签名，并单独报告 Gatekeeper 判定。
+
+ad-hoc 签名不等于 Apple Developer ID 签名或公证。内部包首次启动可能仍需在“系统设置 → 隐私与安全性”允许打开；面向外部分发应通过 `APPLE_SIGNING_IDENTITY` 指定 Developer ID，并配置 Apple 公证凭据。Tauri updater 的签名也不代替平台签名。构建不会移除用户已安装应用的隔离标记或关闭 Gatekeeper。
+
 运行时导入：
 
 1. 在 WordPress 后台创建新的客户端授权码。

@@ -38,6 +38,9 @@
     ],
     "shortDescription": "Device collection and upload tool",
     "longDescription": "Collects local hardware inventory and submits it to Npcink Device Inventory.",
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "windows": {
       "nsis": {
         "languages": ["SimpChinese"],

@@ -8,7 +8,9 @@
     "build": "tsc && vite build",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:build:macos": "tauri build --ci --bundles app,dmg --target aarch64-apple-darwin -- --locked",
+    "check:macos-bundle": "node scripts/verify-macos-bundle.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",

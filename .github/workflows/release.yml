@@ -203,6 +203,11 @@ jobs:
         working-directory: ele-rs
         run: npm run tauri:build -- --ci --config updater-build.json
 
+      - name: Verify macOS disk image and complete app signature
+        if: runner.os == 'macOS'
+        working-directory: ele-rs
+        run: npm run check:macos-bundle -- src-tauri/target/release/bundle/dmg/*.dmg
+
       - name: Upload macOS DMG
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f

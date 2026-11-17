@@ -135,13 +135,17 @@ jobs:
 
       - name: Build Tauri bundle
         working-directory: ele-rs
-        run: npm run tauri:build
+        run: npm run tauri:build:macos
+
+      - name: Verify macOS disk image and complete app signature
+        working-directory: ele-rs
+        run: npm run check:macos-bundle -- src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
 
       - name: Upload macOS DMG
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: preview-npcink-device-agent-macos
-          path: ele-rs/src-tauri/target/release/bundle/dmg/*.dmg
+          path: ele-rs/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
           retention-days: 7
 
