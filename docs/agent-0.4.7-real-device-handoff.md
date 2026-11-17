@@ -1,6 +1,6 @@
 # Agent 0.4.7 实机验收执行与交接
 
-本清单用于原 M4 和指定 Windows 电脑。M4 已自建 Docker 站点并完成[上传核心链路验收](m4-docker-upload-acceptance-2026-11-17.md)，安装版 GUI、系统代理路径和 Windows 实机项目仍为 pending；已有本地与 CI 结果见[验收证据](agent-0.4.7-acceptance-2026-11-17.md)。不要用原生探针或 CI 管理员身份的源码采集 smoke 代替安装版验收。
+本清单用于原 M4 和指定 Windows 电脑。M4 已自建 Docker 站点并完成[上传核心链路验收](m4-docker-upload-acceptance-2026-11-17.md)，也已完成原 CI 安装包的安装、原生启动采集和空闲 quit AppleEvent 退出；安装版 GUI、重试期间关闭/退出、系统代理路径和 Windows 实机项目仍为 pending。用户选择先完成无需桌面操作的检查，GUI 稍后验收；已有结果见[验收证据](agent-0.4.7-acceptance-2026-11-17.md)。不要用原生探针、空闲退出或 CI 源码采集 smoke 代替其余安装版验收。
 
 ## 开始前记录
 
