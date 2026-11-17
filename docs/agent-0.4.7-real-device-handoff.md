@@ -1,6 +1,6 @@
 # Agent 0.4.7 实机验收执行与交接
 
-本清单用于原 M4 和指定 Windows 电脑。当前实机环境尚未提供，下面所有实机项目均为 pending；已有本地与 CI 结果见[验收证据](agent-0.4.7-acceptance-2026-11-17.md)。不要用 CI 管理员身份的源码采集 smoke 代替安装版验收。
+本清单用于原 M4 和指定 Windows 电脑。M4 已自建 Docker 站点并完成[上传核心链路验收](m4-docker-upload-acceptance-2026-11-17.md)，安装版 GUI、系统代理路径和 Windows 实机项目仍为 pending；已有本地与 CI 结果见[验收证据](agent-0.4.7-acceptance-2026-11-17.md)。不要用原生探针或 CI 管理员身份的源码采集 smoke 代替安装版验收。
 
 ## 开始前记录
 
