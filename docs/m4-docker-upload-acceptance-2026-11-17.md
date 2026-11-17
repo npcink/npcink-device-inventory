@@ -52,6 +52,8 @@ M4 的手动 HTTP、HTTPS、SOCKS 系统代理处于启用状态；本次只记�
 - 当前验收 worktree 的 `.local-backups/m4-docker-acceptance-20261117/` 保存 Compose、网关、探针源和脱敏 JSON/日志；`results/SHA256SUMS.json` 记录证据哈希。这些本地材料未作为发行资产发布。
 - M4 上对应临时工作目录为 `/Users/muze/.codex/acceptance/npcink-agent-047-20261117/`，只保留验收配置、探针和脱敏证据。最终清理状态见下文。
 
+收尾时将配置、探针源码、独立插件 ZIP、公有证书及脱敏结果打包为 `release-preview/agent-0.4.7-20261117/m4-acceptance-evidence-20261117.tar.gz`，SHA256 为 `08196585d215b8e8fb728b4881b9d3db2dd11e7ac1633eb782fc565d27e6a2b0`。该包不含临时 token、私钥或原始硬件；安装包与证据包均为 Git 忽略的本地交付物，移除 worktree 前需先保存这些文件，不能仅依赖 Git 提交恢复。
+
 ## 清理与剩余项
 
 完成取证后仅对 `npcink-agent047-acceptance` 执行 Compose down 并删除其专用数据卷，清除测试资产、原始硬件和临时站点中的 token。删除本次本地及 M4 临时 token、CA 私钥和服务端私钥；没有删除共享镜像或其他项目。没有修改系统信任或代理，因此无需恢复系统设置。
