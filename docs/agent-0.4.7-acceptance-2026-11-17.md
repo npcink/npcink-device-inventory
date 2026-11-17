@@ -65,4 +65,6 @@ Windows smoke 报告为 `source-cli-smoke`，在管理员身份的 GitHub Window
 
 用户已明确本阶段先完成本地验收和候选准备，实机环境稍后提供。
 
+设备和站点就绪后按[实机验收执行与交接](agent-0.4.7-real-device-handoff.md)逐项操作并记录；该清单已准备，不表示实机项目已执行。
+
 隔离 HTTPS 站点需安装配套 3.2.4 插件，并单独导入测试授权码；不能在现有工作台账里随意造资产，也不要求在聊天中发送 secret。未创建 tag、正式 Release 或更新公开 updater 清单。
