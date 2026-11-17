@@ -32,7 +32,7 @@ try {
     logLevel: "silent",
   });
 
-  const { assetHardwareContext, hardwareMemoryModules, hardwareMemoryBytes, memoryModuleRows, diskComponentRows, collectionAgeBand, collectionFreshness, collectionOverdueLevel, detectHardwareIssues, hardwareSummary, inferredGraphicsForFallbackDriver, issueGroup } = await import(pathToFileURL(outFile).href);
+  const { assetHardwareContext, hardwareMemoryModules, hardwareMemoryBytes, memoryModuleRows, diskComponentRows, collectionAgeBand, collectionOverdueLevel, detectHardwareIssues, hardwareSummary, inferredGraphicsForFallbackDriver, issueGroup } = await import(pathToFileURL(outFile).href);
   for (const [vendor, model, expected] of [
     ["NVIDIA", "NVIDIA GeForce GTX 1650", "NVIDIA GeForce GTX 1650"],
     ["Intel(R)", "Intel(R) Iris(R) Xe Graphics", "Intel(R) Iris(R) Xe Graphics"],
@@ -437,6 +437,15 @@ try {
   assert(partialHealthRows.some((row) => row.attribute === "温度（采集时）" && row.value === "0"));
   const assets = JSON.parse(await readFile(fixturePath, "utf8"));
   const issues = detectHardwareIssues(assets);
+  // Legacy metadata has no current editor and must not silently suppress findings.
+  const legacyAssets = assets.map((asset) => ({
+    ...asset,
+    metadata: { ...asset.metadata, audit: { ignoredFields: ["primary_ip", "cpu", "graphics", "memory_bytes", "disk_bytes"] } },
+  }));
+  const legacyBefore = JSON.stringify(legacyAssets);
+  assert.deepEqual(detectHardwareIssues(legacyAssets).map((issue) => issue.key), issues.map((issue) => issue.key));
+  assert.equal(JSON.stringify(legacyAssets), legacyBefore, "Analysis must not rewrite historical metadata");
+
   const whitespaceOwnerIssues = detectHardwareIssues([
     {
       ...assets[1],
@@ -503,13 +512,7 @@ try {
   const stale31To60Sample = { ...assets[1], latestObservation: { ...assets[1].latestObservation, observedAt: "2026-06-09T00:00:00Z" } };
   const stale61To90Sample = { ...assets[1], latestObservation: { ...assets[1].latestObservation, observedAt: "2026-05-10T00:00:00Z" } };
   const stale90PlusSample = { ...assets[1], latestObservation: { ...assets[1].latestObservation, observedAt: "2026-04-10T00:00:00Z" } };
-  const staleSample = { ...assets[1], latestObservation: { ...assets[1].latestObservation, observedAt: "2026-06-09T00:00:00Z" } };
   const missingSample = { ...assets[1], latestObservation: undefined };
-  const freshnessClassificationFailed =
-    collectionFreshness(freshSample, freshnessNow) !== "fresh" ||
-    collectionFreshness(agingSample, freshnessNow) !== "aging" ||
-    collectionFreshness(staleSample, freshnessNow) !== "stale" ||
-    collectionFreshness(missingSample, freshnessNow) !== "missing";
   const ageBandClassificationFailed =
     collectionAgeBand(freshSample, freshnessNow) !== "fresh" ||
     collectionAgeBand(agingSample, freshnessNow) !== "aging" ||
@@ -613,7 +616,7 @@ try {
     inferredGraphicsForFallbackDriver("Intel Core i7-9700K") !== "UHD 630（驱动未识别）" ||
     inferredGraphicsForFallbackDriver("Intel Core i7-9700KF") !== "显卡驱动未识别";
 
-  if (missingTypes.length || missingGroups.length || !activeMissingOwner || inactiveMissingOwner || maintenanceIssueCreated || !whitespaceMissingOwner || placeholderDuplicateIssues.length || freshnessClassificationFailed || ageBandClassificationFailed || collectionThresholdFailed || duplicateRelationFailed || virtualGraphicsFilteringFailed || fallbackGraphicsInferenceFailed) {
+  if (missingTypes.length || missingGroups.length || !activeMissingOwner || inactiveMissingOwner || maintenanceIssueCreated || !whitespaceMissingOwner || placeholderDuplicateIssues.length || ageBandClassificationFailed || collectionThresholdFailed || duplicateRelationFailed || virtualGraphicsFilteringFailed || fallbackGraphicsInferenceFailed) {
     console.error("Hardware audit fixture check failed.");
     if (missingTypes.length) {
       console.error(`Missing issue types: ${missingTypes.join(", ")}`);
@@ -635,9 +638,6 @@ try {
     }
     if (placeholderDuplicateIssues.length) {
       console.error("Loopback IP and default hardware strings must not create duplicate-risk issues.");
-    }
-    if (freshnessClassificationFailed) {
-      console.error("Collection freshness must preserve the 7-day, 30-day, and missing-data boundaries.");
     }
     if (ageBandClassificationFailed) {
       console.error("Collection age bands must preserve the 31-60, 61-90, and 90-plus day boundaries.");

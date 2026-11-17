@@ -20,7 +20,6 @@ export interface HardwareIssue {
   duplicateGroupKey?: string;
 }
 
-export type CollectionFreshness = "fresh" | "aging" | "stale" | "missing";
 export type CollectionAgeBand = "fresh" | "aging" | "stale_31_60" | "stale_61_90" | "stale_90_plus" | "missing";
 export type CollectionOverdueLevel = "warning" | "error" | null;
 
@@ -312,14 +311,6 @@ export const collectionAgeBand = (asset: Asset, now = Date.now()): CollectionAge
   return "stale_90_plus";
 };
 
-export const collectionFreshness = (asset: Asset, now = Date.now()): CollectionFreshness => {
-  const band = collectionAgeBand(asset, now);
-  if (band === "fresh" || band === "aging" || band === "missing") {
-    return band;
-  }
-  return "stale";
-};
-
 /**
  * The collection-health dashboard can still show short-term freshness, but it
  * becomes a remediation task only after the agreed operational thresholds.
@@ -330,11 +321,6 @@ export const collectionOverdueLevel = (asset: Asset, now = Date.now()): Collecti
     return null;
   }
   return days >= COLLECTION_DANGER_DAYS ? "error" : "warning";
-};
-
-const ignoredAuditFields = (asset: Asset) => {
-  const audit = getRecord(getRecord(asset.metadata).audit);
-  return Array.isArray(audit.ignoredFields) ? new Set(audit.ignoredFields.map(String)) : new Set<string>();
 };
 
 const normalizeDuplicateValue = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
@@ -470,7 +456,6 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
   const issues: HardwareIssue[] = [];
 
   assets.forEach((asset) => {
-    const ignored = ignoredAuditFields(asset);
     const context = assetHardwareContext(asset);
     const assetLabel = asset.assetNumber || asset.name || asset.uuid;
     const extracted = context.extracted;
@@ -489,7 +474,7 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
     }
     const ip = context.extracted.primaryIp;
     const ipKey = normalizeDuplicateValue(ip);
-    if (isDuplicateCandidate(ip, "ip") && !ignored.has("primary_ip") && (byIp.get(ipKey)?.length || 0) > 1) {
+    if (isDuplicateCandidate(ip, "ip") && (byIp.get(ipKey)?.length || 0) > 1) {
       const relatedAssets = relatedDuplicateAssets(byIp.get(ipKey), asset);
       issues.push({
         key: `${asset.uuid}-duplicate-ip`,
@@ -546,7 +531,7 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
         message: `${assetLabel} 未设置责任人`,
       });
     }
-    if (!ignored.has("cpu") && missingHardwareValue(extracted.cpu)) {
+    if (missingHardwareValue(extracted.cpu)) {
       issues.push({
         key: `${asset.uuid}-missing-cpu`,
         level: "warning",
@@ -555,7 +540,7 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
         message: `${assetLabel} 缺少 CPU 型号`,
       });
     }
-    if (!ignored.has("graphics") && missingHardwareValue(extracted.graphics)) {
+    if (missingHardwareValue(extracted.graphics)) {
       issues.push({
         key: `${asset.uuid}-missing-graphics`,
         level: "warning",
@@ -564,7 +549,7 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
         message: `${assetLabel} 缺少显卡型号`,
       });
     }
-    if (!ignored.has("memory_bytes") && hardwareMemoryBytes(asset) <= 0 && missingHardwareValue(String(context.manualHardware.memory || ""))) {
+    if (hardwareMemoryBytes(asset) <= 0 && missingHardwareValue(String(context.manualHardware.memory || ""))) {
       issues.push({
         key: `${asset.uuid}-missing-memory`,
         level: "warning",
@@ -573,7 +558,7 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
         message: `${assetLabel} 缺少内存信息`,
       });
     }
-    if (!ignored.has("disk_bytes") && hardwareDiskBytes(asset) <= 0 && missingHardwareValue(String(context.manualHardware.disk || ""))) {
+    if (hardwareDiskBytes(asset) <= 0 && missingHardwareValue(String(context.manualHardware.disk || ""))) {
       issues.push({
         key: `${asset.uuid}-missing-disk`,
         level: "warning",
