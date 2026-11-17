@@ -94,6 +94,18 @@ template, record candidate commit, hashes, run links, Windows collection and
 installer/upgrade evidence. Do not replace draft assets after acceptance; source
 or artifact changes require a new candidate version/tag.
 
+## Upload network failure acceptance
+
+For desktop candidates containing the network retry changes, follow the
+[network resilience verification record](upload-network-resilience-2026-11-17.md).
+Run both Rust crates' fmt/Clippy/tests and the desktop frontend build. On macOS,
+build and verify the exact arm64 DMG after changing proxy dependencies. Confirm
+retry progress, normal success after a transient failure, no stale failure toast,
+no redirect forwarding, no retries for auth/business errors, and no credentials
+or response bodies in logs. Check manual HTTP(S) system proxies on a designated
+Mac without changing shared network settings. Windows/Linux runtime acceptance
+and real-site HTTPS checks remain separate from local synthetic fixtures.
+
 ## Windows acceptance and final publication
 
 Run the [Windows collection matrix](windows-collection-acceptance-2026-10-27.md),

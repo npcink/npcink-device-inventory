@@ -108,12 +108,32 @@ fn clear_saved_config() -> Result<(), String> {
     clear_config().map_err(|error| error.to_string())
 }
 
+fn report_upload_progress(
+    site: &str,
+    channel: &tauri::ipc::Channel<upload::UploadProgress>,
+    progress: upload::UploadProgress,
+) {
+    write_app_log("info", "upload.attempt", &format!(
+        "site={} category={} http_status={:?} attempt={} retries={} elapsed_ms={} retry_delay_ms={:?}",
+        redact_url_for_log(site), progress.category, progress.http_status, progress.attempt,
+        progress.attempt.saturating_sub(1), progress.elapsed_ms, progress.retry_delay_ms,
+    ));
+    // IPC failure means the window has gone away; the bounded worker can finish without
+    // holding the UI event loop or installing a close/exit guard.
+    let _ = channel.send(progress);
+}
+
 #[tauri::command]
-async fn verify_upload_config(config: AgentConfig) -> Result<String, String> {
+async fn verify_upload_config(
+    config: AgentConfig,
+    on_progress: tauri::ipc::Channel<upload::UploadProgress>,
+) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         validate_config(&config)?;
-        npcink_device_agent::upload::verify_connection(&config.site, &config.token)
-            .map_err(|error| error.to_string())
+        upload::verify_connection_with_progress(&config.site, &config.token, &mut |progress| {
+            report_upload_progress(&config.site, &on_progress, progress);
+        })
+        .map_err(|error| error.to_string())
     })
     .await
     .map_err(|error| error.to_string())?
@@ -263,9 +283,15 @@ fn write_cached_device_snapshot(snapshot: &DeviceSnapshot) -> Result<()> {
 }
 
 #[tauri::command]
-async fn submit_device_data(config: AgentConfig, data: Value) -> Result<Value, String> {
-    let result =
-        tauri::async_runtime::spawn_blocking(move || submit_device_data_inner(config, data)).await;
+async fn submit_device_data(
+    config: AgentConfig,
+    data: Value,
+    on_progress: tauri::ipc::Channel<upload::UploadProgress>,
+) -> Result<Value, String> {
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        submit_device_data_inner(config, data, on_progress)
+    })
+    .await;
     match result {
         Ok(response) => response,
         Err(error) => {
@@ -276,13 +302,25 @@ async fn submit_device_data(config: AgentConfig, data: Value) -> Result<Value, S
     }
 }
 
-fn submit_device_data_inner(config: AgentConfig, data: Value) -> Result<Value, String> {
+fn submit_device_data_inner(
+    config: AgentConfig,
+    data: Value,
+    on_progress: tauri::ipc::Channel<upload::UploadProgress>,
+) -> Result<Value, String> {
     if let Err(error) = validate_config(&config) {
         write_app_log("warn", "upload.validation_failed", &error);
         return Err(error);
     }
     let started_at = Instant::now();
-    match upload::submit_v3(&config.site, &config.name, &config.token, &data) {
+    match upload::submit_v3_with_progress(
+        &config.site,
+        &config.name,
+        &config.token,
+        &data,
+        &mut |progress| {
+            report_upload_progress(&config.site, &on_progress, progress);
+        },
+    ) {
         Ok(response) => {
             write_app_log(
                 "info",
@@ -877,14 +915,25 @@ fn empty_label(value: &str) -> String {
 }
 
 fn redact_url_for_log(url: &str) -> String {
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
+    if url.trim().is_empty() {
         return "missing".to_string();
     }
-    trimmed
-        .split_once('?')
-        .map(|(base, _)| format!("{base}?[redacted]"))
-        .unwrap_or_else(|| trimmed.to_string())
+    let Ok(parsed) = url::Url::parse(url.trim()) else {
+        return "invalid".to_string();
+    };
+    let Some(host) = parsed.host_str() else {
+        return "invalid".to_string();
+    };
+    // Paths, userinfo, queries and fragments may all carry secrets or reflected input.
+    format!(
+        "{}://{}{}",
+        parsed.scheme(),
+        host,
+        parsed
+            .port()
+            .map(|port| format!(":{port}"))
+            .unwrap_or_default()
+    )
 }
 
 fn package_file_list(out: &Path) -> Result<Vec<String>> {
@@ -1390,5 +1439,17 @@ mod tests {
         assert!(message.contains("[upload-token-redacted]"));
         assert!(!message.contains("mda_abc123_secret"));
         assert!(!message.contains('\n'));
+    }
+
+    #[test]
+    fn site_logs_keep_only_origin_and_never_reflect_invalid_addresses() {
+        assert_eq!(
+            redact_url_for_log(
+                "https://user:secret@example.com:8443/private-token?signature=private#fragment"
+            ),
+            "https://example.com:8443"
+        );
+        assert_eq!(redact_url_for_log("invalid mda_private_token"), "invalid");
+        assert_eq!(redact_url_for_log(""), "missing");
     }
 }

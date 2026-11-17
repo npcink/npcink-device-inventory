@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -300,6 +300,8 @@ let activeConfig: AgentConfig = { site: "", name: "", token: "" };
 let manualConfigDraft: { site: string; token: string; presetLabel: string } | null = null;
 let isCollecting = false;
 let isSubmitting = false;
+let isVerifyingConfig = false;
+let networkProgressGeneration = 0;
 let isExportingHardware = false;
 let isGeneratingDiagnostics = false;
 let isCheckingUpdate = false;
@@ -857,20 +859,21 @@ const hasUploadConfig = (config: AgentConfig = getConfig()) =>
   Boolean(config.site && config.token);
 
 const updateInteractiveState = () => {
+  const networkBusy = isSubmitting || isVerifyingConfig;
   const diagnosticsBusy = isExportingHardware || isGeneratingDiagnostics || isCheckingIdentity;
-  nameInput.disabled = isSubmitting;
-  siteInput.disabled = isSubmitting;
-  tokenInput.disabled = isSubmitting;
-  collectButton.disabled = isCollecting || isSubmitting || diagnosticsBusy;
-  submitButton.disabled = isCollecting || isSubmitting || diagnosticsBusy;
-  importConfigButton.disabled = isSubmitting;
-  manualConfigButton.disabled = isSubmitting;
-  verifyConfigButton.disabled = isSubmitting || !hasUploadConfig();
-  clearConfigButton.disabled = isSubmitting || !hasUploadConfig(activeConfig);
-  saveManualConfigButton.disabled = isSubmitting;
-  checkIdentityButton.disabled = diagnosticsBusy || isCollecting || isSubmitting;
-  exportHardwareButton.disabled = diagnosticsBusy || isCollecting || isSubmitting;
-  generateDiagnosticsButton.disabled = diagnosticsBusy || isCollecting || isSubmitting;
+  nameInput.disabled = networkBusy;
+  siteInput.disabled = networkBusy;
+  tokenInput.disabled = networkBusy;
+  collectButton.disabled = isCollecting || networkBusy || diagnosticsBusy;
+  submitButton.disabled = isCollecting || networkBusy || diagnosticsBusy;
+  importConfigButton.disabled = networkBusy;
+  manualConfigButton.disabled = networkBusy;
+  verifyConfigButton.disabled = networkBusy || !hasUploadConfig();
+  clearConfigButton.disabled = networkBusy || !hasUploadConfig(activeConfig);
+  saveManualConfigButton.disabled = networkBusy;
+  checkIdentityButton.disabled = diagnosticsBusy || isCollecting || networkBusy;
+  exportHardwareButton.disabled = diagnosticsBusy || isCollecting || networkBusy;
+  generateDiagnosticsButton.disabled = diagnosticsBusy || isCollecting || networkBusy;
   openDiagnosticsFolderButton.disabled = diagnosticsBusy;
   copyDiagnosticsPathButton.disabled = diagnosticsBusy;
 };
@@ -1217,16 +1220,30 @@ const importConfig = async () => {
   }
 };
 
+type UploadProgress = { message: string; category: string };
+const uploadProgressChannel = () => {
+  const generation = ++networkProgressGeneration;
+  const channel = new Channel<UploadProgress>();
+  channel.onmessage = (progress) => {
+    if (generation === networkProgressGeneration && progress.category !== "success") {
+      setToast(progress.message);
+    }
+  };
+  return channel;
+};
+
 const verifyConfig = async () => {
+  if (isSubmitting || isVerifyingConfig) return;
   const config = getConfig();
   if (!hasUploadConfig(config)) {
     showSubmitResult("error", "无法验证", "请先导入配置，或手动填写完整授权码和站点地址。");
     return;
   }
-  verifyConfigButton.disabled = true;
+  isVerifyingConfig = true;
+  updateInteractiveState();
   setToast("正在验证连接...");
   try {
-    const result = await invoke<string>("verify_upload_config", { config });
+    const result = await invoke<string>("verify_upload_config", { config, onProgress: uploadProgressChannel() });
     verifiedConfigKey = `${config.site}\n${config.token}`;
     renderConfigStatus(config);
     setToast(result || "连接正常。", "ok");
@@ -1235,6 +1252,8 @@ const verifyConfig = async () => {
     renderConfigStatus(config);
     setToast(`连接验证失败：${errorMessage(error)}`, "error");
   } finally {
+    networkProgressGeneration += 1;
+    isVerifyingConfig = false;
     updateInteractiveState();
   }
 };
@@ -1609,6 +1628,7 @@ void listen<DiagnosticsProgress>("diagnostics-progress", (event) => {
 });
 
 submitButton.addEventListener("click", async () => {
+  if (isSubmitting || isVerifyingConfig) return;
   if (!hasUploadConfig()) {
     showSubmitResult("error", "缺少上传配置", "请先导入配置，或手动填写完整授权码和站点地址。");
     logAppEvent("warn", "ui.submit_blocked_missing_config");
@@ -1634,14 +1654,18 @@ submitButton.addEventListener("click", async () => {
     const response = await invoke<SubmitDeviceResponse>("submit_device_data", {
       config: getConfig(),
       data: snapshot.data,
+      onProgress: uploadProgressChannel(),
     });
     lastSubmittedAt = new Date();
     lastSubmittedConfigLabel = configLabel();
     renderSubmitMeta();
+    setToast("");
     showSubmitResult("success", "上传成功", formatSubmitResultMessage(response));
   } catch (error) {
+    setToast("");
     showSubmitResult("error", "上传失败", errorMessage(error));
   } finally {
+    networkProgressGeneration += 1;
     setSubmitting(false);
   }
 });
