@@ -6,7 +6,7 @@ assets. Preview builds remain unsigned packaging checks, not updater acceptance.
 
 ## Versions and source
 
-Current development candidate: plugin **3.2.4**, Device Agent **0.4.5**. The previous
+Current development candidate: plugin **3.2.4**, Device Agent **0.4.7**. The previous
 formal release is plugin 3.2.3 with Agent 0.4.4. Do not reuse either old version.
 
 Commit all intended source and record the candidate commit before tagging. The
