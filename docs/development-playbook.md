@@ -8,6 +8,8 @@
 
 当前功能精简以 [ADR-019](decisions/ADR-019-focus-on-inventory-and-upload.md) 为准：客户端聚焦采集上传与轻量排障；分析保留事实、缺项和候选清单。实施与验证见[2026-11-10记录](scope-simplification-2026-11-10.md)。
 
+上传错误、有限重试、分层验收和 Git/worktree 收尾按[上传可靠性开发与收尾规范](upload-reliability-and-closeout-standard.md)执行；最新阶段状态与未完成事项见[2026-11-18交接](upload-session-closeout-2026-11-18.md)。后文的日期历史不代表这些待办已完成。
+
 ## 当前不可随意突破的边界
 
 - 顶层资产类型只有 `computer` 和 `custom`；其余分类使用 `category`。
