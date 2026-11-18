@@ -14,6 +14,10 @@
 - 集成回开发分支不等于合入 master。审计时 master 仍为 `43563d0`，相对开发历史存在两百余文件的累计修改；没有在本轮上传收尾中直接整体合并主线。
 - 其他历史本地/远端分支，以及与本轮无关的开放 PR #11，保留原状态，不能声称整个仓库的分支都已清空。后续按分支逐个核对独有提交及合并情况。
 
+本轮集成提交 `9e497e0` 已推送到原开发分支。`codex/agent-047-acceptance` 的本地和远端分支均已删除；删除前核对全部提交已包含于远端开发分支。版本合同与 9 项发布工具测试通过，桌面生产源与已验收的 `3b55a64` 相同，无需把文档收尾描述为新一轮产品实现。
+
+本次 worktree **尚未删除**。应用 `archive_worktree` 接口返回 `The task's primary checkout cannot be removed.`，随后尝试关联原主工作区，接口返回 `Choose a registered linked Git worktree.`。因此保留 `/Users/muze/.codex/worktrees/agent-047-acceptance/npcink-device-inventory`，仅切换为 detached HEAD 以删除临时分支，没有绕过应用保护强删目录。主工作区 `/Users/muze/gitee/npcink-device-inventory` 是继续开发的入口；当前会话不必为这个目录继续运行。
+
 ## 验收与文档证据
 
 | 内容 | 入口 |
@@ -29,7 +33,7 @@
 
 ## 保留的交付物与清理边界
 
-安装包和脱敏证据保存在主工作区 `/Users/muze/gitee/npcink-device-inventory/release-preview/agent-0.4.7-20261117/`；原始验收材料保存在该主工作区 `.local-backups/` 的 `agent-047-acceptance-20261117`、`m4-docker-acceptance-20261117`、`m4-native-acceptance-20261117`。迁移后按文件 SHA256 复核，再归档本轮 managed worktree。Git 忽略的这些文件不随远端代码自动保存，删除主工作区前仍须另行备份。
+安装包和脱敏证据保存在主工作区 `/Users/muze/gitee/npcink-device-inventory/release-preview/agent-0.4.7-20261117/`；原始验收材料保存在该主工作区 `.local-backups/` 的 `agent-047-acceptance-20261117`、`m4-docker-acceptance-20261117`、`m4-native-acceptance-20261117`。59 个迁移文件逐一 SHA256 核对通过，8 个本轮合成浏览器临时文件移入 `.local-backups/agent-047-handoff-20261118/browser-output/`；迁移清单为同目录 `migration-checksums.json`。迁移后尝试归档 worktree，但被上述应用保护拒绝。Git 忽略的这些文件不随远端代码自动保存，删除主工作区前仍须另行备份。
 
 M4 的专用 Docker 容器、数据卷、临时 token 和私钥已再次核对不存在；其他项目不动。App 保留于 M4 的 `~/Applications/Npcink Device Agent.app`，版本 0.4.7，客户端进程已退出。它是供后续 GUI 验收的保留安装，不是未清理的临时服务；本轮未创建上传配置或对应 Keychain 凭据。App 生成的本地硬件缓存未导出到共享证据。
 
