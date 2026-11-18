@@ -5,8 +5,8 @@
 | 需要了解的内容 | 当前入口 |
 | --- | --- |
 | 产品范围与开发约束 | [开发手册](development-playbook.md) |
-| 当前安装包与电脑更新 | [Agent 0.4.6 构建与交接](agent-0.4.6-build-and-handoff-2026-11-10.md) |
-| 源码精简收尾 | [2026-11-10 收尾](simplification-closeout-2026-11-10.md) |
+| 当前安装包与电脑更新 | [11 月 17 日实施与安装包交接](simplification-implementation-2026-11-17.md) |
+| 源码精简收尾 | [11 月 17 日实施状态](simplification-implementation-2026-11-17.md)、[审计依据](remaining-work-and-redundancy-audit-2026-11-17.md) |
 | 本轮范围收缩与验证 | [精简实施记录](scope-simplification-2026-11-10.md)、[ADR-019](decisions/ADR-019-focus-on-inventory-and-upload.md) |
 | 数据存储与资产生命周期 | [资产模型](asset-data-model.md) |
 | 设备身份与匹配 | [身份契约](identity-contract.md) |
@@ -14,6 +14,6 @@
 | 后台只读分析 | [分析开发规范](admin-read-only-analysis-development-standard.md) |
 | 上传故障与数据修复 | [运维手册](device-upload-troubleshooting-and-operations.md) |
 | 发布与验收 | [发布清单](release-readiness-checklist.md)、[GitHub 发布流程](github-release.md) |
-| 尚未完成的实机与发布事项 | [前序待办](session-closeout-2026-10-30.md)、[Windows 采集验收](windows-collection-acceptance-2026-10-27.md) |
+| 尚未完成的实机与发布事项 | [当前剩余事项](simplification-implementation-2026-11-17.md#剩余事项)、[Windows 实机验收表](windows-collection-acceptance-2026-10-27.md) |
 
 决策保存在 `decisions/`，最新 ADR 对其明确替代的部分生效。事故复盘、旧版发布证据和专题实现记录见[历史与专题索引](archive/history-index.md)。

@@ -14,22 +14,23 @@
     "upload_file": "sj/npcink-device-inventory.zip",
     "source_file": "release/npcink-device-inventory.zip",
     "zip_root": "npcink-device-inventory/",
-    "sha256": "32ec55d220d5d29992359ea628eeb75488009bdfb237c91c93c3795e5f844135",
+    "sha256": "55f12e01abfa833edd47fcc57681fcd6a354f82a7ba3679190a8093e888fdaaf",
     "entry_count": 158,
     "file_count": 132,
-    "uncompressed_bytes": 3172592,
-    "compressed_bytes": 977309
+    "uncompressed_bytes": 3167827,
+    "compressed_bytes": 975717
   },
   "verification": {
     "status": "locally_verified",
-    "package_sha256": "32ec55d220d5d29992359ea628eeb75488009bdfb237c91c93c3795e5f844135",
-    "date": "2026-11-10",
+    "package_sha256": "55f12e01abfa833edd47fcc57681fcd6a354f82a7ba3679190a8093e888fdaaf",
+    "date": "2026-11-17",
     "checks": [
       "check:submission",
-      "check:docker"
+      "check:docker",
+      "M4 WordPress production UI acceptance"
     ],
     "plugin_check_version": "2.2.0",
-    "evidence_document": "docs/agent-0.4.6-build-and-handoff-2026-11-10.md",
+    "evidence_document": "docs/simplification-implementation-2026-11-17.md",
     "formal_release_approved": false
   },
   "official_references": [
