@@ -206,9 +206,9 @@ class Npcink_Device_Inventory_Observation_Repository
 	public $daily_count_args = array();
 	public $cache_invalidations = 0;
 
-	public function daily_counts_between($start_at, $end_at)
+	public function daily_counts_between($start_at, $end_at, $day_ranges = array())
 	{
-		$this->daily_count_args = array($start_at, $end_at);
+		$this->daily_count_args = array($start_at, $end_at, $day_ranges);
 		return $this->daily_counts;
 	}
 
@@ -268,7 +268,12 @@ function current_user_can($capability)
 
 function current_time($type)
 {
-	return '2026-07-15';
+	return isset($GLOBALS['npcink_current_date']) ? $GLOBALS['npcink_current_date'] : '2026-07-15';
+}
+
+function wp_timezone()
+{
+	return isset($GLOBALS['npcink_timezone']) ? $GLOBALS['npcink_timezone'] : new DateTimeZone('UTC');
 }
 
 function get_option($name, $fallback = false)
@@ -371,7 +376,39 @@ npcink_asset_write_assert($trend_data['days'] === 30, 'collection trends must re
 npcink_asset_write_assert(count($trend_data['collection']) === 30, 'collection trends must fill every day in the window');
 npcink_asset_write_assert($trend_data['startDate'] === '2026-06-16' && $trend_data['endDate'] === '2026-07-15', 'collection trends must use the WordPress current date');
 npcink_asset_write_assert($trend_data['collection'][28]['count'] === 2 && $trend_data['collection'][29]['count'] === 3, 'collection trends must merge aggregate counts into the filled window');
-npcink_asset_write_assert($trend_observations->daily_count_args === array('2026-06-16 00:00:00', '2026-07-16 00:00:00'), 'collection trend query must use a bounded half-open range');
+npcink_asset_write_assert($trend_observations->daily_count_args[0] === '2026-06-16 00:00:00' && $trend_observations->daily_count_args[1] === '2026-07-16 00:00:00', 'collection trend query must use a bounded half-open UTC range');
+npcink_asset_write_assert(count($trend_observations->daily_count_args[2]) === 30, 'collection trend query must pass one local-day range per filled date');
+npcink_asset_write_assert($trend_observations->daily_count_args[2][0] === array('date' => '2026-06-16', 'start_utc' => '2026-06-16 00:00:00', 'end_utc' => '2026-06-17 00:00:00'), 'UTC sites must keep local midnight equal to UTC midnight');
+
+$GLOBALS['npcink_current_date'] = '2026-11-25';
+$GLOBALS['npcink_timezone'] = new DateTimeZone('Asia/Shanghai');
+$shanghai_observations = new Npcink_Device_Inventory_Observation_Repository();
+$shanghai_observations->daily_counts = array(
+	array('day' => '2026-10-27', 'count' => '1'),
+	array('day' => '2026-11-25', 'count' => '1'),
+);
+$shanghai_controller = new Npcink_Device_Inventory_Assets_Controller(
+	new Npcink_Device_Inventory_Asset_Repository(),
+	new Npcink_Device_Inventory_Identity_Repository(),
+	$shanghai_observations,
+	new Npcink_Device_Inventory_Event_Repository(),
+	new Npcink_Device_Inventory_Event_Service()
+);
+$shanghai_data = $shanghai_controller->get_collection_trends(new Npcink_Asset_Write_Request(array()))->get_data()['data'];
+npcink_asset_write_assert($shanghai_data['startDate'] === '2026-10-27' && $shanghai_data['endDate'] === '2026-11-25', 'Asia/Shanghai trends must use local calendar dates');
+npcink_asset_write_assert($shanghai_observations->daily_count_args[0] === '2026-10-26 16:00:00' && $shanghai_observations->daily_count_args[1] === '2026-11-25 16:00:00', 'Asia/Shanghai window must convert local midnights to UTC');
+$shanghai_first = $shanghai_observations->daily_count_args[2][0];
+$shanghai_last = $shanghai_observations->daily_count_args[2][29];
+npcink_asset_write_assert($shanghai_first === array('date' => '2026-10-27', 'start_utc' => '2026-10-26 16:00:00', 'end_utc' => '2026-10-27 16:00:00'), 'first local day must start at the previous UTC afternoon');
+npcink_asset_write_assert($shanghai_last === array('date' => '2026-11-25', 'start_utc' => '2026-11-24 16:00:00', 'end_utc' => '2026-11-25 16:00:00'), 'today in Asia/Shanghai must start at 2026-11-24 16:00:00 UTC');
+$shanghai_by_day = array();
+foreach ($shanghai_data['collection'] as $row) {
+	$shanghai_by_day[$row['date']] = $row['count'];
+}
+npcink_asset_write_assert($shanghai_by_day['2026-11-25'] === 1 && $shanghai_by_day['2026-10-27'] === 1, 'local early-morning UTC observations must land on the local dates');
+npcink_asset_write_assert($shanghai_by_day['2026-11-24'] === 0, 'the UTC calendar date must not keep the local early-morning count');
+$GLOBALS['npcink_current_date'] = '2026-07-15';
+$GLOBALS['npcink_timezone'] = new DateTimeZone('UTC');
 $invalid = $controller->create_item(new Npcink_Asset_Write_Request(array('status' => 'unknown')));
 npcink_asset_write_assert(is_wp_error($invalid) && $invalid->get_error_code() === 'invalid_asset_status', 'invalid status must fail validation');
 npcink_asset_write_assert($wpdb->commands === array(), 'validation failure must not start a transaction');

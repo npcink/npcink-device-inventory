@@ -330,6 +330,23 @@ try {
 	}
 }
 
+$trend_asset = $make_asset('computer', 'active');
+$observe($trend_asset, '2026-11-24 16:30:00', 'shanghai-today');
+$observe($trend_asset, '2026-10-26 16:30:00', 'shanghai-window-start');
+$observe($trend_asset, '2026-10-26 15:59:59', 'before-window');
+$trend_controller = new Npcink_Device_Inventory_Assets_Controller($assets, $identities, $observations, $events, new Npcink_Device_Inventory_Event_Service($events));
+$trend_data = $trend_controller->collection_trends_for_date('2026-11-25', new DateTimeZone('Asia/Shanghai'));
+$trend_by_day = array();
+foreach ($trend_data['collection'] as $row) {
+	$trend_by_day[$row['date']] = $row['count'];
+}
+npcink_integration_assert($trend_data['startDate'] === '2026-10-27' && $trend_data['endDate'] === '2026-11-25' && count($trend_data['collection']) === 30, 'Trend window must be 30 local days ending on the frozen date.');
+npcink_integration_assert($trend_by_day['2026-11-25'] === 1, '2026-11-24 16:30:00 UTC must count as 2026-11-25 in Asia/Shanghai.');
+npcink_integration_assert($trend_by_day['2026-10-27'] === 1, '2026-10-26 16:30:00 UTC must count as the 30-day window start 2026-10-27.');
+npcink_integration_assert($trend_by_day['2026-11-24'] === 0, 'The UTC calendar date must not receive the local early-morning observation.');
+npcink_integration_assert(!isset($trend_by_day['2026-10-26']), 'Observations before the local window start must be excluded.');
+echo "Real collection-trend timezone filtering and bucketing passed.\n";
+
 // Lifecycle tests are deliberately destructive only within the disposable database.
 require_once WP_PLUGIN_DIR . '/npcink-device-inventory/admin/partials/npcink-device-inventory-admin-uninstall.php';
 require_once WP_PLUGIN_DIR . '/npcink-device-inventory/includes/class-npcink-device-inventory-activator.php';

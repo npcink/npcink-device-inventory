@@ -10,6 +10,7 @@ This folder contains lightweight regression checks that can run without a full W
 - `identity-contract-fixtures.php`: PHP/Rust current hardware identity golden vectors and invalid-signal exclusions.
 - `identity-claim-fixtures.php`: atomic identity claim, idempotency, conflict, and failure fixtures.
 - `observation-ingest-fixtures.php`: transaction rollback, concurrent identity ownership, and audit failure fixtures.
+- `collection-trends-timezone-fixtures.php`: collection-trend local-day window and Asia/Shanghai bucketing regressions.
 - `fixtures/device-observation-demo.json`: synthetic, sanitized hardware observation sample for documentation and parser experiments.
 
 Run the root package scripts for the supported checks:

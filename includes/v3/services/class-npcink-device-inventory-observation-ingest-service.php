@@ -455,7 +455,7 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 		return array('data' => array(
 			'mode' => $mode,
 			'asset' => array('id' => intval($asset['id']), 'uuid' => (string) $asset['uuid'], 'assetNumber' => (string) $asset['asset_number'], 'name' => (string) $asset['name']),
-			'observation' => array('id' => intval($observation['id']), 'observationId' => (string) $observation['observation_uuid'], 'observedAt' => $this->format_utc_datetime($observation['observed_at']), 'receivedAt' => (string) $observation['received_at']),
+			'observation' => array('id' => intval($observation['id']), 'observationId' => (string) $observation['observation_uuid'], 'observedAt' => $this->format_utc_datetime($observation['observed_at']), 'receivedAt' => $this->format_utc_datetime(isset($observation['received_at']) ? $observation['received_at'] : '')),
 		));
 	}
 
@@ -481,7 +481,11 @@ class Npcink_Device_Inventory_Observation_Ingest_Service
 		if ($value === '') {
 			return '';
 		}
-		return str_replace(' ', 'T', $value) . 'Z';
+		$value = str_replace(' ', 'T', $value);
+		if (preg_match('/(?:Z|[+-]\d{2}:\d{2})$/', $value)) {
+			return $value;
+		}
+		return $value . 'Z';
 	}
 
 }
