@@ -237,6 +237,12 @@ export interface BackupRestoreSummary {
   };
   conflicts: string[];
   warnings: string[];
+  deleteDataOnUninstall?: {
+    current: boolean;
+    incoming: boolean | null;
+    changed: boolean;
+    applied: boolean;
+  };
 }
 
 export interface BackupRestoreResult {
