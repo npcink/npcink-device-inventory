@@ -28,9 +28,10 @@ npm run check:identity
 ### 生命周期、最新指针与分析分页回归
 
 - `npm run check:lifecycle`：默认保留数据、显式卸载清理、重装建表、旧修订残留缺表修复。
+- `npm run check:multisite-uninstall`：多站点卸载按站点读取「卸载时删除数据」开关，保留未开启站点的表和选项。
 - `npm run check:observation-repository`：最新指针更新失败不可报告观测创建成功，旧观测零行更新仍成功。
 - `npm run check:analysis-pagination --prefix vite-admin`：固定上界、空页继续、游标前进校验和取消请求。
-- `npm run check:docker`：临时 WordPress/PHP 8.3/MariaDB 环境中的实际 REST 权限、最近两次观测排序及游标、数据库故障回滚、独立连接归档竞态、生命周期、备份恢复、多站点升级；结束自动删除测试容器和卷。测试脚本校验站点身份，禁止在正式站点执行 `tests/wordpress-integration.php`。
+- `npm run check:docker`：临时 WordPress/PHP 8.3/MariaDB 环境中的实际 REST 权限、最近两次观测排序及游标、数据库故障回滚、独立连接归档竞态、生命周期、备份恢复、多站点升级，以及多站点按站点卸载开关；结束自动删除测试容器和卷。测试脚本校验站点身份，禁止在正式站点执行 `tests/wordpress-integration.php`。
 - PHP 7.4、8.5 fixture 运行已加入 CI；PHPStan 提高到 level 1。独立 fixture 不能替代真实数据库测试。
 
 ### 依赖及跨平台检查

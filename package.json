@@ -14,7 +14,7 @@
     "check:windows-identity-probe": "node scripts/check-windows-hardware-identity-probe.mjs --self-test",
     "check:collection-trends": "php tests/collection-trends-timezone-fixtures.php",
     "check:client-tokens": "php tests/client-tokens-autoload-fixtures.php",
-    "check:fixtures": "npm run check:backup-restore && npm run check:asset-search && npm run check:asset-writes && npm run check:device-upload && npm run check:schema && npm run check:identity && npm run check:windows-identity-probe && npm run check:lifecycle && npm run check:observation-repository && npm run check:collection-trends && npm run check:client-tokens",
+    "check:fixtures": "npm run check:backup-restore && npm run check:asset-search && npm run check:asset-writes && npm run check:device-upload && npm run check:schema && npm run check:identity && npm run check:windows-identity-probe && npm run check:lifecycle && npm run check:multisite-uninstall && npm run check:observation-repository && npm run check:collection-trends && npm run check:client-tokens",
     "check:versions": "node scripts/check-version-contract.mjs",
     "check:desktop-quality": "node scripts/check-desktop-quality.mjs",
     "check:release-scope": "node scripts/check-release-scope.mjs",
@@ -31,6 +31,7 @@
     "check:release": "node scripts/check-release-readiness.mjs",
     "check:submission": "node scripts/check-release-readiness.mjs --submission",
     "check:lifecycle": "php tests/lifecycle-fixtures.php",
+    "check:multisite-uninstall": "php tests/multisite-uninstall-fixtures.php",
     "check:observation-repository": "php tests/observation-repository-fixtures.php",
     "check:release-tools": "node --test scripts/release-version-baseline.test.mjs scripts/version-contract.test.mjs scripts/release-checksums.test.mjs scripts/release-candidate.test.mjs ele-rs/scripts/windows-command-runner.test.mjs"
   }

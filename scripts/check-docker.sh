@@ -251,4 +251,73 @@ run_wp eval '
   echo "Multisite upgrade migration verified.\n";
 '
 
+echo "Verifying multisite uninstall honors per-site data deletion flags..."
+run_wp eval '
+  require_once WP_PLUGIN_DIR . "/npcink-device-inventory/admin/partials/npcink-device-inventory-admin-uninstall.php";
+  $origin = get_current_blog_id();
+  $sites = get_sites(array("fields" => "ids", "number" => 0));
+  if (count($sites) < 2) {
+    throw new RuntimeException("Expected at least two sites for uninstall verification.");
+  }
+  $kept_id = (int) $sites[0];
+  $deleted_id = (int) $sites[1];
+  $suffixes = array("npcink_assets", "npcink_asset_identities", "npcink_asset_observations", "npcink_asset_events");
+  $table_exists = static function ($prefix, $suffix) {
+    global $wpdb;
+    $table = $prefix . $suffix;
+    return $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $wpdb->esc_like($table))) === $table;
+  };
+
+  switch_to_blog($kept_id);
+  global $wpdb;
+  $kept_prefix = $wpdb->prefix;
+  $kept = Npcink_Device_Inventory_V3_Tables::options();
+  $kept["delete_data_on_uninstall"] = false;
+  Npcink_Device_Inventory_V3_Tables::update_options($kept);
+  update_option("npcink_v3_upload_nonce_keep", "1");
+  restore_current_blog();
+
+  switch_to_blog($deleted_id);
+  $deleted_prefix = $wpdb->prefix;
+  $deleted = Npcink_Device_Inventory_V3_Tables::options();
+  $deleted["delete_data_on_uninstall"] = true;
+  Npcink_Device_Inventory_V3_Tables::update_options($deleted);
+  if (get_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION, false) === false) {
+    add_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION, array(array("id" => "site-token", "secret" => "docker-secret")), "", false);
+  }
+  update_option("npcink_v3_upload_nonce_drop", "1");
+  restore_current_blog();
+
+  Npcink_Device_Inventory_Admin_Uninstall::run();
+  if (get_current_blog_id() !== $origin) {
+    throw new RuntimeException("Multisite uninstall did not restore the original blog.");
+  }
+  foreach ($suffixes as $suffix) {
+    if (!$table_exists($kept_prefix, $suffix)) {
+      throw new RuntimeException("Uninstall deleted tables on a site that opted to keep data: " . $kept_prefix . $suffix);
+    }
+    if ($table_exists($deleted_prefix, $suffix)) {
+      throw new RuntimeException("Uninstall left tables on a site that opted to delete data: " . $deleted_prefix . $suffix);
+    }
+  }
+
+  switch_to_blog($kept_id);
+  $kept_revision = get_option("npcink_device_inventory_schema_revision");
+  $kept_nonce = get_option("npcink_v3_upload_nonce_keep");
+  restore_current_blog();
+  if ($kept_revision === false || $kept_nonce !== "1") {
+    throw new RuntimeException("Uninstall cleared data on a site that opted to keep it.");
+  }
+
+  switch_to_blog($deleted_id);
+  $deleted_revision = get_option("npcink_device_inventory_schema_revision");
+  $deleted_tokens = get_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION, false);
+  $deleted_nonce = get_option("npcink_v3_upload_nonce_drop");
+  restore_current_blog();
+  if ($deleted_revision !== false || $deleted_tokens !== false || $deleted_nonce !== false) {
+    throw new RuntimeException("Uninstall retained options on a site that opted to delete data.");
+  }
+  echo "Multisite uninstall flags verified.\n";
+'
+
 echo "Isolated Docker verification passed."
