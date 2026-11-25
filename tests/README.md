@@ -3,7 +3,7 @@
 This folder contains lightweight regression checks that can run without a full WordPress browser session.
 
 - `backup-restore-fixtures.php`: JSON backup/restore dry-run and import behavior fixtures.
-- `asset-search-fixtures.php`: asset search cost and extended-search guard fixtures.
+- `asset-search-fixtures.php`: asset search cost, extended-search guards, and compact list projection (full hardware only when `include_hardware` is set).
 - `asset-write-fixtures.php`: atomic batch asset updates, validation, audit, and rollback fixtures.
 - `device-upload-boundary-fixtures.php`: observation payload size/shape and signed upload rate-limit fixtures, including depth-16 hardware preservation and depth/node rejection.
 - `schema-fixtures.php`: current schema installation, completeness checks, idempotence and failure handling.

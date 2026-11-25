@@ -138,6 +138,7 @@ class Npcink_Device_Inventory_Asset_Repository
 		global $wpdb;
 		$page = max(1, intval($args['page']));
 		$page_size = max(1, min(100, intval($args['pageSize'])));
+		$include_hardware = !empty($args['include_hardware']);
 		$offset = ($page - 1) * $page_size;
 		$cache_key = $this->build_cache_key(
 			'list',
@@ -253,11 +254,11 @@ class Npcink_Device_Inventory_Asset_Repository
 			)
 		);
 
+		$hardware_select = $include_hardware ? "\n\t\t\t\tlo.hardware_json AS latest_hardware_json," : '';
 		$items = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT a.*,
-				lo.summary_json AS latest_summary_json,
-				lo.hardware_json AS latest_hardware_json,
+				lo.summary_json AS latest_summary_json," . $hardware_select . "
 				lo.observed_at AS latest_observed_at,
 				lo.source AS latest_observation_source
 			FROM %i a
@@ -557,6 +558,7 @@ class Npcink_Device_Inventory_Asset_Repository
 		foreach (array('asset_type', 'status', 'department', 'category', 'asset_scope', 'search', 'purchase_platform', 'financial_data_status', 'sort_by', 'include_deleted') as $field) {
 			$result[$field] = isset($args[$field]) ? sanitize_text_field((string) $args[$field]) : '';
 		}
+		$result['include_hardware'] = !empty($args['include_hardware']) ? '1' : '';
 		return $result;
 	}
 

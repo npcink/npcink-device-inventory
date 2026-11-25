@@ -196,10 +196,12 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (!in_array($financial_data_status, $allowed_financial_statuses, true)) {
 			return Npcink_Device_Inventory_V3_Response::error('invalid_financial_data_status', 'Financial data status is not supported.', 422);
 		}
+		$include_hardware = $this->wants_full_hardware($request);
 		$result = $this->assets->list_assets(
 			array(
 				'page' => $request->get_param('page') ?: 1,
 				'pageSize' => $request->get_param('pageSize') ?: 20,
+				'include_hardware' => $include_hardware,
 				'search' => $request->get_param('search'),
 				'asset_type' => $request->get_param('assetType'),
 				'asset_scope' => $request->get_param('assetScope'),
@@ -897,6 +899,15 @@ class Npcink_Device_Inventory_Assets_Controller
 		return $asset;
 	}
 
+	private function wants_full_hardware($request)
+	{
+		$value = $request->get_param('includeHardware');
+		if (function_exists('rest_sanitize_boolean')) {
+			return (bool) rest_sanitize_boolean($value);
+		}
+		return $value === true || $value === 1 || $value === '1' || $value === 'true';
+	}
+
 	public function format_asset($row)
 	{
 		if (!$row) {
@@ -920,13 +931,15 @@ class Npcink_Device_Inventory_Assets_Controller
 			'createdAt' => (string) $row['created_at'],
 			'updatedAt' => (string) $row['updated_at'],
 		);
-		if (array_key_exists('latest_summary_json', $row)) {
+		if (array_key_exists('latest_summary_json', $row) || array_key_exists('latest_observed_at', $row)) {
 			$item['latestObservation'] = array(
 				'summary' => $this->decode_json(isset($row['latest_summary_json']) ? $row['latest_summary_json'] : '', array()),
-				'hardware' => $this->decode_json(isset($row['latest_hardware_json']) ? $row['latest_hardware_json'] : '', array()),
 				'observedAt' => $this->format_utc_datetime(isset($row['latest_observed_at']) ? $row['latest_observed_at'] : ''),
 				'source' => isset($row['latest_observation_source']) ? (string) $row['latest_observation_source'] : '',
 			);
+			if (array_key_exists('latest_hardware_json', $row)) {
+				$item['latestObservation']['hardware'] = $this->decode_json($row['latest_hardware_json'], array());
+			}
 		}
 		return $item;
 	}

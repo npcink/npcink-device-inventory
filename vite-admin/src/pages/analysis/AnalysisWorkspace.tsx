@@ -90,7 +90,7 @@ export const AnalysisWorkspace = () => {
         : "summary";
   const assetsQuery = useQuery(
     ["v3-analysis-assets"],
-    () => fetchAllAssets({ assetScope: "all" }),
+    () => fetchAllAssets({ assetScope: "all", includeHardware: true }),
     { staleTime: 60_000 }
   );
   const trendsQuery = useQuery(["v3-analysis-collection-trends"], getCollectionTrends, { enabled: analysisViewKey === "summary", staleTime: 60_000 });

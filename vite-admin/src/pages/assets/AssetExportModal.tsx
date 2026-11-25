@@ -1,5 +1,5 @@
 import { HelpLabel } from "@/components/HelpLabel";
-import { getAssets, getSettings } from "@/services/v3";
+import { getAsset, getAssets, getSettings } from "@/services/v3";
 import type { Asset, AssetListParams } from "@/type/v3";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Checkbox, Empty, Modal, Radio, Space, Typography, message } from "antd";
@@ -9,6 +9,7 @@ import {
   AssetExportFieldKey,
   AssetExportFormat,
   AssetExportScope,
+  exportFieldsNeedHardware,
 } from "@/pages/shared/options";
 import {
   ASSET_EXPORT_STATUS_COLORS,
@@ -74,16 +75,29 @@ export const AssetExportModal = ({
     return () => window.removeEventListener("resize", updatePreviewOffset);
   }, [previewOpen]);
 
+  const needsHardware = exportFieldsNeedHardware(fieldKeys);
   const previewParams = scope === "current-filter" ? currentQueryParams : scope === "selected" ? undefined : exportParams[scope];
   const previewQuery = useQuery(
-    ["v3-export-preview", scope, previewParams],
-    () => getAssets({ ...previewParams, page: 1, pageSize: 30 }),
+    ["v3-export-preview", scope, previewParams, needsHardware],
+    () => getAssets({ ...previewParams, page: 1, pageSize: 30, includeHardware: needsHardware }),
     { enabled: open && previewOpen && scope !== "selected", staleTime: 30_000 }
   );
   const selectedExportAssets = exportableAssets(selectedAssets);
-  const previewLoading = scope !== "selected" && previewQuery.isFetching;
-  const previewError = scope !== "selected" && previewQuery.isError;
-  const previewAssets = exportableAssets(scope === "selected" ? selectedAssets : previewError || previewLoading ? [] : previewQuery.data?.data || []).slice(0, 30);
+  const selectedPreviewQuery = useQuery(
+    ["v3-export-selected-preview", selectedExportAssets.map((asset) => asset.uuid), needsHardware],
+    () => Promise.all(selectedExportAssets.slice(0, 30).map((asset) => getAsset(asset.uuid))),
+    { enabled: open && previewOpen && scope === "selected" && needsHardware, staleTime: 30_000 }
+  );
+  const previewLoading = scope === "selected"
+    ? needsHardware && selectedPreviewQuery.isFetching
+    : previewQuery.isFetching;
+  const previewError = scope === "selected"
+    ? Boolean(needsHardware && selectedPreviewQuery.isError)
+    : previewQuery.isError;
+  const previewSource = scope === "selected"
+    ? (needsHardware ? (previewError || previewLoading ? [] : selectedPreviewQuery.data || []) : selectedAssets)
+    : (previewError || previewLoading ? [] : previewQuery.data?.data || []);
+  const previewAssets = exportableAssets(previewSource).slice(0, 30);
   const previewFields = selectedAssetExportFields(fieldKeys);
   const needsSettings = fieldKeys.includes("financialResidualValue");
   const settingsReady = !needsSettings || Boolean(settingsQuery.data) && !settingsQuery.isError;
@@ -100,8 +114,13 @@ export const AssetExportModal = ({
     setExporting(true);
     try {
       const assets = exportableAssets(scope === "selected"
-        ? selectedAssets
-        : await fetchAllAssets(scope === "current-filter" ? currentQueryParams : exportParams[scope]));
+        ? (needsHardware
+          ? await Promise.all(selectedAssets.map((asset) => getAsset(asset.uuid)))
+          : selectedAssets)
+        : await fetchAllAssets({
+            ...(scope === "current-filter" ? currentQueryParams : exportParams[scope]),
+            includeHardware: needsHardware,
+          }));
       if (!assets.length) {
         message.warning("当前范围没有可导出的未归档资产");
         return;
