@@ -167,6 +167,8 @@ class Npcink_Device_Inventory
 		$schema_revision = get_option('npcink_device_inventory_schema_revision');
 		$installed_version = get_option('npcink_device_inventory_plugin_version');
 		require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-npcink-device-inventory-activator.php';
+		require_once plugin_dir_path(dirname(__FILE__)) . 'includes/v3/class-npcink-device-inventory-v3-tables.php';
+		Npcink_Device_Inventory_V3_Tables::migrate_client_tokens();
 		if ($schema_revision === Npcink_Device_Inventory_Activator::SCHEMA_REVISION) {
 			if ($installed_version !== $this->version) {
 				update_option('npcink_device_inventory_plugin_version', $this->version);

@@ -27,6 +27,7 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Uninstall')) {
 				)
 			);
 			delete_option(Npcink_Device_Inventory_V3_Tables::OPTION);
+			delete_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION);
 			delete_option('npcink_device_inventory_data_model_version');
 			delete_option('npcink_device_inventory_plugin_version');
 			delete_option('npcink_device_inventory_schema_revision');

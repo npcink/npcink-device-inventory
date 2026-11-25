@@ -263,9 +263,19 @@ function get_option($name, $fallback = false)
 	return $fallback;
 }
 
-function update_option($name, $value)
+function update_option($name, $value, $autoload = null)
 {
 	global $npcink_updated_options;
+	$npcink_updated_options[$name] = $value;
+	return true;
+}
+
+function add_option($name, $value, $deprecated = '', $autoload = true)
+{
+	global $npcink_updated_options;
+	if (array_key_exists($name, $npcink_updated_options)) {
+		return false;
+	}
 	$npcink_updated_options[$name] = $value;
 	return true;
 }

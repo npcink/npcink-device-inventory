@@ -314,6 +314,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 	{
 		global $wpdb;
 		$asset_map = $this->empty_asset_map();
+		Npcink_Device_Inventory_V3_Tables::migrate_client_tokens();
 		$previous_options = get_option(Npcink_Device_Inventory_V3_Tables::OPTION, array());
 		$settings_imported = false;
 		$planned_summary = $summary;
@@ -365,7 +366,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			$wpdb->query('ROLLBACK');
 			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			if ($settings_imported) {
-				update_option(Npcink_Device_Inventory_V3_Tables::OPTION, $previous_options);
+				Npcink_Device_Inventory_V3_Tables::update_options($previous_options);
 			}
 			throw $exception;
 		}
@@ -429,7 +430,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			$summary['deleteDataOnUninstall'] = $change;
 		}
 
-		update_option(Npcink_Device_Inventory_V3_Tables::OPTION, $options);
+		Npcink_Device_Inventory_V3_Tables::update_options($options);
 		$summary['imported']['settings'] = 1;
 		return $summary;
 	}

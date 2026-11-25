@@ -7,9 +7,10 @@ define('ABSPATH', $fixture_root);
 define('NPCINK_DEVICE_INVENTORY_VERSION', '3.2.3');
 function plugin_dir_path($path) { return dirname($path) . '/'; }
 $options = array();
-function get_option($key) { global $options; return isset($options[$key]) ? $options[$key] : false; }
-function update_option($key, $value) { global $options; $options[$key] = $value; return true; }
-function delete_option($key) { global $options; unset($options[$key]); return true; }
+function get_option($key, $default = false) { global $options; return array_key_exists($key, $options) ? $options[$key] : $default; }
+function update_option($key, $value, $autoload = null) { global $options, $option_autoload; $options[$key] = $value; if ($autoload !== null) { $option_autoload[$key] = $autoload; } return true; }
+function add_option($key, $value, $deprecated = '', $autoload = true) { global $options, $option_autoload; if (array_key_exists($key, $options)) { return false; } $options[$key] = $value; $option_autoload[$key] = $autoload; return true; }
+function delete_option($key) { global $options, $option_autoload; unset($options[$key], $option_autoload[$key]); return true; }
 function dbDelta($sql)
 {
 	global $wpdb;
@@ -55,9 +56,12 @@ function lifecycle_assert($condition, $message) { if (!$condition) { throw new R
 try {
 	$wpdb = new Npcink_Lifecycle_Db();
 	$options = array('npcink_device_inventory_schema_revision' => Npcink_Device_Inventory_Activator::SCHEMA_REVISION);
+	$option_autoload = array();
 	lifecycle_assert(Npcink_Device_Inventory_Activator::run(), 'Activation must repair tables even when an old revision survived.');
 	lifecycle_assert(count($wpdb->tables) === 4, 'Activation must create all four missing tables.');
 	lifecycle_assert(count($wpdb->writes) === 0, 'Repair must not replay destructive historical migrations.');
+	lifecycle_assert(get_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION) === array(), 'Activation must create an empty client token option.');
+	lifecycle_assert($option_autoload[Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION] === false, 'Client token option must not autoload.');
 	$options['npcink_v3_upload_nonce_test'] = '9999999999';
 	$options['npcink_v3_upload_rate_test'] = '1';
 	$options['npcinkXv3XuploadXnonce_test'] = 'unrelated';
@@ -65,9 +69,11 @@ try {
 	lifecycle_assert(count($wpdb->tables) === 4, 'Default uninstall must preserve data.');
 	lifecycle_assert(isset($options['npcink_v3_upload_nonce_test']), 'Default uninstall must preserve active replay protections.');
 	$options[Npcink_Device_Inventory_V3_Tables::OPTION] = array('delete_data_on_uninstall' => true);
+	$options[Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION] = array(array('id' => 'keep-secret', 'secret' => 'lifecycle-secret'));
 	Npcink_Device_Inventory_Admin_Uninstall::run();
 	lifecycle_assert(count($wpdb->tables) === 0, 'Explicit data deletion must drop all plugin tables.');
 	lifecycle_assert(get_option('npcink_device_inventory_schema_revision') === false, 'Data deletion must clear the migration revision.');
+	lifecycle_assert(get_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION) === false, 'Data deletion must clear the non-autoloaded client token option.');
 	lifecycle_assert(!isset($options['npcink_v3_upload_nonce_test']) && !isset($options['npcink_v3_upload_rate_test']), 'Opt-in uninstall must clear plugin security rows.');
 	lifecycle_assert($options['npcinkXv3XuploadXnonce_test'] === 'unrelated', 'LIKE underscores must not match unrelated options.');
 	lifecycle_assert(Npcink_Device_Inventory_Activator::run(), 'Reinstall must create the current schema directly.');

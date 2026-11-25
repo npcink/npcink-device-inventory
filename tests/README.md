@@ -11,6 +11,7 @@ This folder contains lightweight regression checks that can run without a full W
 - `identity-claim-fixtures.php`: atomic identity claim, idempotency, conflict, and failure fixtures.
 - `observation-ingest-fixtures.php`: transaction rollback, concurrent identity ownership, and audit failure fixtures.
 - `collection-trends-timezone-fixtures.php`: collection-trend local-day window and Asia/Shanghai bucketing regressions.
+- `client-tokens-autoload-fixtures.php`: migrates upload secrets out of the autoloaded options blob and keeps later settings writes from copying them back.
 - `fixtures/device-observation-demo.json`: synthetic, sanitized hardware observation sample for documentation and parser experiments.
 
 Run the root package scripts for the supported checks:

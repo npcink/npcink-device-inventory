@@ -117,6 +117,13 @@ try {
 	$unsigned_verify->set_query_params(array('extra' => '1'));
 	npcink_integration_assert(rest_do_request($unsigned_verify)->get_status() === 400, 'Unsigned query parameters were accepted.');
 	echo "Real signed v2 verification, replay and token scope passed.\n";
+	$migrated_tokens = Npcink_Device_Inventory_V3_Tables::client_tokens();
+	$autoload_options = get_option(Npcink_Device_Inventory_V3_Tables::OPTION, array());
+	npcink_integration_assert(!isset($autoload_options['client_tokens']), 'Migrated client tokens remained in the autoloaded options blob.');
+	npcink_integration_assert(isset($migrated_tokens[0]['secret']) && $migrated_tokens[0]['secret'] === 'scope-test-secret', 'Migrated client token secret was lost.');
+	$alloptions = wp_load_alloptions();
+	npcink_integration_assert(!isset($alloptions[Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION]), 'Client token option was still autoloaded after migration.');
+	npcink_integration_assert(strpos(wp_json_encode($alloptions), 'scope-test-secret') === false, 'Client token secret was present in autoloaded options.');
 
 	$hardware = json_decode(file_get_contents('/workspace/tests/fixtures/device-observation-demo.json'), true);
 	$nested_inventory = array('futureHardwareFact' => false, 'zeroValue' => 0, 'description' => '<USB> & literal\n  A  B', 'C:\\hardware path' => 'value');
