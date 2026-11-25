@@ -38,6 +38,7 @@ if (!defined('WPINC')) {
  * Rename this for your plugin and update it as you release new versions.
  */
 define('NPCINK_DEVICE_INVENTORY_VERSION', '3.2.4');
+define('NPCINK_DEVICE_INVENTORY_MIN_AGENT_VERSION', '0.4.6');
 
 /**
  * The code that runs during plugin activation.
