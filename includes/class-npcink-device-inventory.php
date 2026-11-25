@@ -23,7 +23,7 @@
  * @since      1.0.0
  * @package    Npcink_Device_Inventory
  * @subpackage Npcink_Device_Inventory/includes
- * @author     Npcink <1355471563@qq.com>
+ * @author     Npcink (https://www.npc.ink)
  */
 class Npcink_Device_Inventory
 {
