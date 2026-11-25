@@ -13,8 +13,7 @@ Npcink Device Inventory 是一个 WordPress 设备资产管理插件，用于小
 [`docs/device-identity-collection-release-retrospective-2026-08-05.md`](docs/device-identity-collection-release-retrospective-2026-08-05.md)。
 
 当前工作区按单用户范围移除了旧迁移链、旧字段别名和旧导入形态，见
-[ADR-017](docs/decisions/ADR-017-remove-historical-compatibility.md)。本地预览已接入
-[device.local 后台](http://device.local/wp-admin/plugins.php?page=npcink_device_inventory_settings)，使用原管理员账号登录。
+[ADR-017](docs/decisions/ADR-017-remove-historical-compatibility.md)。
 
 ## 组成
 
@@ -46,19 +45,27 @@ v3 使用统一资产模型，详细契约见 `docs/asset-data-model.md`。插�
 主要 REST 入口：
 
 - `POST /wp-json/npcink-device-inventory/v1/device-observations`：软件端上传采集事实。
+- `GET /wp-json/npcink-device-inventory/v1/device-observations/verify`：校验软件端上传授权与连通性。
 - `GET|POST /wp-json/npcink-device-inventory/v1/assets`：管理资产列表与新增资产。
-- `POST /wp-json/npcink-device-inventory/v1/assets/batch`：在一个事务中批量更新或归档资产；批量新增请使用资产新增接口逐条提交，或使用后续事务性导入接口。
+- `POST /wp-json/npcink-device-inventory/v1/assets/batch`：在一个事务中批量更新或归档资产；批量新增请使用资产新增接口逐条提交，或使用导入接口。
+- `POST /wp-json/npcink-device-inventory/v1/assets/import`：在一个事务中按表格导入资产。
 - `GET|PATCH|DELETE /wp-json/npcink-device-inventory/v1/assets/{uuid}`：资产详情、更新、软删除。
 - `GET /wp-json/npcink-device-inventory/v1/assets/{uuid}/identities`：只读查看资产身份；身份由采集入库或备份恢复流程认领。
 - `GET /wp-json/npcink-device-inventory/v1/assets/{uuid}/observations`：资产采集快照。
 - `GET|POST /wp-json/npcink-device-inventory/v1/assets/{uuid}/events`：资产事件时间线。
+- `GET /wp-json/npcink-device-inventory/v1/events`：跨资产事件时间线。
+- `GET /wp-json/npcink-device-inventory/v1/analysis/collection-trends`：按站点时区汇总的采集趋势。
+- `GET /wp-json/npcink-device-inventory/v1/analysis/hardware-observations`：硬件观测对照分页。
 - `GET|PATCH /wp-json/npcink-device-inventory/v1/settings`：插件设置。
+- `POST /wp-json/npcink-device-inventory/v1/observations/cleanup`：按保留策略清理观测。
 - `POST /wp-json/npcink-device-inventory/v1/client-tokens`：创建软件端授权码。
 - `PATCH|DELETE /wp-json/npcink-device-inventory/v1/client-tokens/{id}`：启停或删除软件端授权码。
 - `GET /wp-json/npcink-device-inventory/v1/backup`：在一个数据库一致性快照中导出所选备份区段。
 - `POST /wp-json/npcink-device-inventory/v1/backup-restore`：校验、预览或导入 JSON 备份。
 
-插件设置保存在 `npcink_device_inventory_v3_options`。卸载时仅当设置中允许删除数据时，才会删除插件表和设置项。
+默认资产列表不含完整硬件快照；分析或需要硬件列的导出请传 `includeHardware=true`。详情、对照和 JSON 备份仍返回完整硬件。
+
+插件设置保存在 `npcink_device_inventory_v3_options`。上传授权码保存在独立的非自动加载选项中。卸载时仅当设置中允许删除数据时，才会删除插件表和设置项。
 
 ## JSON 备份恢复契约
 
