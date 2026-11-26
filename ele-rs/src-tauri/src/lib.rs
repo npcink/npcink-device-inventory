@@ -680,9 +680,14 @@ fn create_diagnostics_package(app: tauri::AppHandle) -> Result<DiagnosticsPackag
     progress.step("准备上传排障包", "创建本地排障目录");
     let stamp = Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
     let directory_path = diagnostics_base_dir()?.join(format!("NpcinkDiagnostics-{stamp}"));
-    let mut directory = fs::DirBuilder::new();
     #[cfg(unix)]
-    directory.mode(0o700);
+    let directory = {
+        let mut directory = fs::DirBuilder::new();
+        directory.mode(0o700);
+        directory
+    };
+    #[cfg(not(unix))]
+    let directory = fs::DirBuilder::new();
     directory
         .create(&directory_path)
         .context("failed to create diagnostics directory")?;
