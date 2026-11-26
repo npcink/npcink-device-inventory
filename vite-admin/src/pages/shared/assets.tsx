@@ -4,13 +4,40 @@ import { firstText, getRecord, inferredGraphicsForFallbackDriver } from "@/utils
 import { assetPurchaseRecord, isComputerAsset } from "@/pages/shared/finance";
 import { assetTypeLabel, fieldText, statusLabel } from "@/pages/shared/presentation";
 
-export const fetchAllAssets = async (params: AssetListParams = {}) => {
-  const first = await getAssets({ ...params, page: 1, pageSize: 100 });
+export const MAX_FULL_HARDWARE_ASSETS = 500;
+export const FULL_HARDWARE_PAGE_SIZE = 20;
+
+export class AssetBatchLimitError extends Error {
+  constructor(limit: number) {
+    super(`当前范围超过 ${limit} 条资产，未生成不完整的结果。`);
+  }
+}
+
+export const fetchAllAssets = async (params: AssetListParams = {}, { signal, maxAssets }: { signal?: AbortSignal; maxAssets?: number } = {}) => {
+  const pageSize = params.includeHardware ? FULL_HARDWARE_PAGE_SIZE : 100;
+  const limit = params.includeHardware ? Math.min(maxAssets ?? MAX_FULL_HARDWARE_ASSETS, MAX_FULL_HARDWARE_ASSETS) : maxAssets;
+  const validatePage = (result: Awaited<ReturnType<typeof getAssets>>) => {
+    const { totalItems, totalPages } = result?.pagination ?? {};
+    if (typeof totalItems !== "number" || !Number.isSafeInteger(totalItems) || totalItems < 0 ||
+        totalPages !== Math.ceil(totalItems / pageSize) || !Array.isArray(result?.data) || result.data.length > pageSize) {
+      throw new Error("资产列表分页响应无效，未生成不完整的结果。");
+    }
+    if (limit !== undefined && (totalItems > limit || totalPages > Math.ceil(limit / pageSize))) {
+      throw new AssetBatchLimitError(limit);
+    }
+  };
+  const first = await getAssets({ ...params, page: 1, pageSize }, signal);
+  validatePage(first);
   const assets = [...first.data];
-  const totalPages = first.pagination.totalPages || 1;
+  const totalPages = first.pagination.totalPages;
+  if (limit !== undefined && assets.length > limit) throw new AssetBatchLimitError(limit);
   for (let nextPage = 2; nextPage <= totalPages; nextPage += 1) {
-    const next = await getAssets({ ...params, page: nextPage, pageSize: 100 });
+    const next = await getAssets({ ...params, page: nextPage, pageSize }, signal);
+    validatePage(next);
     assets.push(...next.data);
+    if (limit !== undefined && assets.length > limit) {
+      throw new AssetBatchLimitError(limit);
+    }
   }
   return assets;
 };

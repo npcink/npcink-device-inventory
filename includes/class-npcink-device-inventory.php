@@ -56,6 +56,8 @@ class Npcink_Device_Inventory
 	 */
 	protected $version;
 
+	private $schema_upgrade_failed = false;
+
 	/**
 	 * Define the core functionality of the plugin.
 	 *
@@ -118,6 +120,8 @@ class Npcink_Device_Inventory
 		$plugin_admin = new Npcink_Device_Inventory_Admin($this->get_plugin_name(), $this->get_version());
 
 		$this->loader->add_action('admin_init', $this, 'maybe_upgrade');
+		$this->loader->add_action('admin_notices', $this, 'schema_upgrade_notice');
+		$this->loader->add_action('network_admin_notices', $this, 'schema_upgrade_notice');
 		$this->loader->add_action('init', $this, 'ensure_observation_cleanup_schedule');
 		$this->loader->add_action('npcink_device_inventory_cleanup_observations', $this, 'cleanup_observations');
 	}
@@ -176,7 +180,15 @@ class Npcink_Device_Inventory
 			return;
 		}
 
-		Npcink_Device_Inventory_Activator::upgrade_schema($schema_revision, $this->version);
+		$this->schema_upgrade_failed = !Npcink_Device_Inventory_Activator::upgrade_schema($schema_revision, $this->version);
+	}
+
+	public function schema_upgrade_notice()
+	{
+		if (!$this->schema_upgrade_failed || !current_user_can('manage_options')) {
+			return;
+		}
+		echo '<div class="notice notice-error"><p>' . esc_html__('Device Inventory could not upgrade its database tables. Check the database permissions and error log, then reload this admin page to retry. Do not uninstall the plugin to repair the tables.', 'npcink-device-inventory') . '</p></div>';
 	}
 
 	/**

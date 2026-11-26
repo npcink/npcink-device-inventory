@@ -118,6 +118,11 @@ if ! grep -Fq "Checks complete. No errors found." <<<"${plugin_check_output}"; t
   exit 1
 fi
 
+if [ "${NPCINK_DOCKER_SEARCH_BENCHMARK:-0}" = 1 ]; then
+  echo "Running synthetic asset search benchmark on the empty database..."
+  run_wp eval-file /workspace/tests/wordpress-asset-search-benchmark.php
+fi
+
 echo "Running WordPress/MariaDB integration regressions..."
 run_wp eval-file /workspace/tests/wordpress-integration.php
 

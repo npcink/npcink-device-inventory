@@ -38,10 +38,11 @@ export const getComparisonObservations = async (afterAssetId = 0, throughAssetId
 };
 
 export const getAssets = async (
-  params: AssetListParams
+  params: AssetListParams, signal?: AbortSignal
 ): Promise<PaginatedResult<Asset>> => {
   const response = await restInstance.get<PaginatedResult<Asset>>("/assets", {
     params,
+    signal,
     showSuccessMessage: false,
   } as RequestConfig);
   return response.data;

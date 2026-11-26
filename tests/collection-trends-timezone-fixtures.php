@@ -247,4 +247,16 @@ npcink_trend_assert($wpdb->args[0][0] === '2026-10-26 16:00:00' && $wpdb->args[0
 $last_range_offset = (30 * 3) - 3;
 npcink_trend_assert($wpdb->args[0][$last_range_offset] === '2026-11-24 16:00:00' && $wpdb->args[0][$last_range_offset + 2] === '2026-11-25', 'SQL must bind the last local-day UTC range');
 
+$santiago = new DateTimeZone('America/Santiago');
+$controller->collection_trends_for_date('2026-09-10', $santiago);
+$ranges = array_column($observations->daily_count_args[2], null, 'date');
+npcink_trend_assert($ranges['2026-09-06']['start_utc'] === '2026-09-06 04:00:00', 'A skipped midnight must start at the first valid local time.');
+npcink_trend_assert($ranges['2026-09-06']['end_utc'] === $ranges['2026-09-07']['start_utc'] && $ranges['2026-09-07']['start_utc'] === '2026-09-07 03:00:00', 'The next day must not inherit the normalized 01:00 clock time.');
+$controller->collection_trends_for_date('2026-09-06', $santiago);
+npcink_trend_assert($observations->daily_count_args[1] === '2026-09-07 03:00:00', 'The filter end must also be exact when today has a skipped midnight.');
+
+$controller->collection_trends_for_date('2026-11-02', new DateTimeZone('America/Havana'));
+$ranges = array_column($observations->daily_count_args[2], null, 'date');
+npcink_trend_assert($ranges['2026-11-01']['start_utc'] === '2026-11-01 04:00:00' && $ranges['2026-11-01']['end_utc'] === '2026-11-02 05:00:00', 'Both occurrences of midnight must belong to the same 25-hour day.');
+
 echo "Collection trend timezone fixture checks passed.\n";

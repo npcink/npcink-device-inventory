@@ -47,7 +47,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Modal, Radio, Spin, Table, Tabs, Tag, Typography } from "antd";
 import { useMemo, useState, type ReactNode } from "react";
-import { fetchAllAssets } from "@/pages/shared/assets";
+import { AssetBatchLimitError, fetchAllAssets } from "@/pages/shared/assets";
 import { normalizeDepartmentList } from "@/pages/shared/departments";
 import { assetPurchaseDateText, effectiveFinancialResidualValue } from "@/pages/shared/finance";
 import { STATUS_OPTIONS } from "@/pages/shared/options";
@@ -88,10 +88,14 @@ export const AnalysisWorkspace = () => {
       : activeTab === "planning"
         ? assetPlanningView
         : "summary";
+  const needsHardware = analysisViewKey === "inventory" || analysisViewKey === "query" || analysisViewKey === "quality" || analysisViewKey === "renewal";
   const assetsQuery = useQuery(
-    ["v3-analysis-assets"],
-    () => fetchAllAssets({ assetScope: "all", includeHardware: true }),
-    { staleTime: 60_000 }
+    ["v3-analysis-assets", needsHardware ? "hardware" : "summary"],
+    ({ signal }) => fetchAllAssets(
+      { assetScope: needsHardware ? "computer" : "all", includeHardware: needsHardware },
+      { signal, maxAssets: 2000 }
+    ),
+    { staleTime: 60_000, retry: (attempt, error) => !(error instanceof AssetBatchLimitError) && attempt < 2 }
   );
   const trendsQuery = useQuery(["v3-analysis-collection-trends"], getCollectionTrends, { enabled: analysisViewKey === "summary", staleTime: 60_000 });
   const settingsQuery = useQuery(["v3-settings"], getSettings, { staleTime: 60_000 });
@@ -151,7 +155,7 @@ export const AnalysisWorkspace = () => {
     ...(hardwareQuery.minMemoryGb ? [<Tag key="min-memory" closable color="blue" onClose={() => setHardwareQuery((value) => ({ ...value, minMemoryGb: undefined }))}>内存 ≥ {hardwareQuery.minMemoryGb} GB</Tag>] : []),
     ...(hardwareQuery.minDiskGb ? [<Tag key="min-disk" closable color="blue" onClose={() => setHardwareQuery((value) => ({ ...value, minDiskGb: undefined }))}>硬盘 ≥ {hardwareQuery.minDiskGb} GB</Tag>] : []),
   ];
-  const issues = useMemo(() => detectHardwareIssues(assets), [assets]);
+  const issues = useMemo(() => needsHardware ? detectHardwareIssues(assets) : [], [assets, needsHardware]);
   const groupOptions = useMemo(
     () =>
       Array.from(new Set(issues.map((issue) => issueGroup(issue.type))))
@@ -353,15 +357,16 @@ export const AnalysisWorkspace = () => {
         </div>
         <Button disabled={!canExportAnalysis} onClick={exportAnalysisCsv}>导出当前分析</Button>
       </div>
-      {assetsQuery.isError ? (
+      {assetsQuery.error instanceof AssetBatchLimitError ? (
+        <Alert type="warning" showIcon message="资产数量超过当前分析上限" description={assetsQuery.error.message} />
+      ) : assetsQuery.isError ? (
         <Alert type="error" showIcon message="分析数据加载失败" action={<Button onClick={() => assetsQuery.refetch()}>重试</Button>} />
       ) : null}
       <div className="npcink-v3-simple-kpis" aria-label="电脑资产概览">
         {[
           { label: "电脑总数", value: assets.length },
           { label: "已接入采集", value: connectedCount },
-          { label: "发现的问题", value: issues.length },
-          { label: "重复风险组", value: duplicateRiskGroups },
+          ...(needsHardware ? [{ label: "发现的问题", value: issues.length }, { label: "重复风险组", value: duplicateRiskGroups }] : []),
         ].map((item) => (
           <div key={item.label}>
             <span>{item.label}</span>

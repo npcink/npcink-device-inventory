@@ -10,7 +10,7 @@ This folder contains lightweight regression checks that can run without a full W
 - `identity-contract-fixtures.php`: PHP/Rust current hardware identity golden vectors and invalid-signal exclusions.
 - `identity-claim-fixtures.php`: atomic identity claim, idempotency, conflict, and failure fixtures.
 - `observation-ingest-fixtures.php`: transaction rollback, concurrent identity ownership, and audit failure fixtures.
-- `collection-trends-timezone-fixtures.php`: collection-trend local-day window and Asia/Shanghai bucketing regressions.
+- `collection-trends-timezone-fixtures.php`: collection-trend local-day windows in Shanghai and DST transitions at midnight in Santiago and Havana.
 - `client-tokens-autoload-fixtures.php`: migrates upload secrets out of the autoloaded options blob and keeps later settings writes from copying them back.
 - `fixtures/device-observation-demo.json`: synthetic, sanitized hardware observation sample for documentation and parser experiments.
 
@@ -31,9 +31,15 @@ npm run check:identity
 - `npm run check:multisite-uninstall`：多站点卸载按站点读取「卸载时删除数据」开关，保留未开启站点的表和选项。
 - `npm run check:observation-repository`：最新指针更新失败不可报告观测创建成功，旧观测零行更新仍成功。
 - `npm run check:asset-number-retry`：自动生成资产编号在唯一冲突时有界重试，手工指定编号冲突不重试。
-- `npm run check:analysis-pagination --prefix vite-admin`：固定上界、空页继续、游标前进校验和取消请求。
+- `npm run check:analysis-pagination --prefix vite-admin`：观测游标的固定上界、空页继续和取消请求；资产分页的轻量/硬件投影、页大小、超限和无效响应。
 - `npm run check:docker`：临时 WordPress/PHP 8.3/MariaDB 环境中的实际 REST 权限、最近两次观测排序及游标、数据库故障回滚、独立连接归档竞态、生命周期、备份恢复、多站点升级，以及多站点按站点卸载开关；结束自动删除测试容器和卷。测试脚本校验站点身份，禁止在正式站点执行 `tests/wordpress-integration.php`。
 - PHP 7.4、8.5 fixture 运行已加入 CI；PHPStan 提高到 level 1。独立 fixture 不能替代真实数据库测试。
+
+### 实库趋势、金额和搜索基准
+
+- `npm run check:docker` 另外验证站点日历日的分桶：用 MariaDB 覆盖上海日界和圣地亚哥 DST 起点，再从 CLI 容器经 Apache 发起 REST 请求，验证实际路由按站点时区统计。备份回归通过 JSON 往返后直接比较数据库中的三列 `DECIMAL`，覆盖上界及零金额。
+- `NPCINK_DOCKER_SEARCH_BENCHMARK=1 npm run check:docker`：在干净的临时容器内先运行搜索基准，再运行常规集成测试。远程 Docker 可在测试站安装同一 ZIP 后、写入其他资产前，通过 Compose 的 CLI 服务执行 `wp eval-file /workspace/tests/wordpress-asset-search-benchmark.php`。只允许指定测试站且库存表为空；写入 1,500 条合成资产（其中 1,200 条含 32 KiB 硬件快照），结束时事务回滚。
+- 基准打印编号、部门、身份、主机名及无匹配查询各 7 次测量的中位数和最大值，并比较同一页 20 条资产的两种 JSON 投影字节数。只测 PHP REST 内部调度和序列化（含数据库查询），不含 HTTP、压缩或浏览器渲染；不是生产延迟，也不设机器相关的时间门限。
 
 ### 依赖及跨平台检查
 

@@ -584,28 +584,31 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (!$timezone instanceof DateTimeZone) {
 			$timezone = new DateTimeZone('UTC');
 		}
+		$utc = new DateTimeZone('UTC');
 		$today = is_string($today) ? $today : '';
-		$today_date = DateTimeImmutable::createFromFormat('!Y-m-d', $today, $timezone);
-		if (!$today_date) {
-			$today_date = new DateTimeImmutable('now', $timezone);
-			$today = $today_date->format('Y-m-d');
-			$today_date = DateTimeImmutable::createFromFormat('!Y-m-d', $today, $timezone);
+		$today_date = DateTimeImmutable::createFromFormat('!Y-m-d', $today, $utc);
+		if (!$today_date || $today_date->format('Y-m-d') !== $today) {
+			$today = (new DateTimeImmutable('now', $timezone))->format('Y-m-d');
+			$today_date = new DateTimeImmutable($today, $utc);
 		}
 		$start = $today_date->modify('-' . ($days - 1) . ' days');
-		$end = $today_date->modify('+1 day');
-		$utc = new DateTimeZone('UTC');
+		// Enumerate calendar labels separately so a skipped midnight cannot shift later boundaries.
+		$boundaries = array();
+		for ($offset = 0; $offset <= $days; $offset++) {
+			$label = $start->modify('+' . $offset . ' days')->format('Y-m-d');
+			$boundary = new DateTimeImmutable($label . ' 00:00:00', $timezone);
+			$boundaries[] = array($label, $boundary->setTimezone($utc)->format('Y-m-d H:i:s'));
+		}
 		$day_ranges = array();
 		for ($offset = 0; $offset < $days; $offset++) {
-			$day_start = $start->modify('+' . $offset . ' days');
-			$day_end = $day_start->modify('+1 day');
 			$day_ranges[] = array(
-				'date' => $day_start->format('Y-m-d'),
-				'start_utc' => $day_start->setTimezone($utc)->format('Y-m-d H:i:s'),
-				'end_utc' => $day_end->setTimezone($utc)->format('Y-m-d H:i:s'),
+				'date' => $boundaries[$offset][0],
+				'start_utc' => $boundaries[$offset][1],
+				'end_utc' => $boundaries[$offset + 1][1],
 			);
 		}
-		$start_utc = $day_ranges[0]['start_utc'];
-		$end_utc = $end->setTimezone($utc)->format('Y-m-d H:i:s');
+		$start_utc = $boundaries[0][1];
+		$end_utc = $boundaries[$days][1];
 		$counts_by_day = array();
 
 		foreach ($this->observations->daily_counts_between($start_utc, $end_utc, $day_ranges) as $row) {

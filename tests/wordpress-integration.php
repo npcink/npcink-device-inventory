@@ -234,7 +234,10 @@ try {
 	$before_observations++;
 	$before_events++;
 
-	// Restoring receipt IDs must preserve distinct collections with the same timestamp.
+	// Restoring receipt IDs and DECIMAL columns must preserve the original facts.
+	$database_amounts = array('purchase_price' => '9999999999.99', 'residual_value' => '0.00', 'financial_residual_value' => '1234.56');
+	$api_amounts = array('purchasePrice' => 9999999999.99, 'secondHandMarketValue' => 0.0, 'financialResidualValue' => 1234.56);
+	npcink_integration_assert($wpdb->update(Npcink_Device_Inventory_V3_Tables::assets(), $database_amounts, array('id' => $upload_id)) === 1, 'Could not set the backup money fixture.');
 	$receipt_controller = new Npcink_Device_Inventory_Backup_Restore_Controller();
 	$receipt_export_request = new WP_REST_Request('GET', '/');
 	$receipt_export_request->set_param('sections', 'assets,observations');
@@ -242,16 +245,23 @@ try {
 	$receipt_backup = array('schema' => $receipt_export['schema'],
 		'assets' => array_values(array_filter($receipt_export['assets'], static function ($row) use ($upload_id) { return intval($row['id']) === intval($upload_id); })),
 		'observations' => array_values(array_filter($receipt_export['observations'], static function ($row) use ($upload_id) { return intval($row['assetId']) === intval($upload_id); })));
+	npcink_integration_assert(count($receipt_backup['assets']) === 1, 'Backup omitted the money fixture.');
+	foreach ($api_amounts as $field => $expected) {
+		npcink_integration_assert($receipt_backup['assets'][0][$field] === $expected, 'Backup changed amount: ' . $field);
+	}
 	npcink_integration_assert(count($receipt_backup['observations']) === $before_observations && !empty($receipt_backup['observations'][0]['observationId']), 'Export lost receipt metadata.');
 	$exported_original = array_values(array_filter($receipt_backup['observations'], static function ($row) use ($payload) { return $row['observationId'] === $payload['observation']['_npcink_device']['observation_id']; }));
 	npcink_integration_assert(count($exported_original) === 1 && $exported_original[0]['hardware']['storage'] === $hardware['storage'], 'Backup export lost storage relationships.');
 	$wpdb->delete(Npcink_Device_Inventory_V3_Tables::observations(), array('asset_id' => $upload_id));
+	npcink_integration_assert($wpdb->update(Npcink_Device_Inventory_V3_Tables::assets(), array_fill_keys(array_keys($database_amounts), '1.00'), array('id' => $upload_id)) === 1, 'Could not replace fixture amounts before import.');
 	$observations->invalidate_cache();
 	$restore_receipts_request = new WP_REST_Request('POST', '/');
 	$restore_receipts_request->set_header('content-type', 'application/json');
 	$restore_receipts_request->set_body(wp_json_encode(array('backup' => $receipt_backup, 'dryRun' => false)));
 	$restored_receipts = $receipt_controller->restore_backup($restore_receipts_request);
 	npcink_integration_assert(!is_wp_error($restored_receipts), 'Receipt restore failed.');
+	$actual_amounts = $wpdb->get_row($wpdb->prepare('SELECT purchase_price, residual_value, financial_residual_value FROM %i WHERE id = %d', Npcink_Device_Inventory_V3_Tables::assets(), $upload_id), ARRAY_A);
+	npcink_integration_assert($actual_amounts === $database_amounts, 'Backup JSON round trip changed persisted DECIMAL amounts.');
 	npcink_integration_assert($count(Npcink_Device_Inventory_V3_Tables::observations()) === $before_observations, 'Restore merged collections that shared a timestamp.');
 	$restored_retry = $ingest->ingest($payload);
 	npcink_integration_assert(!is_wp_error($restored_retry) && $restored_retry['data']['mode'] === 'duplicate', 'Restore lost retry idempotency.');
@@ -259,7 +269,7 @@ try {
 	$restored_inventory = $observations->find_by_id($restored_retry['data']['observation']['id']);
 	$restored_hardware = json_decode($restored_inventory['hardware_json'], true);
 	npcink_integration_assert($restored_hardware['storage'] === $hardware['storage'] && $restored_hardware['graphics'] === $hardware['graphics'], 'Backup restore lost component relations or graphics diagnostics.');
-	echo "Real receipt export/restore and retry idempotency passed.\n";
+	echo "Real receipt export/restore, DECIMAL amount round trip and retry idempotency passed.\n";
 
 	// Failed wpdb reads can look exactly like empty result sets. Never export or
 	// restore successfully when a section read or a duplicate lookup fails.
@@ -352,7 +362,52 @@ npcink_integration_assert($trend_by_day['2026-11-25'] === 1, '2026-11-24 16:30:0
 npcink_integration_assert($trend_by_day['2026-10-27'] === 1, '2026-10-26 16:30:00 UTC must count as the 30-day window start 2026-10-27.');
 npcink_integration_assert($trend_by_day['2026-11-24'] === 0, 'The UTC calendar date must not receive the local early-morning observation.');
 npcink_integration_assert(!isset($trend_by_day['2026-10-26']), 'Observations before the local window start must be excluded.');
+$observe($trend_asset, '2026-09-06 04:00:00', 'santiago-first-valid-time');
+$observe($trend_asset, '2026-09-07 03:30:00', 'santiago-next-day');
+$santiago = new DateTimeZone('America/Santiago');
+$trend_by_day = array_column($trend_controller->collection_trends_for_date('2026-09-10', $santiago)['collection'], 'count', 'date');
+npcink_integration_assert($trend_by_day['2026-09-06'] === 1 && $trend_by_day['2026-09-07'] === 1, 'Santiago midnight DST skipped hour must not shift the next-day bucket.');
+$trend_by_day = array_column($trend_controller->collection_trends_for_date('2026-09-06', $santiago)['collection'], 'count', 'date');
+npcink_integration_assert($trend_by_day['2026-09-06'] === 1, 'The next local day must be excluded from a trend ending on the DST transition.');
 echo "Real collection-trend timezone filtering and bucketing passed.\n";
+
+// Exercise the registered route through Apache, not just the in-process REST dispatcher.
+npcink_integration_assert(home_url() === 'http://wordpress', 'Trend HTTP check requires the private Docker hostname.');
+$admin = get_user_by('login', 'npcink-e2e-admin');
+$app_password = WP_Application_Passwords::create_new_application_password($admin->ID, array('name' => 'Docker trend integration'));
+npcink_integration_assert(!is_wp_error($app_password), 'Could not create the disposable REST credential.');
+$previous_timezone = get_option('timezone_string');
+try {
+	update_option('timezone_string', 'Asia/Shanghai');
+	$read_http_trends = static function () use ($admin, $app_password) {
+		$response = wp_remote_get(add_query_arg('rest_route', '/npcink-device-inventory/v1/analysis/collection-trends', 'http://wordpress/'), array(
+			'headers' => array('Authorization' => 'Basic ' . base64_encode($admin->user_login . ':' . $app_password[0])),
+			'redirection' => 0,
+		));
+		npcink_integration_assert(wp_remote_retrieve_response_code($response) === 200, 'Authenticated trend HTTP request did not return 200.');
+		$body = json_decode(wp_remote_retrieve_body($response), true);
+		npcink_integration_assert(isset($body['data']['collection']) && count($body['data']['collection']) === 30, 'Invalid trend HTTP payload.');
+		return array_column($body['data']['collection'], 'count', 'date');
+	};
+	$now_site = new DateTimeImmutable('now', wp_timezone());
+	$local_observed = $now_site->modify('-2 days')->setTime(0, 30);
+	$utc_observed = $local_observed->setTimezone(new DateTimeZone('UTC'));
+	$local_day = $local_observed->format('Y-m-d');
+	$utc_day = $utc_observed->format('Y-m-d');
+	$before_http = $read_http_trends();
+	$observe($trend_asset, $utc_observed->format('Y-m-d H:i:s'), 'http-site-midnight');
+	$after_http = $read_http_trends();
+	npcink_integration_assert($local_day !== $utc_day && isset($before_http[$local_day], $before_http[$utc_day], $after_http[$local_day], $after_http[$utc_day]), 'Trend HTTP fixture dates not in the window.');
+	npcink_integration_assert($after_http[$local_day] === $before_http[$local_day] + 1 && $after_http[$utc_day] === $before_http[$utc_day], 'Trend HTTP route did not bucket by the configured site date.');
+} finally {
+	if ($previous_timezone === false) {
+		delete_option('timezone_string');
+	} else {
+		update_option('timezone_string', $previous_timezone);
+	}
+	WP_Application_Passwords::delete_application_password($admin->ID, $app_password[1]['uuid']);
+}
+echo "Cross-container HTTP trend bucketing passed.\n";
 
 // Lifecycle tests are deliberately destructive only within the disposable database.
 require_once WP_PLUGIN_DIR . '/npcink-device-inventory/admin/partials/npcink-device-inventory-admin-uninstall.php';
