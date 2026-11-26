@@ -49,6 +49,7 @@ v3 使用统一资产模型，详细契约见 `docs/asset-data-model.md`。插�
 - `GET|POST /wp-json/npcink-device-inventory/v1/assets`：管理资产列表与新增资产。
 - `POST /wp-json/npcink-device-inventory/v1/assets/batch`：在一个事务中批量更新或归档资产；批量新增请使用资产新增接口逐条提交，或使用导入接口。
 - `POST /wp-json/npcink-device-inventory/v1/assets/import`：在一个事务中按表格导入资产。
+- `POST /wp-json/npcink-device-inventory/v1/assets/import/lookup`：导入预检，按 `assetNumbers` 精确查找，每次最多 100 个编号，包含已软删除的资产，不写入数据。
 - `GET|PATCH|DELETE /wp-json/npcink-device-inventory/v1/assets/{uuid}`：资产详情、更新、软删除。
 - `GET /wp-json/npcink-device-inventory/v1/assets/{uuid}/identities`：只读查看资产身份；身份由采集入库或备份恢复流程认领。
 - `GET /wp-json/npcink-device-inventory/v1/assets/{uuid}/observations`：资产采集快照。

@@ -431,6 +431,8 @@ export const buildImportPreviewRows = (
     }
     if (!assetNumber) {
       errors.push("资产编号必填");
+    } else if (Array.from(assetNumber.trim()).length > 64) {
+      errors.push("资产编号不能超过 64 个字符");
     }
     const normalizedNumber = assetNumber.trim().toLowerCase();
     if (normalizedNumber && seenNumbers.has(normalizedNumber)) {

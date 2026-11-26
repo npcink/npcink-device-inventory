@@ -76,11 +76,26 @@ try {
 	$next = $request_page(array('afterAssetId' => $data['pagination']['nextAfterAssetId'], 'throughAssetId' => $data['pagination']['throughAssetId'], 'pageSize' => 25))->get_data();
 	npcink_integration_assert(array_column($next['data'], 'id') === array($second_id) && $next['pagination']['nextAfterAssetId'] === null, 'Cursor/exclusion of archived and custom assets failed.');
 	npcink_integration_assert($request_page(array('pageSize' => 26))->get_status() === 400, 'Invalid page size was accepted.');
+	$lookup_import = static function ($numbers) {
+		$request = new WP_REST_Request('POST', '/npcink-device-inventory/v1/assets/import/lookup');
+		$request->set_header('content-type', 'application/json');
+		$request->set_body(wp_json_encode(array('assetNumbers' => $numbers)));
+		return rest_do_request($request);
+	};
+	$lookup = $lookup_import(array(strtolower($first['asset_number']), $archived['asset_number'], 'INTEGRATION-', 'MISSING-123'));
+	npcink_integration_assert($lookup->get_status() === 200, 'Import lookup failed for the administrator.');
+	$matches = array_column($lookup->get_data()['data'], null, 'uuid');
+	npcink_integration_assert(count($matches) === 2 && isset($matches[$first['uuid']], $matches[$archived['uuid']]), 'Import lookup must match case-insensitively without returning substring matches.');
+	npcink_integration_assert($matches[$archived['uuid']]['status'] === 'deleted' && !isset($matches[$first['uuid']]['latestObservation']['hardware']), 'Import lookup must preserve deleted numbers and omit complete hardware.');
+	npcink_integration_assert($lookup_import(array_fill(0, 101, 'A1'))->get_status() === 400, 'Import lookup accepted more than 100 numbers.');
+	npcink_integration_assert($lookup_import(array(array('A1')))->get_status() === 400, 'Import lookup accepted a nested value.');
 	wp_set_current_user(0);
 	npcink_integration_assert($request_page(array())->get_status() === 403, 'Anonymous analysis access was accepted.');
+	npcink_integration_assert($lookup_import(array('A1'))->get_status() === 403, 'Anonymous import lookup was accepted.');
 	$subscriber = wp_create_user('npcink-integration-subscriber', wp_generate_password(), 'subscriber@example.invalid');
 	wp_set_current_user($subscriber);
 	npcink_integration_assert($request_page(array())->get_status() === 403, 'Subscriber analysis access was accepted.');
+	npcink_integration_assert($lookup_import(array('A1'))->get_status() === 403, 'Subscriber import lookup was accepted.');
 	wp_set_current_user(0);
 	require_once ABSPATH . 'wp-admin/includes/user.php';
 	wp_delete_user($subscriber);

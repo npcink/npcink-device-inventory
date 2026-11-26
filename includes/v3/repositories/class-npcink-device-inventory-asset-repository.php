@@ -134,6 +134,23 @@ class Npcink_Device_Inventory_Asset_Repository
 		return $row;
 	}
 
+	public function find_import_matches($numbers)
+	{
+		if (!$numbers) {
+			return array();
+		}
+		global $wpdb;
+		$placeholders = implode(', ', array_fill(0, count($numbers), '%s'));
+		$args = array_merge(array(Npcink_Device_Inventory_V3_Tables::assets()), $numbers);
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Import needs fresh rows. Only placeholder tokens are interpolated.
+		$rows = $wpdb->get_results(
+			$wpdb->prepare("SELECT * FROM %i WHERE asset_number IN ({$placeholders})", $args),
+			ARRAY_A
+		);
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		return $wpdb->last_error === '' && is_array($rows) ? $rows : null;
+	}
+
 	public function list_assets($args)
 	{
 		global $wpdb;
