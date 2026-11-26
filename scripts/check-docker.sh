@@ -267,6 +267,11 @@ run_wp eval '
     $table = $prefix . $suffix;
     return $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $wpdb->esc_like($table))) === $table;
   };
+  // Security rows bypass the options cache in production, including during uninstall.
+  $security_row_exists = static function ($name) {
+    global $wpdb;
+    return (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM %i WHERE option_name = %s", $wpdb->options, $name)) === 1;
+  };
 
   switch_to_blog($kept_id);
   global $wpdb;
@@ -282,9 +287,7 @@ run_wp eval '
   $deleted = Npcink_Device_Inventory_V3_Tables::options();
   $deleted["delete_data_on_uninstall"] = true;
   Npcink_Device_Inventory_V3_Tables::update_options($deleted);
-  if (get_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION, false) === false) {
-    add_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION, array(array("id" => "site-token", "secret" => "docker-secret")), "", false);
-  }
+  Npcink_Device_Inventory_V3_Tables::update_client_tokens(array(array("id" => "site-token", "secret" => "docker-secret")));
   update_option("npcink_v3_upload_nonce_drop", "1");
   restore_current_blog();
 
@@ -303,18 +306,18 @@ run_wp eval '
 
   switch_to_blog($kept_id);
   $kept_revision = get_option("npcink_device_inventory_schema_revision");
-  $kept_nonce = get_option("npcink_v3_upload_nonce_keep");
+  $kept_nonce = $security_row_exists("npcink_v3_upload_nonce_keep");
   restore_current_blog();
-  if ($kept_revision === false || $kept_nonce !== "1") {
+  if ($kept_revision === false || !$kept_nonce) {
     throw new RuntimeException("Uninstall cleared data on a site that opted to keep it.");
   }
 
   switch_to_blog($deleted_id);
   $deleted_revision = get_option("npcink_device_inventory_schema_revision");
   $deleted_tokens = get_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION, false);
-  $deleted_nonce = get_option("npcink_v3_upload_nonce_drop");
+  $deleted_nonce = $security_row_exists("npcink_v3_upload_nonce_drop");
   restore_current_blog();
-  if ($deleted_revision !== false || $deleted_tokens !== false || $deleted_nonce !== false) {
+  if ($deleted_revision !== false || $deleted_tokens !== false || $deleted_nonce) {
     throw new RuntimeException("Uninstall retained options on a site that opted to delete data.");
   }
   echo "Multisite uninstall flags verified.\n";

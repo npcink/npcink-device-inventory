@@ -296,6 +296,7 @@ class Npcink_Device_Inventory_Observation_Repository
 				GROUP BY 1
 				HAVING day IS NOT NULL
 				ORDER BY day ASC";
+			// phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- The generated CASE contains only placeholders; prepare binds every date, boundary and table name.
 			$rows = $wpdb->get_results(
 				$wpdb->prepare($query, array_merge($case_args, array($observations_table, $assets_table, $start_at, $end_at))),
 				ARRAY_A

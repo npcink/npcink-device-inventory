@@ -256,10 +256,13 @@ class Npcink_Device_Inventory_Asset_Repository
 		);
 
 		$hardware_select = $include_hardware ? "\n\t\t\t\tlo.hardware_json AS latest_hardware_json," : '';
+		// phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- Only a fixed projection fragment is composed; prepare binds all external input.
 		$items = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT a.*,
-				lo.summary_json AS latest_summary_json," . $hardware_select . "
+				lo.summary_json AS latest_summary_json," .
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The projection is one of two fixed strings; every external value is bound below.
+				$hardware_select . "
 				lo.observed_at AS latest_observed_at,
 				lo.source AS latest_observation_source
 			FROM %i a

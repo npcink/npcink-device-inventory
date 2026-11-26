@@ -6,8 +6,10 @@ file_put_contents($fixture_root . 'wp-admin/includes/upgrade.php', '<?php // dbD
 define('ABSPATH', $fixture_root);
 define('NPCINK_DEVICE_INVENTORY_VERSION', '3.2.3');
 $options = array();
-function get_option($key) { global $options; return isset($options[$key]) ? $options[$key] : false; }
-function update_option($key, $value) { global $options; $options[$key] = $value; return true; }
+function plugin_dir_path($path) { return dirname($path) . '/'; }
+function get_option($key, $default = false) { global $options; return $options[$key] ?? $default; }
+function update_option($key, $value, $autoload = null) { global $options; $options[$key] = $value; return true; }
+function add_option($key, $value, $deprecated = '', $autoload = true) { global $options; if (array_key_exists($key, $options)) { return false; } $options[$key] = $value; return true; }
 function dbDelta($sql) {
 	global $wpdb;
 	$wpdb->definitions[] = $sql;
