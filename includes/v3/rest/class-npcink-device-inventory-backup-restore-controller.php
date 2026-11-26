@@ -98,6 +98,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			return Npcink_Device_Inventory_V3_Response::error('backup_too_large', 'Backup JSON is too large.', 413);
 		}
 		$dry_run = !empty($params['dryRun']);
+		$confirm_delete_data_on_uninstall_change = !empty($params['confirmDeleteDataOnUninstallChange']);
 		$validation = $this->validate_backup($backup);
 		if (is_wp_error($validation)) {
 			return $validation;
@@ -124,7 +125,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 		}
 
 		try {
-			$result = $this->import_backup($backup, $summary);
+			$result = $this->import_backup($backup, $summary, $confirm_delete_data_on_uninstall_change);
 		} catch (Npcink_Device_Inventory_Backup_Restore_Conflict_Exception $exception) {
 			return Npcink_Device_Inventory_V3_Response::error('backup_conflicts', $exception->getMessage(), 409, $exception->get_summary());
 		} catch (Exception $exception) {
@@ -242,6 +243,18 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			$summary = $this->process_events($backup['events'], $summary, $asset_map, false);
 		}
 
+		$summary['deleteDataOnUninstall'] = $this->describe_delete_data_on_uninstall_change(
+			isset($backup['settings']) && is_array($backup['settings']) ? $backup['settings'] : array()
+		);
+		if (!empty($summary['deleteDataOnUninstall']['changed'])) {
+			$current_label = !empty($summary['deleteDataOnUninstall']['current']) ? '删除数据' : '保留数据';
+			$incoming_label = !empty($summary['deleteDataOnUninstall']['incoming']) ? '删除数据' : '保留数据';
+			$this->add_warning(
+				$summary,
+				'备份将把「卸载时删除数据」从「' . $current_label . '」改为「' . $incoming_label . '」。这只影响以后卸载，不会立即删数；正式导入需单独确认后才会改写该开关。'
+			);
+		}
+
 		return $summary;
 	}
 
@@ -297,21 +310,25 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 		);
 	}
 
-	private function import_backup($backup, $summary)
+	private function import_backup($backup, $summary, $confirm_delete_data_on_uninstall_change = false)
 	{
 		global $wpdb;
 		$asset_map = $this->empty_asset_map();
+		Npcink_Device_Inventory_V3_Tables::migrate_client_tokens();
 		$previous_options = get_option(Npcink_Device_Inventory_V3_Tables::OPTION, array());
 		$settings_imported = false;
 		$planned_summary = $summary;
 		$summary = $this->empty_summary($backup);
 		$summary['planned'] = $planned_summary['planned'];
 		$summary['warnings'] = $planned_summary['warnings'];
+		if (isset($planned_summary['deleteDataOnUninstall'])) {
+			$summary['deleteDataOnUninstall'] = $planned_summary['deleteDataOnUninstall'];
+		}
 
 		try {
 			if (isset($backup['settings']) && is_array($backup['settings'])) {
 				$settings_imported = true;
-				$summary = $this->import_settings($backup['settings'], $summary);
+				$summary = $this->import_settings($backup['settings'], $summary, $confirm_delete_data_on_uninstall_change);
 			}
 
 			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Restore spans plugin-owned tables and needs transaction boundaries.
@@ -349,7 +366,7 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			$wpdb->query('ROLLBACK');
 			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			if ($settings_imported) {
-				update_option(Npcink_Device_Inventory_V3_Tables::OPTION, $previous_options);
+				Npcink_Device_Inventory_V3_Tables::update_options($previous_options);
 			}
 			throw $exception;
 		}
@@ -359,7 +376,20 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 		return $summary;
 	}
 
-	private function import_settings($settings, $summary)
+	private function describe_delete_data_on_uninstall_change($settings)
+	{
+		$current = !empty(Npcink_Device_Inventory_V3_Tables::options()['delete_data_on_uninstall']);
+		$present = is_array($settings) && array_key_exists('deleteDataOnUninstall', $settings);
+		$incoming = $present ? (bool) $settings['deleteDataOnUninstall'] : null;
+		return array(
+			'current' => $current,
+			'incoming' => $incoming,
+			'changed' => $present && $incoming !== $current,
+			'applied' => false,
+		);
+	}
+
+	private function import_settings($settings, $summary, $confirm_delete_data_on_uninstall_change = false)
 	{
 		$options = Npcink_Device_Inventory_V3_Tables::options();
 		if (array_key_exists('observationRetentionDays', $settings)) {
@@ -390,10 +420,17 @@ class Npcink_Device_Inventory_Backup_Restore_Controller
 			$options['departments'] = Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($settings['departments']);
 		}
 		if (array_key_exists('deleteDataOnUninstall', $settings)) {
-			$options['delete_data_on_uninstall'] = (bool) $settings['deleteDataOnUninstall'];
+			$change = $this->describe_delete_data_on_uninstall_change($settings);
+			if (!$change['changed'] || $confirm_delete_data_on_uninstall_change) {
+				$options['delete_data_on_uninstall'] = (bool) $settings['deleteDataOnUninstall'];
+				$change['applied'] = true;
+			} else {
+				$this->add_warning($summary, '未确认更改「卸载时删除数据」开关，已保留当前站点设置。');
+			}
+			$summary['deleteDataOnUninstall'] = $change;
 		}
 
-		update_option(Npcink_Device_Inventory_V3_Tables::OPTION, $options);
+		Npcink_Device_Inventory_V3_Tables::update_options($options);
 		$summary['imported']['settings'] = 1;
 		return $summary;
 	}

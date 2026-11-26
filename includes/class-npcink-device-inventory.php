@@ -23,7 +23,7 @@
  * @since      1.0.0
  * @package    Npcink_Device_Inventory
  * @subpackage Npcink_Device_Inventory/includes
- * @author     Npcink <1355471563@qq.com>
+ * @author     Npcink (https://www.npc.ink)
  */
 class Npcink_Device_Inventory
 {
@@ -55,6 +55,8 @@ class Npcink_Device_Inventory
 	 * @var      string    $version    The current version of the plugin.
 	 */
 	protected $version;
+
+	private $schema_upgrade_failed = false;
 
 	/**
 	 * Define the core functionality of the plugin.
@@ -118,6 +120,8 @@ class Npcink_Device_Inventory
 		$plugin_admin = new Npcink_Device_Inventory_Admin($this->get_plugin_name(), $this->get_version());
 
 		$this->loader->add_action('admin_init', $this, 'maybe_upgrade');
+		$this->loader->add_action('admin_notices', $this, 'schema_upgrade_notice');
+		$this->loader->add_action('network_admin_notices', $this, 'schema_upgrade_notice');
 		$this->loader->add_action('init', $this, 'ensure_observation_cleanup_schedule');
 		$this->loader->add_action('npcink_device_inventory_cleanup_observations', $this, 'cleanup_observations');
 	}
@@ -167,6 +171,8 @@ class Npcink_Device_Inventory
 		$schema_revision = get_option('npcink_device_inventory_schema_revision');
 		$installed_version = get_option('npcink_device_inventory_plugin_version');
 		require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-npcink-device-inventory-activator.php';
+		require_once plugin_dir_path(dirname(__FILE__)) . 'includes/v3/class-npcink-device-inventory-v3-tables.php';
+		Npcink_Device_Inventory_V3_Tables::migrate_client_tokens();
 		if ($schema_revision === Npcink_Device_Inventory_Activator::SCHEMA_REVISION) {
 			if ($installed_version !== $this->version) {
 				update_option('npcink_device_inventory_plugin_version', $this->version);
@@ -174,7 +180,15 @@ class Npcink_Device_Inventory
 			return;
 		}
 
-		Npcink_Device_Inventory_Activator::upgrade_schema($schema_revision, $this->version);
+		$this->schema_upgrade_failed = !Npcink_Device_Inventory_Activator::upgrade_schema($schema_revision, $this->version);
+	}
+
+	public function schema_upgrade_notice()
+	{
+		if (!$this->schema_upgrade_failed || !current_user_can('manage_options')) {
+			return;
+		}
+		echo '<div class="notice notice-error"><p>' . esc_html__('Device Inventory could not upgrade its database tables. Check the database permissions and error log, then reload this admin page to retry. Do not uninstall the plugin to repair the tables.', 'npcink-device-inventory') . '</p></div>';
 	}
 
 	/**

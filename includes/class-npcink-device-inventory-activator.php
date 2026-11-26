@@ -25,7 +25,7 @@ if (!defined('ABSPATH')) {
  * @since      1.0.0
  * @package    Npcink_Device_Inventory
  * @subpackage Npcink_Device_Inventory/includes
- * @author     Npcink <1355471563@qq.com>
+ * @author     Npcink (https://www.npc.ink)
  */
 class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_Interface
 {
@@ -102,23 +102,27 @@ class Npcink_Device_Inventory_Activator extends Npcink_Device_Inventory_Admin_In
 	 */
 	private static function create_default_v3_options()
 	{
-		if (get_option('npcink_device_inventory_v3_options') !== false) {
-			return;
+		require_once plugin_dir_path(__FILE__) . 'v3/class-npcink-device-inventory-v3-tables.php';
+
+		if (get_option(Npcink_Device_Inventory_V3_Tables::OPTION) === false) {
+			update_option(
+				Npcink_Device_Inventory_V3_Tables::OPTION,
+				array(
+					'client_upload_base_url' => '',
+					'observation_retention_days' => 0,
+					'asset_number_prefix' => 'A',
+					'depreciation_period_months' => 36,
+					'default_residual_rate' => 5,
+					'departments' => array('未分配'),
+					'delete_data_on_uninstall' => false,
+				)
+			);
 		}
 
-		update_option(
-			'npcink_device_inventory_v3_options',
-			array(
-				'client_tokens' => array(),
-				'client_upload_base_url' => '',
-				'observation_retention_days' => 0,
-				'asset_number_prefix' => 'A',
-				'depreciation_period_months' => 36,
-				'default_residual_rate' => 5,
-				'departments' => array('未分配'),
-				'delete_data_on_uninstall' => false,
-			)
-		);
+		Npcink_Device_Inventory_V3_Tables::migrate_client_tokens();
+		if (get_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION) === false) {
+			add_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION, array(), '', false);
+		}
 	}
 
 	/**

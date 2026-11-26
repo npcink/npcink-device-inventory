@@ -38,10 +38,11 @@ export const getComparisonObservations = async (afterAssetId = 0, throughAssetId
 };
 
 export const getAssets = async (
-  params: AssetListParams
+  params: AssetListParams, signal?: AbortSignal
 ): Promise<PaginatedResult<Asset>> => {
   const response = await restInstance.get<PaginatedResult<Asset>>("/assets", {
     params,
+    signal,
     showSuccessMessage: false,
   } as RequestConfig);
   return response.data;
@@ -232,11 +233,16 @@ export const deleteClientToken = async (id: string): Promise<void> => {
 
 export const restoreBackup = async (
   backup: unknown,
-  dryRun = false
+  dryRun = false,
+  options: { confirmDeleteDataOnUninstallChange?: boolean } = {}
 ): Promise<BackupRestoreResult> => {
   const response = await restInstance.post<DataEnvelope<BackupRestoreResult>>(
     "/backup-restore",
-    { backup, dryRun },
+    {
+      backup,
+      dryRun,
+      confirmDeleteDataOnUninstallChange: Boolean(options.confirmDeleteDataOnUninstallChange),
+    },
     { showSuccessMessage: false } as RequestConfig
   );
   return unwrapData(response.data);

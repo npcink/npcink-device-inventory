@@ -1,14 +1,15 @@
 import { HelpLabel } from "@/components/HelpLabel";
-import { getAssets, getSettings } from "@/services/v3";
+import { getAsset, getAssets, getSettings } from "@/services/v3";
 import type { Asset, AssetListParams } from "@/type/v3";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Checkbox, Empty, Modal, Radio, Space, Typography, message } from "antd";
 import { useEffect, useState } from "react";
-import { fetchAllAssets } from "@/pages/shared/assets";
+import { fetchAllAssets, MAX_FULL_HARDWARE_ASSETS, FULL_HARDWARE_PAGE_SIZE } from "@/pages/shared/assets";
 import {
   AssetExportFieldKey,
   AssetExportFormat,
   AssetExportScope,
+  exportFieldsNeedHardware,
 } from "@/pages/shared/options";
 import {
   ASSET_EXPORT_STATUS_COLORS,
@@ -22,6 +23,15 @@ import {
 } from "@/pages/shared/tabular";
 
 const { Text } = Typography;
+
+const fetchExportAssetDetails = async (assets: Asset[]) => {
+  const details: Asset[] = [];
+  const batchSize = 5;
+  for (let index = 0; index < assets.length; index += batchSize) {
+    details.push(...await Promise.all(assets.slice(index, index + batchSize).map((asset) => getAsset(asset.uuid))));
+  }
+  return details;
+};
 
 export interface AssetExportModalProps {
   open: boolean;
@@ -74,17 +84,33 @@ export const AssetExportModal = ({
     return () => window.removeEventListener("resize", updatePreviewOffset);
   }, [previewOpen]);
 
+  const needsHardware = exportFieldsNeedHardware(fieldKeys);
   const previewParams = scope === "current-filter" ? currentQueryParams : scope === "selected" ? undefined : exportParams[scope];
   const previewQuery = useQuery(
-    ["v3-export-preview", scope, previewParams],
-    () => getAssets({ ...previewParams, page: 1, pageSize: 30 }),
+    ["v3-export-preview", scope, previewParams, needsHardware],
+    () => getAssets({ ...previewParams, page: 1, pageSize: needsHardware ? FULL_HARDWARE_PAGE_SIZE : 30, includeHardware: needsHardware }),
     { enabled: open && previewOpen && scope !== "selected", staleTime: 30_000 }
   );
   const selectedExportAssets = exportableAssets(selectedAssets);
-  const previewLoading = scope !== "selected" && previewQuery.isFetching;
-  const previewError = scope !== "selected" && previewQuery.isError;
-  const previewAssets = exportableAssets(scope === "selected" ? selectedAssets : previewError || previewLoading ? [] : previewQuery.data?.data || []).slice(0, 30);
+  const selectedPreviewQuery = useQuery(
+    ["v3-export-selected-preview", selectedExportAssets.map((asset) => asset.uuid), needsHardware],
+    () => fetchExportAssetDetails(selectedExportAssets.slice(0, FULL_HARDWARE_PAGE_SIZE)),
+    { enabled: open && previewOpen && scope === "selected" && needsHardware, staleTime: 30_000 }
+  );
+  const previewLoading = scope === "selected"
+    ? needsHardware && selectedPreviewQuery.isFetching
+    : previewQuery.isFetching;
+  const previewError = scope === "selected"
+    ? Boolean(needsHardware && selectedPreviewQuery.isError)
+    : previewQuery.isError;
+  const previewSource = scope === "selected"
+    ? (needsHardware ? (previewError || previewLoading ? [] : selectedPreviewQuery.data || []) : selectedAssets)
+    : (previewError || previewLoading ? [] : previewQuery.data?.data || []);
+  const previewAssets = exportableAssets(previewSource).slice(0, 30);
   const previewFields = selectedAssetExportFields(fieldKeys);
+  const knownScopeTotal = scope === "selected" ? selectedExportAssets.length : previewQuery.data?.pagination.totalItems;
+  const exceedsHardwareLimit = needsHardware && (knownScopeTotal ?? 0) > MAX_FULL_HARDWARE_ASSETS;
+  const hardwareLimitMessage = `含硬件字段的单次导出最多 ${MAX_FULL_HARDWARE_ASSETS} 条，请缩小范围或取消硬件字段。`;
   const needsSettings = fieldKeys.includes("financialResidualValue");
   const settingsReady = !needsSettings || Boolean(settingsQuery.data) && !settingsQuery.isError;
 
@@ -97,11 +123,20 @@ export const AssetExportModal = ({
       message.warning("请至少选择一个导出字段");
       return;
     }
+    if (exceedsHardwareLimit) {
+      message.warning(hardwareLimitMessage);
+      return;
+    }
     setExporting(true);
     try {
       const assets = exportableAssets(scope === "selected"
-        ? selectedAssets
-        : await fetchAllAssets(scope === "current-filter" ? currentQueryParams : exportParams[scope]));
+        ? (needsHardware
+          ? await fetchExportAssetDetails(selectedExportAssets)
+          : selectedAssets)
+        : await fetchAllAssets({
+            ...(scope === "current-filter" ? currentQueryParams : exportParams[scope]),
+            includeHardware: needsHardware,
+          }));
       if (!assets.length) {
         message.warning("当前范围没有可导出的未归档资产");
         return;
@@ -151,10 +186,11 @@ export const AssetExportModal = ({
       footer={[
         <Button key="cancel" onClick={onClose}>取消</Button>,
         <Button key="preview" disabled={!fieldKeys.length || !settingsReady} onClick={() => setPreviewOpen(true)}>预览表格</Button>,
-        <Button key="export" type="primary" loading={exporting} disabled={!fieldKeys.length || !settingsReady} onClick={exportAssets}>{format === "xlsx" ? "导出 Excel" : "导出 CSV"}</Button>,
+        <Button key="export" type="primary" loading={exporting} disabled={!fieldKeys.length || !settingsReady || exceedsHardwareLimit} onClick={exportAssets}>{format === "xlsx" ? "导出 Excel" : "导出 CSV"}</Button>,
       ]}
     >
       <div className="npcink-v3-export-config">
+        {exceedsHardwareLimit ? <Alert type="warning" showIcon message={hardwareLimitMessage} /> : null}
         {needsSettings && settingsQuery.isError ? <Alert
           type="error"
           showIcon
@@ -217,13 +253,14 @@ export const AssetExportModal = ({
       destroyOnHidden
       footer={[
         <Button key="back" onClick={() => setPreviewOpen(false)}>返回修改</Button>,
-        <Button key="export" type="primary" loading={exporting} disabled={!fieldKeys.length || !settingsReady || previewLoading || previewError} onClick={exportAssets}>{format === "xlsx" ? "确认导出 Excel" : "确认导出 CSV"}</Button>,
+        <Button key="export" type="primary" loading={exporting} disabled={!fieldKeys.length || !settingsReady || exceedsHardwareLimit || previewLoading || previewError} onClick={exportAssets}>{format === "xlsx" ? "确认导出 Excel" : "确认导出 CSV"}</Button>,
       ]}
     >
       <div className="npcink-v3-export-preview-summary">
-        <div><Text strong>{previewScopeLabel}</Text>{!previewLoading && !previewError ? <Text type="secondary">预览前 {previewAssets.length} 条，导出时包含范围内全部数据。</Text> : null}</div>
+        <div><Text strong>{previewScopeLabel}</Text>{!previewLoading && !previewError ? <Text type="secondary">预览前 {previewAssets.length} 条。</Text> : null}</div>
         <Text type="secondary">{previewTotalText} · {fieldKeys.length} 列 · {format === "xlsx" ? "Excel" : "CSV"}{format === "xlsx" ? " · 状态单元格着色" : ""}</Text>
       </div>
+      {exceedsHardwareLimit ? <Alert type="warning" showIcon message={hardwareLimitMessage} /> : null}
       {needsSettings && settingsQuery.isError ? <Alert
         type="error"
         showIcon
@@ -234,7 +271,7 @@ export const AssetExportModal = ({
         type="error"
         showIcon
         message="导出预览加载失败"
-        action={<Button onClick={() => previewQuery.refetch()}>重试</Button>}
+        action={<Button onClick={() => scope === "selected" ? selectedPreviewQuery.refetch() : previewQuery.refetch()}>重试</Button>}
       /> : previewLoading ? <div className="npcink-v3-export-preview-loading" role="status">正在加载预览…</div> : (
       <div className="npcink-v3-export-preview-table is-fullscreen">
         {fieldKeys.length && settingsReady && previewAssets.length ? <table><thead><tr>{previewFields.map((field) => <th key={field.key}>{field.label}</th>)}</tr></thead><tbody>{previewAssets.map((asset) => <tr key={asset.uuid}>{previewFields.map((field) => {

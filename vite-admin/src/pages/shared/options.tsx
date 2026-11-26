@@ -134,6 +134,19 @@ export type AssetExportFieldKey =
   | "createdAt"
   | "updatedAt";
 
+export const HARDWARE_ASSET_EXPORT_FIELD_KEYS: AssetExportFieldKey[] = [
+  "cpu",
+  "memory",
+  "disk",
+  "ip",
+  "graphics",
+  "deviceModel",
+  "baseboard",
+];
+
+export const exportFieldsNeedHardware = (fieldKeys: AssetExportFieldKey[]) =>
+  fieldKeys.some((key) => HARDWARE_ASSET_EXPORT_FIELD_KEYS.includes(key));
+
 export type AssetExportScope = "current-filter" | "selected" | "computer" | "custom" | "all";
 
 export type AssetExportFormat = "xlsx" | "csv";

@@ -313,11 +313,24 @@ class Npcink_Device_Inventory_Backup_Export_Service
 			'observationId' => isset($row['observation_uuid']) ? (string) $row['observation_uuid'] : null,
 			'payloadHash' => isset($row['payload_hash']) ? (string) $row['payload_hash'] : null,
 			'observedAt' => (string) $row['observed_at'],
-			'receivedAt' => (string) $row['received_at'],
+			'receivedAt' => $this->format_utc_datetime(isset($row['received_at']) ? $row['received_at'] : ''),
 			'summary' => $this->decode_json($row['summary_json']),
 			'hardware' => $this->decode_json($row['hardware_json']),
 			'raw' => $this->decode_json($row['raw_json']),
 		);
+	}
+
+	private function format_utc_datetime($value)
+	{
+		$value = trim((string) $value);
+		if ($value === '') {
+			return '';
+		}
+		$value = str_replace(' ', 'T', $value);
+		if (preg_match('/(?:Z|[+-]\d{2}:\d{2})$/', $value)) {
+			return $value;
+		}
+		return $value . 'Z';
 	}
 
 	private function decode_json($value)

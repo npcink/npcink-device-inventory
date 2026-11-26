@@ -12,6 +12,7 @@ test("version gate rejects a Tauri API minor incompatible with the resolved Rust
   try {
     const files = [
       "scripts/check-version-contract.mjs", "npcink-device-inventory.php", "README.txt",
+      "docs/github-release.md",
       "ele-rs/package.json", "ele-rs/package-lock.json", "ele-rs/Cargo.toml", "ele-rs/Cargo.lock",
       "ele-rs/src-tauri/tauri.conf.json", "ele-rs/src-tauri/Cargo.toml", "ele-rs/src-tauri/Cargo.lock",
       "ele-rs/src/collector/mod.rs", "ele-rs/scripts/windows-smoke-test.ps1",

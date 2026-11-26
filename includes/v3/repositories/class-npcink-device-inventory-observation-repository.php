@@ -66,6 +66,9 @@ class Npcink_Device_Inventory_Observation_Repository
 			'payload_hash' => isset($observation['payload_hash']) ? $observation['payload_hash'] : null,
 			'schema_version' => intval($observation['schema_version']),
 			'observed_at' => sanitize_text_field($observation['observed_at']),
+			'received_at' => isset($observation['received_at']) && $observation['received_at'] !== ''
+				? sanitize_text_field($observation['received_at'])
+				: gmdate('Y-m-d H:i:s'),
 			'summary_json' => Npcink_Device_Inventory_V3_Sanitizer::json_encode($observation['summary']),
 			'hardware_json' => Npcink_Device_Inventory_V3_Sanitizer::json_encode($observation['hardware']),
 			'raw_json' => Npcink_Device_Inventory_V3_Sanitizer::json_encode($observation['raw']),
@@ -75,7 +78,7 @@ class Npcink_Device_Inventory_Observation_Repository
 		$result = $wpdb->insert(
 			Npcink_Device_Inventory_V3_Tables::observations(),
 			$row,
-			array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s')
+			array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s')
 		);
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		if ($result === false) {
@@ -236,16 +239,35 @@ class Npcink_Device_Inventory_Observation_Repository
 		return $result;
 	}
 
-	public function daily_counts_between($start_at, $end_at)
+	public function daily_counts_between($start_at, $end_at, $day_ranges = array())
 	{
 		global $wpdb;
 		$start_at = sanitize_text_field((string) $start_at);
 		$end_at = sanitize_text_field((string) $end_at);
+		$normalized_ranges = array();
+		if (is_array($day_ranges)) {
+			foreach ($day_ranges as $range) {
+				if (!is_array($range)) {
+					continue;
+				}
+				$date = isset($range['date']) ? sanitize_text_field((string) $range['date']) : '';
+				$range_start = isset($range['start_utc']) ? sanitize_text_field((string) $range['start_utc']) : '';
+				$range_end = isset($range['end_utc']) ? sanitize_text_field((string) $range['end_utc']) : '';
+				if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) && $range_start !== '' && $range_end !== '') {
+					$normalized_ranges[] = array(
+						'date' => $date,
+						'start_utc' => $range_start,
+						'end_utc' => $range_end,
+					);
+				}
+			}
+		}
 		$cache_key = $this->build_cache_key(
 			'daily-counts',
 			array(
 				'start_at' => $start_at,
 				'end_at' => $end_at,
+				'day_ranges' => $normalized_ranges,
 				'version' => $this->get_list_cache_version(),
 			)
 		);
@@ -256,23 +278,49 @@ class Npcink_Device_Inventory_Observation_Repository
 
 		$observations_table = Npcink_Device_Inventory_V3_Tables::observations();
 		$assets_table = Npcink_Device_Inventory_V3_Tables::assets();
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned aggregate is bounded to the requested date range and cached.
-		$rows = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT DATE(o.observed_at) AS day, COUNT(*) AS count
+		if ($normalized_ranges) {
+			$cases = array();
+			$case_args = array();
+			foreach ($normalized_ranges as $range) {
+				$cases[] = 'WHEN o.observed_at >= %s AND o.observed_at < %s THEN %s';
+				$case_args[] = $range['start_utc'];
+				$case_args[] = $range['end_utc'];
+				$case_args[] = $range['date'];
+			}
+			$case_sql = 'CASE ' . implode(' ', $cases) . ' END';
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Case branches are generated placeholders only; every bound value is passed to prepare.
+			$query = "SELECT {$case_sql} AS day, COUNT(*) AS count
 				FROM %i o
 				INNER JOIN %i a ON a.id = o.asset_id
 				WHERE a.status <> 'deleted' AND o.observed_at >= %s AND o.observed_at < %s
-				GROUP BY DATE(o.observed_at)
-				ORDER BY day ASC",
-				$observations_table,
-				$assets_table,
-				$start_at,
-				$end_at
-			),
-			ARRAY_A
-		);
-		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery
+				GROUP BY 1
+				HAVING day IS NOT NULL
+				ORDER BY day ASC";
+			// phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- The generated CASE contains only placeholders; prepare binds every date, boundary and table name.
+			$rows = $wpdb->get_results(
+				$wpdb->prepare($query, array_merge($case_args, array($observations_table, $assets_table, $start_at, $end_at))),
+				ARRAY_A
+			);
+			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		} else {
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned aggregate is bounded to the requested date range and cached.
+			$rows = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT DATE(o.observed_at) AS day, COUNT(*) AS count
+					FROM %i o
+					INNER JOIN %i a ON a.id = o.asset_id
+					WHERE a.status <> 'deleted' AND o.observed_at >= %s AND o.observed_at < %s
+					GROUP BY DATE(o.observed_at)
+					ORDER BY day ASC",
+					$observations_table,
+					$assets_table,
+					$start_at,
+					$end_at
+				),
+				ARRAY_A
+			);
+			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery
+		}
 
 		$result = $rows ?: array();
 		wp_cache_set($cache_key, $result, self::CACHE_GROUP, self::CACHE_TTL);

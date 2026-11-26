@@ -196,10 +196,12 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (!in_array($financial_data_status, $allowed_financial_statuses, true)) {
 			return Npcink_Device_Inventory_V3_Response::error('invalid_financial_data_status', 'Financial data status is not supported.', 422);
 		}
+		$include_hardware = $this->wants_full_hardware($request);
 		$result = $this->assets->list_assets(
 			array(
 				'page' => $request->get_param('page') ?: 1,
 				'pageSize' => $request->get_param('pageSize') ?: 20,
+				'include_hardware' => $include_hardware,
 				'search' => $request->get_param('search'),
 				'asset_type' => $request->get_param('assetType'),
 				'asset_scope' => $request->get_param('assetScope'),
@@ -564,19 +566,52 @@ class Npcink_Device_Inventory_Assets_Controller
 
 	public function get_collection_trends($request)
 	{
+		$timezone = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+		return rest_ensure_response(
+			array(
+				'data' => $this->collection_trends_for_date(current_time('Y-m-d'), $timezone),
+			)
+		);
+	}
+
+	/**
+	 * Build the 30-day collection trend in the site timezone.
+	 * $today is a Y-m-d local calendar date; stored observed_at values stay UTC.
+	 */
+	public function collection_trends_for_date($today, $timezone)
+	{
 		$days = 30;
-		$today = current_time('Y-m-d');
-		$today_date = DateTimeImmutable::createFromFormat('!Y-m-d', $today);
-		if (!$today_date) {
-			$today_date = new DateTimeImmutable($today);
+		if (!$timezone instanceof DateTimeZone) {
+			$timezone = new DateTimeZone('UTC');
+		}
+		$utc = new DateTimeZone('UTC');
+		$today = is_string($today) ? $today : '';
+		$today_date = DateTimeImmutable::createFromFormat('!Y-m-d', $today, $utc);
+		if (!$today_date || $today_date->format('Y-m-d') !== $today) {
+			$today = (new DateTimeImmutable('now', $timezone))->format('Y-m-d');
+			$today_date = new DateTimeImmutable($today, $utc);
 		}
 		$start = $today_date->modify('-' . ($days - 1) . ' days');
-		$end = $today_date->modify('+1 day');
-		$start_date = $start->format('Y-m-d');
-		$end_date = $end->format('Y-m-d');
+		// Enumerate calendar labels separately so a skipped midnight cannot shift later boundaries.
+		$boundaries = array();
+		for ($offset = 0; $offset <= $days; $offset++) {
+			$label = $start->modify('+' . $offset . ' days')->format('Y-m-d');
+			$boundary = new DateTimeImmutable($label . ' 00:00:00', $timezone);
+			$boundaries[] = array($label, $boundary->setTimezone($utc)->format('Y-m-d H:i:s'));
+		}
+		$day_ranges = array();
+		for ($offset = 0; $offset < $days; $offset++) {
+			$day_ranges[] = array(
+				'date' => $boundaries[$offset][0],
+				'start_utc' => $boundaries[$offset][1],
+				'end_utc' => $boundaries[$offset + 1][1],
+			);
+		}
+		$start_utc = $boundaries[0][1];
+		$end_utc = $boundaries[$days][1];
 		$counts_by_day = array();
 
-		foreach ($this->observations->daily_counts_between($start_date . ' 00:00:00', $end_date . ' 00:00:00') as $row) {
+		foreach ($this->observations->daily_counts_between($start_utc, $end_utc, $day_ranges) as $row) {
 			$day = isset($row['day']) ? sanitize_text_field((string) $row['day']) : '';
 			if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $day)) {
 				$counts_by_day[$day] = intval(isset($row['count']) ? $row['count'] : 0);
@@ -584,23 +619,19 @@ class Npcink_Device_Inventory_Assets_Controller
 		}
 
 		$collection = array();
-		for ($offset = 0; $offset < $days; $offset++) {
-			$day = $start->modify('+' . $offset . ' days')->format('Y-m-d');
+		foreach ($day_ranges as $range) {
+			$day = $range['date'];
 			$collection[] = array(
 				'date' => $day,
 				'count' => isset($counts_by_day[$day]) ? $counts_by_day[$day] : 0,
 			);
 		}
 
-		return rest_ensure_response(
-			array(
-				'data' => array(
-					'days' => $days,
-					'startDate' => $start_date,
-					'endDate' => $today,
-					'collection' => $collection,
-				),
-			)
+		return array(
+			'days' => $days,
+			'startDate' => $start->format('Y-m-d'),
+			'endDate' => $today,
+			'collection' => $collection,
 		);
 	}
 
@@ -871,6 +902,15 @@ class Npcink_Device_Inventory_Assets_Controller
 		return $asset;
 	}
 
+	private function wants_full_hardware($request)
+	{
+		$value = $request->get_param('includeHardware');
+		if (function_exists('rest_sanitize_boolean')) {
+			return (bool) rest_sanitize_boolean($value);
+		}
+		return $value === true || $value === 1 || $value === '1' || $value === 'true';
+	}
+
 	public function format_asset($row)
 	{
 		if (!$row) {
@@ -894,13 +934,15 @@ class Npcink_Device_Inventory_Assets_Controller
 			'createdAt' => (string) $row['created_at'],
 			'updatedAt' => (string) $row['updated_at'],
 		);
-		if (array_key_exists('latest_summary_json', $row)) {
+		if (array_key_exists('latest_summary_json', $row) || array_key_exists('latest_observed_at', $row)) {
 			$item['latestObservation'] = array(
 				'summary' => $this->decode_json(isset($row['latest_summary_json']) ? $row['latest_summary_json'] : '', array()),
-				'hardware' => $this->decode_json(isset($row['latest_hardware_json']) ? $row['latest_hardware_json'] : '', array()),
 				'observedAt' => $this->format_utc_datetime(isset($row['latest_observed_at']) ? $row['latest_observed_at'] : ''),
 				'source' => isset($row['latest_observation_source']) ? (string) $row['latest_observation_source'] : '',
 			);
+			if (array_key_exists('latest_hardware_json', $row)) {
+				$item['latestObservation']['hardware'] = $this->decode_json($row['latest_hardware_json'], array());
+			}
 		}
 		return $item;
 	}
@@ -927,7 +969,7 @@ class Npcink_Device_Inventory_Assets_Controller
 			'source' => (string) $row['source'],
 			'schemaVersion' => intval($row['schema_version']),
 			'observedAt' => $this->format_utc_datetime(isset($row['observed_at']) ? $row['observed_at'] : ''),
-			'receivedAt' => (string) $row['received_at'],
+			'receivedAt' => $this->format_utc_datetime(isset($row['received_at']) ? $row['received_at'] : ''),
 			'summary' => $this->decode_json(isset($row['summary_json']) ? $row['summary_json'] : '', array()),
 			'hardware' => $this->decode_json(isset($row['hardware_json']) ? $row['hardware_json'] : '', array()),
 			'raw' => $this->decode_json(isset($row['raw_json']) ? $row['raw_json'] : '', array()),
@@ -966,7 +1008,11 @@ class Npcink_Device_Inventory_Assets_Controller
 		if ($value === '') {
 			return '';
 		}
-		return str_replace(' ', 'T', $value) . 'Z';
+		$value = str_replace(' ', 'T', $value);
+		if (preg_match('/(?:Z|[+-]\d{2}:\d{2})$/', $value)) {
+			return $value;
+		}
+		return $value . 'Z';
 	}
 
 	private function format_asset_reference($row)

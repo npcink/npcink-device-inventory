@@ -19,7 +19,7 @@ export interface Asset {
   metadata: JsonRecord;
   latestObservation?: {
     summary: JsonRecord;
-    hardware: JsonRecord;
+    hardware?: JsonRecord;
     observedAt: string;
     source: string;
   };
@@ -158,6 +158,7 @@ export interface AssetListParams {
   financialDataStatus?: "missing_purchase_price" | "missing_second_hand_market_value" | "missing_both" | "complete";
   sortBy?: "latestUpload" | "latestObserved" | "updated";
   includeDeleted?: boolean;
+  includeHardware?: boolean;
 }
 
 export interface EventListParams {
@@ -237,6 +238,12 @@ export interface BackupRestoreSummary {
   };
   conflicts: string[];
   warnings: string[];
+  deleteDataOnUninstall?: {
+    current: boolean;
+    incoming: boolean | null;
+    changed: boolean;
+    applied: boolean;
+  };
 }
 
 export interface BackupRestoreResult {

@@ -99,6 +99,11 @@ class Npcink_Device_Inventory_V3_Tables
 	{
 		return self::$options;
 	}
+
+	public static function client_tokens()
+	{
+		return isset(self::$options['client_tokens']) && is_array(self::$options['client_tokens']) ? self::$options['client_tokens'] : array();
+	}
 }
 
 $npcink_upload_clock = time();

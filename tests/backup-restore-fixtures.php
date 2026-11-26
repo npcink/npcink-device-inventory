@@ -256,12 +256,26 @@ function rest_ensure_response($value)
 
 function get_option($name, $fallback = false)
 {
+	global $npcink_current_options;
+	if (class_exists('Npcink_Device_Inventory_V3_Tables') && $name === Npcink_Device_Inventory_V3_Tables::OPTION && is_array($npcink_current_options)) {
+		return $npcink_current_options;
+	}
 	return $fallback;
 }
 
-function update_option($name, $value)
+function update_option($name, $value, $autoload = null)
 {
 	global $npcink_updated_options;
+	$npcink_updated_options[$name] = $value;
+	return true;
+}
+
+function add_option($name, $value, $deprecated = '', $autoload = true)
+{
+	global $npcink_updated_options;
+	if (array_key_exists($name, $npcink_updated_options)) {
+		return false;
+	}
 	$npcink_updated_options[$name] = $value;
 	return true;
 }
@@ -295,19 +309,19 @@ require_once __DIR__ . '/../includes/v3/rest/class-npcink-device-inventory-backu
 $wpdb = new Npcink_Test_Wpdb();
 $npcink_updated_options = array();
 
-function npcink_request($backup, $dry_run)
+function npcink_request($backup, $dry_run, $extra = array())
 {
 	$request = new WP_REST_Request();
-	$body = wp_json_encode(array('backup' => $backup, 'dryRun' => $dry_run));
+	$body = wp_json_encode(array_merge(array('backup' => $backup, 'dryRun' => $dry_run), $extra));
 	$request->set_body($body);
 	$request->set_header('content-length', strlen($body));
 	return $request;
 }
 
-function npcink_restore($backup, $dry_run = true)
+function npcink_restore($backup, $dry_run = true, $extra = array())
 {
 	$controller = new Npcink_Device_Inventory_Backup_Restore_Controller();
-	return $controller->restore_backup(npcink_request($backup, $dry_run));
+	return $controller->restore_backup(npcink_request($backup, $dry_run, $extra));
 }
 
 function npcink_export($sections)
@@ -455,6 +469,37 @@ npcink_assert($restored_options['renewal_age_years'] === 7, 'restore must apply 
 npcink_assert($restored_options['renewal_min_memory_gb'] === 16, 'restore must apply the renewal memory threshold');
 npcink_assert($restored_options['renewal_min_disk_gb'] === 512, 'restore must apply the renewal disk threshold');
 npcink_assert($restored_options['renewal_max_residual_rate'] === 15.0, 'restore must apply the renewal residual threshold');
+
+$uninstall_backup = array(
+	'schema' => 'npcink-device-inventory/v3-admin-export',
+	'exportedAt' => '2026-07-06T00:00:00+00:00',
+	'settings' => array(
+		'renewalAgeYears' => 8,
+		'deleteDataOnUninstall' => true,
+	),
+);
+$npcink_current_options = array('delete_data_on_uninstall' => false);
+$npcink_updated_options = array();
+$uninstall_preview = npcink_data(npcink_restore($uninstall_backup, true));
+npcink_assert($uninstall_preview['data']['dryRun'] === true, 'uninstall-switch preview must remain a dry run');
+npcink_assert($npcink_updated_options === array(), 'uninstall-switch preview must not write options');
+$preview_change = $uninstall_preview['data']['summary']['deleteDataOnUninstall'];
+npcink_assert($preview_change['current'] === false && $preview_change['incoming'] === true && $preview_change['changed'] === true, 'preview must compare current and incoming deleteDataOnUninstall values');
+npcink_assert($preview_change['applied'] === false, 'preview must not mark the uninstall switch as applied');
+
+$npcink_updated_options = array();
+$unconfirmed = npcink_data(npcink_restore($uninstall_backup, false));
+$unconfirmed_options = $npcink_updated_options[Npcink_Device_Inventory_V3_Tables::OPTION];
+npcink_assert($unconfirmed_options['renewal_age_years'] === 8, 'unconfirmed import must still apply other settings');
+npcink_assert($unconfirmed_options['delete_data_on_uninstall'] === false, 'unconfirmed import must leave deleteDataOnUninstall unchanged');
+npcink_assert($unconfirmed['data']['summary']['deleteDataOnUninstall']['applied'] === false, 'unconfirmed import must report that the uninstall switch was not applied');
+
+$npcink_updated_options = array();
+$confirmed = npcink_data(npcink_restore($uninstall_backup, false, array('confirmDeleteDataOnUninstallChange' => true)));
+$confirmed_options = $npcink_updated_options[Npcink_Device_Inventory_V3_Tables::OPTION];
+npcink_assert($confirmed_options['delete_data_on_uninstall'] === true, 'confirmed import must apply the incoming deleteDataOnUninstall value');
+npcink_assert($confirmed['data']['summary']['deleteDataOnUninstall']['applied'] === true, 'confirmed import must report that the uninstall switch was applied');
+$npcink_current_options = null;
 
 $wpdb->commands = array();
 $wpdb->fail_command = 'COMMIT';

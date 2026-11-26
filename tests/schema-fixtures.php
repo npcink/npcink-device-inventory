@@ -6,8 +6,13 @@ file_put_contents($fixture_root . 'wp-admin/includes/upgrade.php', '<?php // dbD
 define('ABSPATH', $fixture_root);
 define('NPCINK_DEVICE_INVENTORY_VERSION', '3.2.3');
 $options = array();
-function get_option($key) { global $options; return isset($options[$key]) ? $options[$key] : false; }
-function update_option($key, $value) { global $options; $options[$key] = $value; return true; }
+$can_manage = true;
+function plugin_dir_path($path) { return dirname($path) . '/'; }
+function current_user_can($capability) { global $can_manage; return $capability === 'manage_options' && $can_manage; }
+function esc_html__($text, $domain) { return htmlspecialchars($text, ENT_QUOTES, 'UTF-8'); }
+function get_option($key, $default = false) { global $options; return $options[$key] ?? $default; }
+function update_option($key, $value, $autoload = null) { global $options; $options[$key] = $value; return true; }
+function add_option($key, $value, $deprecated = '', $autoload = true) { global $options; if (array_key_exists($key, $options)) { return false; } $options[$key] = $value; return true; }
 function dbDelta($sql) {
 	global $wpdb;
 	$wpdb->definitions[] = $sql;
@@ -35,6 +40,10 @@ class Npcink_Schema_Db {
 }
 require_once __DIR__ . '/../admin/partials/npcink-device-inventory-admin-interface.php';
 require_once __DIR__ . '/../includes/class-npcink-device-inventory-activator.php';
+require_once __DIR__ . '/../includes/class-npcink-device-inventory.php';
+class Npcink_Schema_Plugin extends Npcink_Device_Inventory {
+	public function __construct() { $this->version = NPCINK_DEVICE_INVENTORY_VERSION; }
+}
 function npcink_schema_assert($condition, $message) { if (!$condition) { throw new RuntimeException($message); } }
 try {
 	$wpdb = new Npcink_Schema_Db();
@@ -58,6 +67,20 @@ try {
 	$wpdb = new Npcink_Schema_Db();
 	$wpdb->receipt_columns = 1;
 	npcink_schema_assert(!Npcink_Device_Inventory_Activator::run(), 'Incomplete upload receipt columns must not mark schema ready.');
+	$plugin = new Npcink_Schema_Plugin();
+	$notice = static function () use ($plugin) {
+		ob_start();
+		$plugin->schema_upgrade_notice();
+		return ob_get_clean();
+	};
+	$plugin->maybe_upgrade();
+	npcink_schema_assert(!$options && strpos($notice(), 'could not upgrade its database tables') !== false, 'Failed admin upgrade must show an actionable error and not claim readiness.');
+	$can_manage = false;
+	npcink_schema_assert($notice() === '', 'Database upgrade error must not be rendered to non-admins.');
+	$can_manage = true;
+	$wpdb->receipt_columns = 2;
+	$plugin->maybe_upgrade();
+	npcink_schema_assert($notice() === '' && get_option('npcink_device_inventory_schema_revision') === Npcink_Device_Inventory_Activator::SCHEMA_REVISION, 'A successful retry must clear the notice and mark readiness.');
 	echo "Current schema fixture checks passed.\n";
 } finally {
 	unlink($fixture_root . 'wp-admin/includes/upgrade.php');

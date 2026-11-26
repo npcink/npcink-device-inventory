@@ -24,8 +24,7 @@ class Npcink_Device_Inventory_Token_Auth_Service
 
 	public function verify_request(WP_REST_Request $request)
 	{
-		$options = Npcink_Device_Inventory_V3_Tables::options();
-		$tokens = isset($options['client_tokens']) && is_array($options['client_tokens']) ? $options['client_tokens'] : array();
+		$tokens = Npcink_Device_Inventory_V3_Tables::client_tokens();
 		$token_id = (string) $request->get_header('x-npcink-device-token-id');
 		$timestamp = (string) $request->get_header('x-npcink-device-timestamp');
 		$nonce = (string) $request->get_header('x-npcink-device-nonce');

@@ -1756,7 +1756,7 @@ fn configure_command_window(command: &mut Command) {
     command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(not(target_os = "windows"), any(target_os = "macos", test)))]
 fn configure_command_window(_command: &mut Command) {}
 
 fn insert_empty_if_missing(root: &mut Map<String, Value>, key: &str) {

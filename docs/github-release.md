@@ -6,19 +6,22 @@ assets. Preview builds remain unsigned packaging checks, not updater acceptance.
 
 ## Versions and source
 
-Current development candidate: plugin **3.2.4**, Device Agent **0.4.7**. The previous
-formal release is plugin 3.2.3 with Agent 0.4.4. Do not reuse either old version.
+Current development candidate: plugin **3.2.4**, recommended Device Agent **0.4.7**.
+Device Agent **0.4.6** remains the minimum compatible client because both use
+request signature v2. The previous formal release is plugin 3.2.3 with Agent 0.4.4.
+Do not reuse those older published versions.
 
 Commit all intended source and record the candidate commit before tagging. The
 workflow reads the latest published release as its baseline, checks strictly
 increasing plugin/desktop versions, and compares changed paths against that
 published tag. Unpublished candidate tags do not become the release baseline.
 
-This release changes both ends of the upload contract: request signature v2 is
-mandatory. Install the matching Agent and plugin together; old Agent signatures
-are rejected, while existing authorization codes remain valid. Use HTTPS without
-redirects. Back up the actual database before updating, and rehearse restore and
-upgrade using a copy of the previous site's data in an isolated environment.
+This release requires request signature v2. Install the recommended Agent with
+this plugin when possible; Device Agent 0.4.6 remains compatible. Pre-v2 Agent
+signatures are rejected, while existing authorization codes remain valid. Use
+HTTPS without redirects. Back up the actual database before updating, and
+rehearse restore and upgrade using a copy of the previous site's data in an
+isolated environment.
 
 ## Local checks
 

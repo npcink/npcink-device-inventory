@@ -13,6 +13,23 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Uninstall')) {
 		{
 			require_once plugin_dir_path(dirname(dirname(__FILE__))) . 'includes/v3/class-npcink-device-inventory-v3-tables.php';
 
+			if (function_exists('is_multisite') && is_multisite() && function_exists('get_sites') && function_exists('switch_to_blog') && function_exists('restore_current_blog')) {
+				foreach ((array) get_sites(array('fields' => 'ids', 'number' => 0)) as $site_id) {
+					switch_to_blog((int) $site_id);
+					try {
+						self::run_for_current_site();
+					} finally {
+						restore_current_blog();
+					}
+				}
+				return;
+			}
+
+			self::run_for_current_site();
+		}
+
+		private static function run_for_current_site()
+		{
 			$options = Npcink_Device_Inventory_V3_Tables::options();
 			if (empty($options['delete_data_on_uninstall'])) {
 				return;
@@ -27,6 +44,7 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Uninstall')) {
 				)
 			);
 			delete_option(Npcink_Device_Inventory_V3_Tables::OPTION);
+			delete_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION);
 			delete_option('npcink_device_inventory_data_model_version');
 			delete_option('npcink_device_inventory_plugin_version');
 			delete_option('npcink_device_inventory_schema_revision');

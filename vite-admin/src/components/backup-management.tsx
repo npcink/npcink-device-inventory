@@ -106,6 +106,7 @@ export const BackupRestoreModal = ({ open, onClose, onImported }: BackupRestoreM
   const [backup, setBackup] = useState<unknown>(null);
   const [summary, setSummary] = useState<BackupRestoreSummary | null>(null);
   const [restoreConfirmed, setRestoreConfirmed] = useState(false);
+  const [uninstallSwitchConfirmed, setUninstallSwitchConfirmed] = useState(false);
   const previewMutation = useMutation(
     async (text: string) => {
       const parsed = JSON.parse(text);
@@ -117,12 +118,14 @@ export const BackupRestoreModal = ({ open, onClose, onImported }: BackupRestoreM
         setBackup(result.parsed);
         setSummary(result.summary);
         setRestoreConfirmed(false);
+        setUninstallSwitchConfirmed(false);
         message.success("备份文件校验通过");
       },
       onError: (error) => {
         setBackup(null);
         setSummary(null);
         setRestoreConfirmed(false);
+        setUninstallSwitchConfirmed(false);
         if (!axios.isAxiosError(error)) {
           message.error(error instanceof SyntaxError ? "JSON 格式不正确，请检查备份文件是否完整" : error instanceof Error ? error.message : "备份文件校验失败");
         }
@@ -134,7 +137,9 @@ export const BackupRestoreModal = ({ open, onClose, onImported }: BackupRestoreM
       if (!backup) {
         throw new Error("请先校验备份文件");
       }
-      return restoreBackup(backup, false);
+      return restoreBackup(backup, false, {
+        confirmDeleteDataOnUninstallChange: Boolean(summary?.deleteDataOnUninstall?.changed) && uninstallSwitchConfirmed,
+      });
     },
     {
       onSuccess: (result) => {
@@ -144,11 +149,13 @@ export const BackupRestoreModal = ({ open, onClose, onImported }: BackupRestoreM
         setBackup(null);
         setSummary(null);
         setRestoreConfirmed(false);
+        setUninstallSwitchConfirmed(false);
         onImported();
         onClose();
       },
       onError: (error) => {
         setRestoreConfirmed(false);
+        setUninstallSwitchConfirmed(false);
         if (!axios.isAxiosError(error)) {
           message.error(error instanceof Error ? error.message : "JSON 备份导入失败");
         }
@@ -162,6 +169,7 @@ export const BackupRestoreModal = ({ open, onClose, onImported }: BackupRestoreM
       setBackup(null);
       setSummary(null);
       setRestoreConfirmed(false);
+      setUninstallSwitchConfirmed(false);
       previewMutation.reset();
       restoreMutation.reset();
     }
@@ -216,7 +224,7 @@ export const BackupRestoreModal = ({ open, onClose, onImported }: BackupRestoreM
           key="restore"
           type="primary"
           danger
-          disabled={!backup || !summary || hasConflicts || !restoreConfirmed}
+          disabled={!backup || !summary || hasConflicts || !restoreConfirmed || (Boolean(summary?.deleteDataOnUninstall?.changed) && !uninstallSwitchConfirmed)}
           loading={restoreMutation.isLoading}
           onClick={() => restoreMutation.mutate()}
         >
@@ -246,6 +254,7 @@ export const BackupRestoreModal = ({ open, onClose, onImported }: BackupRestoreM
               setBackup(null);
               setSummary(null);
               setRestoreConfirmed(false);
+              setUninstallSwitchConfirmed(false);
               parseSource(text);
             };
             reader.readAsText(file);
@@ -259,6 +268,7 @@ export const BackupRestoreModal = ({ open, onClose, onImported }: BackupRestoreM
             setBackup(null);
             setSummary(null);
             setRestoreConfirmed(false);
+            setUninstallSwitchConfirmed(false);
           }}
           placeholder="粘贴从本插件“JSON 备份导出”生成的备份内容"
         />
@@ -326,6 +336,23 @@ export const BackupRestoreModal = ({ open, onClose, onImported }: BackupRestoreM
                 </Tag>
               ))}
             </div>
+            {summary.deleteDataOnUninstall?.changed ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="备份将更改「卸载时删除数据」"
+                description={`当前站点为「${summary.deleteDataOnUninstall.current ? "删除数据" : "保留数据"}」，备份为「${summary.deleteDataOnUninstall.incoming ? "删除数据" : "保留数据"}」。这只影响以后卸载本插件时是否删除业务数据，不会在导入时立即删数。`}
+              />
+            ) : null}
+            {summary.deleteDataOnUninstall?.changed ? (
+              <Checkbox
+                checked={uninstallSwitchConfirmed}
+                disabled={hasConflicts}
+                onChange={(event) => setUninstallSwitchConfirmed(event.target.checked)}
+              >
+                {`我确认将「卸载时删除数据」从${summary.deleteDataOnUninstall.current ? "删除数据" : "保留数据"}改为${summary.deleteDataOnUninstall.incoming ? "删除数据" : "保留数据"}`}
+              </Checkbox>
+            ) : null}
             <Checkbox
               checked={restoreConfirmed}
               disabled={hasConflicts}
