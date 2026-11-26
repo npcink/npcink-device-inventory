@@ -95,6 +95,18 @@ export const batchAssets = async (
   return unwrapData(response.data);
 };
 
+export const lookupImportAssets = async (assetNumbers: string[], signal?: AbortSignal): Promise<Asset[]> => {
+  const matches: Asset[] = [];
+  for (let offset = 0; offset < assetNumbers.length; offset += 100) {
+    const response = await restInstance.post<DataEnvelope<Asset[]>>(
+      "/assets/import/lookup", { assetNumbers: assetNumbers.slice(offset, offset + 100) },
+      { signal, showSuccessMessage: false } as RequestConfig,
+    );
+    matches.push(...unwrapData(response.data));
+  }
+  return matches;
+};
+
 export const importAssets = async (items: AssetImportWriteItem[]): Promise<AssetImportWriteResult> => {
   const response = await restInstance.post<DataEnvelope<AssetImportWriteResult>>(
     "/assets/import",

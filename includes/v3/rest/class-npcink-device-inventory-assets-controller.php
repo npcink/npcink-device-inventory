@@ -68,6 +68,17 @@ class Npcink_Device_Inventory_Assets_Controller
 				'permission_callback' => array($this, 'admin_permissions_check'),
 			)
 		);
+		register_rest_route('npcink-device-inventory/v1', '/assets/import/lookup', array(
+			'methods' => WP_REST_Server::CREATABLE,
+			'callback' => array($this, 'lookup_import_assets'),
+			'permission_callback' => array($this, 'admin_permissions_check'),
+			'args' => array(
+				'assetNumbers' => array(
+					'type' => 'array', 'required' => true, 'minItems' => 1, 'maxItems' => self::MAX_BATCH_SIZE,
+					'items' => array('type' => 'string', 'minLength' => 1, 'maxLength' => 64),
+				),
+			),
+		));
 
 		register_rest_route(
 			'npcink-device-inventory/v1',
@@ -423,6 +434,18 @@ class Npcink_Device_Inventory_Assets_Controller
 				),
 			)
 		);
+	}
+
+	public function lookup_import_assets($request)
+	{
+		$numbers = array_values(array_unique(array_filter(array_map('sanitize_text_field', $request->get_param('assetNumbers')), static function ($number) {
+			return $number !== '';
+		})));
+		$rows = $this->assets->find_import_matches($numbers);
+		if ($rows === null) {
+			return Npcink_Device_Inventory_V3_Response::error('import_lookup_failed', 'Could not check asset numbers.', 500);
+		}
+		return rest_ensure_response(array('data' => array_map(array($this, 'format_asset'), $rows)));
 	}
 
 	public function import_items($request)

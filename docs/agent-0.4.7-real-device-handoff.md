@@ -1,6 +1,6 @@
 # Agent 0.4.7 实机验收执行与交接
 
-审计修复候选 `f86443a` 的 Windows/macOS 实机验收仍待用户单独执行，见[最终候选待办](audit-candidate-closeout-2026-11-26.md#实机验收待办)。下文安装包哈希、路径和已有结果是 `3b55a64` 的历史预览证据；验证本轮候选时沿用执行矩阵，不沿用旧包或旧结果。确认新包对应候选源码后，再记录实际安装包的来源和 SHA-256。
+审计修复候选 `0a21250383e36a90b82dc4970dc15620e09f8ec6` 的预览来源是 [构建 45770424816](https://github.com/npcink/npcink-device-inventory/actions/runs/45770424816)。Windows/macOS 实机仍待执行，见[最终候选待办](audit-candidate-closeout-2026-11-26.md#实机验收待办)。下文安装包哈希、路径和已有结果是 `3b55a64` 的历史预览证据；验证本轮候选时沿用执行矩阵，不沿用旧包或旧结果。核对本轮收执的实际文件哈希后再安装。
 
 本清单用于原 M4 和指定 Windows 电脑。M4 已自建 Docker 站点并完成[上传核心链路验收](m4-docker-upload-acceptance-2026-11-17.md)，也已完成原 CI 安装包的安装、原生启动采集和空闲 quit AppleEvent 退出；安装版 GUI、重试期间关闭/退出、系统代理路径和 Windows 实机项目仍为 pending。用户选择先完成无需桌面操作的检查，GUI 稍后验收；已有结果见[验收证据](agent-0.4.7-acceptance-2026-11-17.md)。不要用原生探针、空闲退出或 CI 源码采集 smoke 代替其余安装版验收。
 

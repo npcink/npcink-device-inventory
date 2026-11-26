@@ -44,6 +44,12 @@
 
 ## 合并与清理交接
 
-此次只补文档。PR 尚未合并，候选及临时 worktree 和分支保留。决定合并前重新确认 PR head、diff 和对应 CI；若实机未完成，不能把它写成已通过。清理前逐一核对该 worktree 的未提交内容、未纳入目标的独有提交、未跟踪及被忽略的验收产物；需要保留的文档和证据先落实归宿，再按授权删除。尤其不要把包含本地收尾记录的 worktree 当作可直接删除的临时副本。
+上文是初次记录的历史快照。后续复核补了凭据迁移的数据库失败回归：写不进新选项时保留旧值供现有 Agent 使用，迁移完成前不允许修改授权码；管理接口不会把失败的写入报告成成功。
+
+- [PR #12](https://github.com/npcink/npcink-device-inventory/pull/12) 已合入 `codex/scope-simplification-closeout`，合并提交 `20202e51d1d80663dcc9d021f4c4cf03c361ad90`。合并树与审核 head `0a21250383e36a90b82dc4970dc15620e09f8ec6` 一致；[Quality checks 45770345028](https://github.com/npcink/npcink-device-inventory/actions/runs/45770345028) 的 9 项通过。未合入 `master`，没有打 tag 或发布。
+- [预览构建 45770424816](https://github.com/npcink/npcink-device-inventory/actions/runs/45770424816) 使用该审核 head。实际安装时按本地收执核对下载件 SHA-256，不复用旧 `0.4.7` 包或哈希。实机和正式签名仍待验。
+- 后续导入预检优化与预览不同批，不能把预览当作导入优化的验收包。同一个三行 CSV 和每请求 80 ms 的模拟延迟下，浏览器针对 501 / 2,001 台合成库存的预检请求从 6 / 21 次降至各 1 次；500 故障时禁用提交，重试后恢复。不是生产延迟结论。新路由、权限和软删除编号在本机 WordPress/MariaDB 隔离 Docker 验证通过。
+
+清理前逐一核对未提交内容、独有提交和忽略的验收产物；先保留所需证据，再按授权清理。
 
 可复用的验证和归档规则已补入[开发手册](development-playbook.md#最小验证矩阵)。

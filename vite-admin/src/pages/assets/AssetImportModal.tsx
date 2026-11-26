@@ -1,5 +1,5 @@
 import { HelpLabel } from "@/components/HelpLabel";
-import { getSettings, importAssets } from "@/services/v3";
+import { getSettings, importAssets, lookupImportAssets } from "@/services/v3";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Alert,
@@ -17,7 +17,6 @@ import {
 } from "antd";
 import { useMemo, useState } from "react";
 import type { JsonRecord } from "@/type/v3";
-import { fetchAllAssets } from "@/pages/shared/assets";
 import { normalizeDepartmentList } from "@/pages/shared/departments";
 import {
   AssetImportPreviewRow,
@@ -29,6 +28,7 @@ import { fieldText, statusLabel } from "@/pages/shared/presentation";
 import {
   buildImportPreviewRows,
   downloadCsvFile,
+  importFieldValue,
   importTemplateCsv,
   parseTabularText,
 } from "@/pages/shared/tabular";
@@ -51,13 +51,19 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
     () => normalizeDepartmentList(settingsQuery.data?.departments || []),
     [settingsQuery.data?.departments]
   );
-  const existingAssetsQuery = useQuery(["v3-assets-import-index"], () => fetchAllAssets({ assetScope: "all", includeDeleted: true }), {
-    enabled: open,
-  });
+  const numbers = useMemo(() => Array.from(new Set(
+    (sourceRows || []).map((row) => importFieldValue(row, "assetNumber").trim())
+      .filter((number) => number && Array.from(number).length <= 64)
+  )).sort(), [sourceRows]);
+  const existingAssetsQuery = useQuery(
+    ["v3-assets-import-index", numbers],
+    ({ signal }) => lookupImportAssets(numbers, signal),
+    { enabled: open && numbers.length > 0, cacheTime: 0 },
+  );
   const preflightReady = Boolean(
-    settingsQuery.data && existingAssetsQuery.data &&
+    settingsQuery.data &&
     !settingsQuery.isError && !settingsQuery.isFetching &&
-    !existingAssetsQuery.isError && !existingAssetsQuery.isFetching
+    (!numbers.length || (existingAssetsQuery.data && !existingAssetsQuery.isError && !existingAssetsQuery.isFetching))
   );
   const previewRows = useMemo(
     () => sourceRows && preflightReady
@@ -65,6 +71,7 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
       : [],
     [sourceRows, preflightReady, existingAssetsQuery.data, strategy, sections, departmentOptions]
   );
+  const executableCount = previewRows.filter((row) => row.action === "create" || row.action === "update").length;
   const importMutation = useMutation(
     async (rows: AssetImportPreviewRow[]) => {
       const executable = rows.filter((row) => row.action === "create" || row.action === "update");
@@ -111,7 +118,7 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
         <Button key="cancel" onClick={onClose}>
           取消
         </Button>,
-        <Button key="preview" disabled={!preflightReady || importMutation.isLoading} onClick={() => parseSource()}>
+        <Button key="preview" disabled={existingAssetsQuery.isFetching || importMutation.isLoading} onClick={() => parseSource()}>
           生成预览
         </Button>,
         <Button
@@ -119,7 +126,7 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
           type="primary"
           disabled={
             !preflightReady ||
-            !previewRows.some((row) => row.action === "create" || row.action === "update")
+            executableCount < 1 || executableCount > 100
           }
           loading={importMutation.isLoading}
           onClick={() => importMutation.mutate(previewRows)}
@@ -141,12 +148,16 @@ export const AssetImportModal = ({ open, onClose, onImported }: AssetImportModal
             showIcon
             message="导入预检数据加载失败"
             description="无法安全判断部门和已有资产，请重试后再导入。"
-            action={<Button onClick={() => { settingsQuery.refetch(); existingAssetsQuery.refetch(); }}>重试</Button>}
+            action={<Button onClick={() => {
+              if (settingsQuery.isError) void settingsQuery.refetch();
+              if (numbers.length && existingAssetsQuery.isError) void existingAssetsQuery.refetch();
+            }}>重试</Button>}
           />
         ) : null}
         {settingsQuery.isFetching || existingAssetsQuery.isFetching ? (
-          <Alert type="info" showIcon message="正在加载部门和已有资产，完成后生成预览" />
+          <Alert type="info" showIcon message="正在核对导入数据" />
         ) : null}
+        {executableCount > 100 ? <Alert type="warning" showIcon message="单次最多导入 100 条可执行数据，请拆分 CSV。" /> : null}
         <Alert type="success" showIcon message="导入使用单次服务端事务" description="任意一行写入失败时，本次可执行数据会全部回滚，不会留下半导入。" />
         <Space wrap>
           <Button onClick={() => downloadCsvFile(`asset-import-template-${Date.now()}.csv`, importTemplateCsv())}>
