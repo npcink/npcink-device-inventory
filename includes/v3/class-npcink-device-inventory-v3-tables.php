@@ -109,8 +109,12 @@ class Npcink_Device_Inventory_V3_Tables
 
 	public static function client_tokens()
 	{
-		self::migrate_client_tokens();
+		$migrated = self::migrate_client_tokens();
 		$tokens = get_option(self::CLIENT_TOKENS_OPTION, array());
+		if (!$migrated && (!is_array($tokens) || !$tokens)) {
+			$options = get_option(self::OPTION, array());
+			$tokens = isset($options['client_tokens']) ? $options['client_tokens'] : array();
+		}
 		return is_array($tokens) ? array_values($tokens) : array();
 	}
 
@@ -120,6 +124,11 @@ class Npcink_Device_Inventory_V3_Tables
 			$options = array();
 		}
 		unset($options['client_tokens']);
+		// Keep the old copy if a preceding migration could not finish.
+		$current = get_option(self::OPTION, array());
+		if (is_array($current) && array_key_exists('client_tokens', $current)) {
+			$options['client_tokens'] = $current['client_tokens'];
+		}
 		update_option(self::OPTION, $options);
 	}
 
@@ -128,13 +137,16 @@ class Npcink_Device_Inventory_V3_Tables
 		if (!is_array($tokens)) {
 			$tokens = array();
 		}
-		self::migrate_client_tokens();
+		if (!self::migrate_client_tokens()) {
+			return false;
+		}
 		if (get_option(self::CLIENT_TOKENS_OPTION, false) === false) {
-			add_option(self::CLIENT_TOKENS_OPTION, $tokens, '', false);
+			$saved = add_option(self::CLIENT_TOKENS_OPTION, $tokens, '', false);
 		} else {
-			update_option(self::CLIENT_TOKENS_OPTION, $tokens, false);
+			$saved = update_option(self::CLIENT_TOKENS_OPTION, $tokens, false);
 		}
 		self::ensure_client_tokens_autoload_disabled();
+		return $saved || get_option(self::CLIENT_TOKENS_OPTION, false) === $tokens;
 	}
 
 	public static function migrate_client_tokens()
@@ -144,14 +156,21 @@ class Npcink_Device_Inventory_V3_Tables
 			$legacy = is_array($options['client_tokens']) ? $options['client_tokens'] : array();
 			$existing = get_option(self::CLIENT_TOKENS_OPTION, false);
 			if ($existing === false) {
-				add_option(self::CLIENT_TOKENS_OPTION, $legacy, '', false);
+				if (!add_option(self::CLIENT_TOKENS_OPTION, $legacy, '', false)) {
+					return false;
+				}
 			} elseif ($legacy && (!is_array($existing) || !$existing)) {
-				update_option(self::CLIENT_TOKENS_OPTION, $legacy, false);
+				if (!update_option(self::CLIENT_TOKENS_OPTION, $legacy, false)) {
+					return false;
+				}
 			}
 			unset($options['client_tokens']);
-			update_option(self::OPTION, $options);
+			if (!update_option(self::OPTION, $options)) {
+				return false;
+			}
 		}
 		self::ensure_client_tokens_autoload_disabled();
+		return true;
 	}
 
 	private static function ensure_client_tokens_autoload_disabled()

@@ -10,6 +10,7 @@ function wp_json_encode($value)
 $npcink_options = array();
 $npcink_option_autoload = array();
 $npcink_alloptions = array();
+$npcink_failed_option = '';
 
 function npcink_autoload_enabled($autoload)
 {
@@ -24,8 +25,8 @@ function get_option($name, $default = false)
 
 function add_option($name, $value, $deprecated = '', $autoload = true)
 {
-	global $npcink_options, $npcink_option_autoload, $npcink_alloptions;
-	if (array_key_exists($name, $npcink_options)) {
+	global $npcink_options, $npcink_option_autoload, $npcink_alloptions, $npcink_failed_option;
+	if ($name === $npcink_failed_option || array_key_exists($name, $npcink_options)) {
 		return false;
 	}
 	$npcink_options[$name] = $value;
@@ -40,7 +41,10 @@ function add_option($name, $value, $deprecated = '', $autoload = true)
 
 function update_option($name, $value, $autoload = null)
 {
-	global $npcink_options, $npcink_option_autoload, $npcink_alloptions;
+	global $npcink_options, $npcink_option_autoload, $npcink_alloptions, $npcink_failed_option;
+	if ($name === $npcink_failed_option) {
+		return false;
+	}
 	if (!array_key_exists($name, $npcink_options)) {
 		return add_option($name, $value, '', $autoload === null ? true : $autoload);
 	}
@@ -155,5 +159,39 @@ $alloptions = wp_load_alloptions();
 npcink_assert(Npcink_Device_Inventory_V3_Tables::client_tokens()[0]['secret'] === 'repaired-secret', 'An already-split token option was lost while repairing autoload.');
 npcink_assert(!isset($alloptions[Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION]), 'An autoloaded client token option was not repaired.');
 npcink_assert(strpos(wp_json_encode($alloptions), 'repaired-secret') === false, 'A repaired token secret remained visible in autoloaded options.');
+
+$legacy_option = Npcink_Device_Inventory_V3_Tables::OPTION;
+$dedicated_option = Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION;
+$legacy_tokens = array(array('id' => 'tok4', 'secret' => 'retryable-secret', 'enabled' => true));
+foreach (array(false, true) as $has_empty_dedicated_option) {
+	$npcink_options = array($legacy_option => array('client_tokens' => $legacy_tokens));
+	$npcink_option_autoload = array($legacy_option => true);
+	$npcink_alloptions = $npcink_options;
+	if ($has_empty_dedicated_option) {
+		add_option($dedicated_option, array(), '', false);
+	}
+	$npcink_failed_option = $dedicated_option;
+	npcink_assert(!Npcink_Device_Inventory_V3_Tables::migrate_client_tokens(), 'Migration did not report the failed destination write.');
+	npcink_assert(Npcink_Device_Inventory_V3_Tables::client_tokens() === $legacy_tokens, 'A failed migration broke existing upload credentials.');
+	npcink_assert(!isset(Npcink_Device_Inventory_V3_Tables::options()['client_tokens']), 'Reading general settings exposed legacy credentials.');
+	Npcink_Device_Inventory_V3_Tables::update_options(array('asset_number_prefix' => 'R'));
+	npcink_assert(get_option($legacy_option)['client_tokens'] === $legacy_tokens, 'Settings write erased uncommitted legacy credentials.');
+	npcink_assert(!Npcink_Device_Inventory_V3_Tables::update_client_tokens(array()), 'Token mutation reported success before migration completed.');
+
+	$npcink_failed_option = $legacy_option;
+	npcink_assert(!Npcink_Device_Inventory_V3_Tables::migrate_client_tokens(), 'Migration did not report the failed legacy cleanup.');
+	npcink_assert(get_option($dedicated_option) === $legacy_tokens && get_option($legacy_option)['client_tokens'] === $legacy_tokens, 'Cleanup failure erased the only proven copy.');
+	npcink_assert(!Npcink_Device_Inventory_V3_Tables::update_client_tokens(array()), 'Mutation could resurrect the old copy on a later migration.');
+
+	$npcink_failed_option = '';
+	npcink_assert(Npcink_Device_Inventory_V3_Tables::migrate_client_tokens(), 'Migration did not recover after database writes resumed.');
+	npcink_assert(!isset(get_option($legacy_option)['client_tokens']), 'Retry did not remove the legacy copy.');
+	npcink_assert(get_option($legacy_option)['asset_number_prefix'] === 'R', 'Retry did not preserve the intervening settings update.');
+	$npcink_failed_option = $dedicated_option;
+	npcink_assert(!Npcink_Device_Inventory_V3_Tables::update_client_tokens(array()), 'Token mutation reported a failed destination write as successful.');
+	$npcink_failed_option = '';
+	npcink_assert(Npcink_Device_Inventory_V3_Tables::update_client_tokens(array()), 'Retry could not revoke the migrated credentials.');
+	npcink_assert(Npcink_Device_Inventory_V3_Tables::client_tokens() === array(), 'Revoked credentials were resurrected.');
+}
 
 echo "Client token autoload fixtures passed.\n";

@@ -152,7 +152,9 @@ class Npcink_Device_Inventory_Settings_Controller
 			'created_at' => current_time('mysql'),
 		);
 		$tokens[] = $token;
-		Npcink_Device_Inventory_V3_Tables::update_client_tokens($tokens);
+		if (!Npcink_Device_Inventory_V3_Tables::update_client_tokens($tokens)) {
+			return Npcink_Device_Inventory_V3_Response::error('token_write_failed', 'Could not save device tokens.', 500);
+		}
 
 		$public = $this->public_token($token);
 		$public['secret'] = $secret;
@@ -169,7 +171,9 @@ class Npcink_Device_Inventory_Settings_Controller
 			}
 			$tokens[] = $token;
 		}
-		Npcink_Device_Inventory_V3_Tables::update_client_tokens($tokens);
+		if (!Npcink_Device_Inventory_V3_Tables::update_client_tokens($tokens)) {
+			return Npcink_Device_Inventory_V3_Response::error('token_write_failed', 'Could not save device tokens.', 500);
+		}
 		return rest_ensure_response(array('data' => array('success' => true)));
 	}
 
@@ -198,7 +202,9 @@ class Npcink_Device_Inventory_Settings_Controller
 			return Npcink_Device_Inventory_V3_Response::error('token_not_found', 'Client token not found.', 404);
 		}
 
-		Npcink_Device_Inventory_V3_Tables::update_client_tokens($tokens);
+		if (!Npcink_Device_Inventory_V3_Tables::update_client_tokens($tokens)) {
+			return Npcink_Device_Inventory_V3_Response::error('token_write_failed', 'Could not save device tokens.', 500);
+		}
 		return rest_ensure_response(array('data' => $this->public_token($updated)));
 	}
 
