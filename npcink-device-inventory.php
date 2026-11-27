@@ -125,7 +125,11 @@ npcink_device_inventory_run();
 
 //设置按钮
 add_filter('plugin_action_links_' . plugin_basename(__FILE__), function ($links) {
-	$links[] = '<a href="' . esc_url(get_admin_url(null, 'plugins.php?page=npcink_device_inventory_settings')) . '">' . esc_html__('设置', 'npcink-device-inventory') . '</a>';
+	$label = __('Settings', 'npcink-device-inventory');
+	if ('Settings' === $label && 0 === strpos(determine_locale(), 'zh_')) {
+		$label = '设置';
+	}
+	$links[] = '<a href="' . esc_url(get_admin_url(null, 'plugins.php?page=npcink_device_inventory_settings')) . '">' . esc_html($label) . '</a>';
 	return $links;
 });
 

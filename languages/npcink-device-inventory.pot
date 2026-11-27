@@ -39,19 +39,10 @@ msgstr ""
 msgid "https://www.npc.ink"
 msgstr ""
 
-#: admin/partials/npcink-device-inventory-admin-menu.php:30
+#: admin/partials/npcink-device-inventory-admin-menu.php
 msgid "Device Inventory"
 msgstr ""
 
-#: admin/partials/npcink-device-inventory-admin-menu.php:77
-msgid "Assets"
-msgstr ""
-
-#: admin/partials/npcink-device-inventory-admin-menu.php:78
-msgid "Client Tokens"
-msgstr ""
-
-#: admin/partials/npcink-device-inventory-admin-menu.php:79
-#: npcink-device-inventory.php:92
+#: npcink-device-inventory.php
 msgid "Settings"
 msgstr ""

@@ -93,6 +93,12 @@ run_wp core install \
   --skip-email
 run_wp plugin install /workspace/release/npcink-device-inventory.zip --activate
 
+echo "Verifying admin labels with and without WordPress plugin language packs..."
+run_wp eval-file /workspace/tests/wordpress-admin-translations.php install-fixtures
+for locale in en_US fr_FR zh_CN zh_TW; do
+  run_wp --user=npcink-e2e-admin eval-file /workspace/tests/wordpress-admin-translations.php "${locale}"
+done
+
 wordpress_version="$(run_wp core version)"
 php_version="$(run_wp eval 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')"
 expected_php="${NPCINK_DOCKER_PHP_VERSION:-8.3}"

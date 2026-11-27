@@ -60,12 +60,12 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Menu')) {
 
         private static function admin_page_title()
         {
-            $locale = determine_locale();
-            if (0 === strpos($locale, 'zh_')) {
+            $title = __('Device Inventory', 'npcink-device-inventory');
+            if ('Device Inventory' === $title && 0 === strpos(determine_locale(), 'zh_')) {
                 return '设备资产管理';
             }
 
-            return __('Device Inventory', 'npcink-device-inventory');
+            return $title;
         }
 
         /**
