@@ -1,11 +1,7 @@
-#root {
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-#root *,
-#root *::before,
-#root *::after {
+.npcink-v3-app,
+.npcink-v3-app *,
+.npcink-v3-app *::before,
+.npcink-v3-app *::after {
   box-sizing: border-box;
 }
 
@@ -31,6 +27,32 @@
   padding: 10px 0 12px;
   font-size: 16px;
   font-weight: 500;
+}
+
+.npcink-v3-workspace-switcher {
+  display: none;
+}
+
+@media (max-width: 540px) {
+  .npcink-v3-workspace-switcher {
+    display: block;
+    margin-bottom: 16px;
+  }
+
+  .npcink-v3-workspace-switcher select {
+    width: 100%;
+    max-width: none;
+    min-height: 40px;
+    padding-inline: 12px 28px;
+    border: 1px solid #d9dee7;
+    border-radius: 8px;
+    background-color: #fff;
+    color: #1f2328;
+  }
+
+  .npcink-v3-workspace-tabs > .ant-tabs-nav {
+    display: none;
+  }
 }
 
 .npcink-v3-analysis-workspace {
@@ -407,19 +429,9 @@
 
 .npcink-v3-toolbar-shell {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 0;
-  padding: 14px 16px;
-  background: #ffffff;
-  border: 1px solid #d9dee7;
-  border-bottom: 0;
-  border-radius: 10px 10px 0 0;
-}
-
-.npcink-v3-toolbar-shell.is-plain {
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 16px;
   margin-bottom: 16px;
   padding: 12px 14px;
   background: #ffffff;
@@ -442,8 +454,27 @@
 .npcink-v3-toolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 10px;
+  flex-wrap: wrap;
+  flex: 1 1 890px;
+  min-width: 0;
+}
+
+.npcink-v3-toolbar-filters,
+.npcink-v3-toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.npcink-v3-toolbar-filters {
+  flex: 1 1 610px;
+}
+
+.npcink-v3-toolbar-filters .npcink-v3-filter {
+  flex: 1 1 118px;
   min-width: 0;
 }
 
@@ -465,8 +496,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  width: min(380px, 38vw);
-  margin-right: 4px;
+  flex: 2 1 220px;
+  min-width: 0;
 }
 
 .npcink-v3-toolbar-search .ant-input-affix-wrapper {
@@ -539,6 +570,32 @@
   white-space: normal;
   text-align: left;
   font-weight: 500;
+}
+
+.npcink-v3-asset-name-link.ant-btn {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.npcink-v3-table-cell-clamp,
+.npcink-v3-table-cell-ellipsis {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.npcink-v3-table-cell-clamp.is-two-lines {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.npcink-v3-table-cell-ellipsis {
+  white-space: nowrap;
 }
 
 .npcink-v3-search-highlight {
@@ -693,8 +750,13 @@
 }
 
 .npcink-v3-custom-card-body h3 {
+  display: -webkit-box;
   min-height: 48px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   font-size: 16px;
 }
 
@@ -789,6 +851,27 @@
   max-height: calc(100vh - 128px);
   overflow: auto;
   padding-right: 3px;
+}
+
+.npcink-v3-asset-form-modal.ant-modal {
+  top: 52px;
+  padding-bottom: 12px;
+}
+
+.npcink-v3-asset-form-modal .ant-modal-content {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 64px);
+}
+
+.npcink-v3-asset-form-modal .ant-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.npcink-v3-asset-form-modal :is(.ant-modal-header, .ant-modal-footer) {
+  flex: none;
 }
 
 .npcink-v3-detail-modal .ant-modal-header {
@@ -2320,24 +2403,13 @@
 .npcink-v3-app .ant-btn,
 .npcink-v3-app .ant-input,
 .npcink-v3-app .ant-select-selector,
-.npcink-v3-app .ant-input-number,
-.ant-modal .ant-btn,
-.ant-drawer .ant-btn {
+.npcink-v3-app .ant-input-number {
   border-radius: 8px;
 }
 
-.npcink-v3-app .ant-tag,
-.ant-drawer .ant-tag {
+.npcink-v3-app .ant-tag {
   border-radius: 999px;
   padding-inline: 8px;
-}
-
-.ant-drawer .ant-drawer-header {
-  border-bottom-color: #e4e7ec;
-}
-
-.ant-drawer .ant-tabs-nav {
-  margin-bottom: 14px;
 }
 
 @media (max-width: 1280px) {
@@ -2348,15 +2420,6 @@
 
   .npcink-v3-card-grid {
     grid-template-columns: repeat(auto-fill, 200px);
-  }
-
-  .npcink-v3-toolbar-shell {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .npcink-v3-toolbar {
-    justify-content: flex-start;
   }
 
   .npcink-v3-search {
@@ -2588,12 +2651,8 @@
     min-height: 96px;
   }
 
-  .npcink-v3-toolbar {
-    flex-wrap: wrap;
-  }
-
   .npcink-v3-search,
-.npcink-v3-filter {
+  .npcink-v3-filter {
     width: 100%;
   }
 }

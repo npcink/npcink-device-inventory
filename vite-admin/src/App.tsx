@@ -20,6 +20,7 @@ const App = () => {
     <>
       <ConfigProvider
         locale={zhCN}
+        button={{ autoInsertSpace: false }}
         theme={{
           token: {
             colorPrimary: "#2563eb",

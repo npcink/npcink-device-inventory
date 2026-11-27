@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App.tsx";
 import { clearObsoleteAssetListCache } from "@/pages/shared/cache";
-import "./index.css";
 import { ensureRestNonce } from "@/services/axiosConfig";
 
 const queryClient = new QueryClient({

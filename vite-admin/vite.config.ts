@@ -34,6 +34,11 @@ function wordpressReact(): Plugin {
         .join("\n");
     },
     generateBundle(_options, bundle) {
+      const entry = Object.values(bundle).find((chunk) => chunk.type === "chunk" && chunk.isEntry);
+      if (!entry) this.error("Missing WordPress admin application entry");
+      // WP versions index.js with a query parameter. Lazy chunks must resolve
+      // the same unversioned, content-hashed module as this loader.
+      this.emitFile({ type: "asset", fileName: "index.js", source: `import ${JSON.stringify(`./${entry.fileName}`)};\n` });
       for (const chunk of Object.values(bundle)) {
         if (chunk.type !== "chunk") continue;
         for (const id of Object.keys(chunk.modules)) {
@@ -61,7 +66,7 @@ export default defineConfig(({ mode }) => {
           //chunkFileNames: 'js/[name].js',
           // 指定静态资源文件名（不含导出的代码）
           //assetFileNames: 'assets/[name].[ext]',
-          entryFileNames: "index.js",
+          entryFileNames: isProd ? "admin-[hash].js" : "index.js",
           assetFileNames: "[name][extname]",
           chunkFileNames: "[name]-[hash].js",
         },

@@ -68,12 +68,14 @@ export const AssetFormModal = ({ open, departmentOptions = [], onClose, onSubmit
       okText="确认录入"
       cancelText="取消"
       destroyOnHidden
+      className="npcink-v3-asset-form-modal"
       width={760}
     >
       <Form
         form={form}
         initialValues={INITIAL_ASSET_VALUES}
         layout="vertical"
+        scrollToFirstError={{ focus: true, block: "nearest" }}
         onFinish={(values) => onSubmit(assetFormValuesToInput(values, null, settingsQuery.data))}
         preserve={false}
         className="npcink-v3-asset-form"
