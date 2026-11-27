@@ -13,6 +13,11 @@ const dependencies = (key, visited = new Set()) => {
 };
 const entry = Object.keys(manifest).find((key) => manifest[key].isEntry);
 if (!entry) throw new Error("Missing application entry in build manifest");
+const entryFile = manifest[entry].file;
+const wordpressLoader = await readFile(path.join(directory, "index.js"), "utf8");
+if (!/^admin-[\w-]+\.js$/.test(entryFile) || wordpressLoader.trim() !== `import ${JSON.stringify(`./${entryFile}`)};`) {
+  throw new Error("WordPress index.js must only import the content-hashed application entry");
+}
 const shell = dependencies(entry);
 const defaultWorkspace = dependencies("src/pages/assets/AssetWorkspace.tsx", new Set(shell));
 const budgets = [

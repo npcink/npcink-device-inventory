@@ -72,6 +72,7 @@ export const CustomAssetDetail = ({
                     {infoItem("采购人员", info.purchaser)}
                     {infoItem("设备编号", info.number, "primary")}
                     {infoItem("使用人 / 责任人", info.usage, "primary")}
+                    {infoItem("部门", asset.department)}
                     {infoItem("设备用途", info.purpose)}
                   </div>
                 </div>

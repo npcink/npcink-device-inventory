@@ -296,13 +296,15 @@ export const AssetWorkspace = ({
       render: (value: string, asset) => (
         <Button
           type="link"
-          className="npcink-v3-link"
+          className="npcink-v3-link npcink-v3-asset-name-link"
           onClick={(event) => {
             event.stopPropagation();
             setSelectedUuid(asset.uuid);
           }}
         >
-          {highlightText(value || "未命名资产", search)}
+          <span className="npcink-v3-table-cell-clamp is-two-lines" title={value || "未命名资产"}>
+            {highlightText(value || "未命名资产", search)}
+          </span>
         </Button>
       ),
     },
@@ -313,7 +315,16 @@ export const AssetWorkspace = ({
       render: assetTypeLabel,
     },
     { title: "使用人", dataIndex: "ownerName", width: 120, render: (value) => highlightText(value, search) },
-    { title: "部门", dataIndex: "department", width: 140, render: (value) => highlightText(value, search) },
+    {
+      title: "部门",
+      dataIndex: "department",
+      width: 140,
+      render: (value) => (
+        <span className="npcink-v3-table-cell-ellipsis" title={value || undefined}>
+          {highlightText(value, search)}
+        </span>
+      ),
+    },
     {
       title: "状态",
       dataIndex: "status",
@@ -423,29 +434,54 @@ export const AssetWorkspace = ({
 
   return (
     <div className={`npcink-v3-section${viewMode === "card" && compactLayout ? " is-compact-card-layout" : ""}`}>
-      <div className="npcink-v3-toolbar-shell is-plain">
+      <div className="npcink-v3-toolbar-shell">
         <div className="npcink-v3-toolbar-title">
           <Text strong>{activeScopeLabel}</Text>
           <Tag bordered={false}>共 {assetsQuery.isError || assetsQuery.isPreviousData ? "-" : pagination?.totalItems ?? "-"} 条</Tag>
         </div>
         <div className="npcink-v3-toolbar">
-          <Select
-            allowClear
-            placeholder={assetScope === "other" ? "设备状态" : "状态"}
-            options={STATUS_OPTIONS}
-            value={status}
-            onChange={(value) => {
-              setPage(1);
-              setStatus(value);
-            }}
-            className="npcink-v3-filter"
-          />
-          {assetScope === "other" ? (
-            <>
+          <div className="npcink-v3-toolbar-filters">
+            <Select
+              allowClear
+              placeholder={assetScope === "other" ? "设备状态" : "状态"}
+              options={STATUS_OPTIONS}
+              value={status}
+              onChange={(value) => {
+                setPage(1);
+                setStatus(value);
+              }}
+              className="npcink-v3-filter"
+            />
+            {assetScope === "other" ? (
+              <>
+                <Select
+                  allowClear
+                  placeholder="分类"
+                  options={categoryOptions}
+                  value={category}
+                  onChange={(value) => {
+                    setPage(1);
+                    setCategory(value);
+                  }}
+                  className="npcink-v3-filter"
+                />
+                <Select
+                  allowClear
+                  placeholder="采购平台"
+                  options={CUSTOM_PURCHASE_PLATFORM_OPTIONS}
+                  value={purchasePlatform}
+                  onChange={(value) => {
+                    setPage(1);
+                    setPurchasePlatform(value);
+                  }}
+                  className="npcink-v3-filter"
+                />
+              </>
+            ) : assetScope === "computer" ? (
               <Select
                 allowClear
-                placeholder="分类"
-                options={categoryOptions}
+                placeholder="类型"
+                options={COMPUTER_DEVICE_TYPE_OPTIONS}
                 value={category}
                 onChange={(value) => {
                   setPage(1);
@@ -453,120 +489,100 @@ export const AssetWorkspace = ({
                 }}
                 className="npcink-v3-filter"
               />
+            ) : (
               <Select
                 allowClear
-                placeholder="采购平台"
-                options={CUSTOM_PURCHASE_PLATFORM_OPTIONS}
-                value={purchasePlatform}
+                placeholder="资产类型"
+                options={ASSET_TYPES}
+                value={assetType}
                 onChange={(value) => {
                   setPage(1);
-                  setPurchasePlatform(value);
+                  setAssetType(value);
                 }}
                 className="npcink-v3-filter"
               />
-            </>
-          ) : assetScope === "computer" ? (
-            <Select
-              allowClear
-              placeholder="类型"
-              options={COMPUTER_DEVICE_TYPE_OPTIONS}
-              value={category}
-              onChange={(value) => {
-                setPage(1);
-                setCategory(value);
-              }}
-              className="npcink-v3-filter"
-            />
-          ) : (
-            <Select
-              allowClear
-              placeholder="资产类型"
-              options={ASSET_TYPES}
-              value={assetType}
-              onChange={(value) => {
-                setPage(1);
-                setAssetType(value);
-              }}
-              className="npcink-v3-filter"
-            />
-          )}
-          {assetScope !== "other" ? (
-            <Select
-              allowClear
-              placeholder="金额筛选"
-              options={FINANCIAL_DATA_STATUS_OPTIONS}
-              value={financialDataStatus}
-              onChange={(value) => {
-                setPage(1);
-                setFinancialDataStatus(value);
-              }}
-              className="npcink-v3-filter"
-            />
-          ) : null}
-          <div className="npcink-v3-toolbar-search">
-            <Input
-              allowClear
-              value={searchDraft}
-              placeholder={assetScope === "other" ? "搜索姓名、订单号、产品名称" : "搜索编号、名称、使用人、部门"}
-              onChange={(event) => updateSearchDraft(event.target.value)}
-              onPressEnter={submitSearch}
-            />
-            <Button
-              aria-label="搜索资产"
-              icon={<SearchOutlined />}
-              onClick={submitSearch}
-            />
+            )}
+            {assetScope !== "other" ? (
+              <Select
+                allowClear
+                placeholder="金额筛选"
+                options={FINANCIAL_DATA_STATUS_OPTIONS}
+                value={financialDataStatus}
+                onChange={(value) => {
+                  setPage(1);
+                  setFinancialDataStatus(value);
+                }}
+                className="npcink-v3-filter"
+              />
+            ) : null}
+            <div className="npcink-v3-toolbar-search">
+              <Input
+                allowClear
+                value={searchDraft}
+                placeholder={assetScope === "other" ? "搜索姓名、订单号、产品名称" : "搜索编号、名称、使用人、部门"}
+                onChange={(event) => updateSearchDraft(event.target.value)}
+                onPressEnter={submitSearch}
+              />
+              <Button
+                aria-label="搜索资产"
+                icon={<SearchOutlined />}
+                onClick={submitSearch}
+              />
           </div>
-          <Space.Compact>
-            <Button
-              type={viewMode === "card" ? "primary" : "default"}
-              onClick={() => setViewMode("card")}
+          </div>
+          <div className="npcink-v3-toolbar-actions">
+            <Space.Compact>
+              <Button
+                type={viewMode === "card" ? "primary" : "default"}
+                onClick={() => setViewMode("card")}
+              >
+                卡片
+              </Button>
+              <Button
+                type={viewMode === "table" ? "primary" : "default"}
+                onClick={() => setViewMode("table")}
+              >
+                列表
+              </Button>
+            </Space.Compact>
+            {assetScope === "other" ? (
+              <Button type="primary" icon={<PlusOutlined aria-hidden="true" />} onClick={openCreateModal}>
+                新增
+              </Button>
+            ) : null}
+            <Dropdown
+              trigger={["click"]}
+              menu={{
+                items: [
+                  { key: "export", label: "导出表格" },
+                  { key: "save-filter", label: "保存筛选" },
+                  { key: "batch", label: batchMode ? "退出批量模式" : "批量模式" },
+                  ...(viewMode === "card"
+                    ? [{ key: "layout", label: compactLayout ? "舒展模式" : "紧凑模式" }]
+                    : []),
+                  ...workspaceSavedFilters.map((filter) => ({
+                    key: `filter:${filter.id}`,
+                    label: `筛选：${filter.name}`,
+                  })),
+                ],
+                onClick: ({ key }) => {
+                  if (key === "export") {
+                    setExportModalOpen(true);
+                  } else if (key === "save-filter") {
+                    saveCurrentFilter();
+                  } else if (key === "batch") {
+                    setBatchMode((value) => !value);
+                  } else if (key === "layout") {
+                    toggleAssetLayoutMode();
+                  } else if (key.startsWith("filter:")) {
+                    applySavedFilter(key.replace("filter:", ""));
+                  }
+                },
+              }}
             >
-              卡片
-            </Button>
-            <Button
-              type={viewMode === "table" ? "primary" : "default"}
-              onClick={() => setViewMode("table")}
-            >
-              列表
-            </Button>
-          </Space.Compact>
-          {assetScope === "other" ? (
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-              新增
-            </Button>
-          ) : null}
-          <Dropdown
-            menu={{
-              items: [
-                { key: "export", label: "导出表格" },
-                { key: "save-filter", label: "保存筛选" },
-                { key: "batch", label: batchMode ? "退出批量模式" : "批量模式" },
-                ...(viewMode === "card"
-                  ? [{ key: "layout", label: compactLayout ? "舒展模式" : "紧凑模式" }]
-                  : []),
-                ...workspaceSavedFilters.map((filter) => ({
-                  key: `filter:${filter.id}`,
-                  label: `筛选：${filter.name}`,
-                })),
-              ],
-              onClick: ({ key }) => {
-                if (key === "export") {
-                  setExportModalOpen(true);
-                } else if (key === "save-filter") {
-                  saveCurrentFilter();
-                } else if (key === "batch") {
-                  setBatchMode((value) => !value);
-                } else if (key === "layout") {
-                  toggleAssetLayoutMode();
-                } else if (key.startsWith("filter:")) {
-                  applySavedFilter(key.replace("filter:", ""));
-                }
-              },
-            }}
-          >
-            <Button>更多</Button>
-          </Dropdown>
+              <Button>更多</Button>
+            </Dropdown>
+          </div>
         </div>
       </div>
       {batchMode ? (
@@ -673,7 +689,8 @@ export const AssetWorkspace = ({
               setSelectedUuid(asset.uuid);
             },
           })}
-          scroll={{ x: 1110 }}
+          scroll={{ x: 1200 }}
+          tableLayout="fixed"
           pagination={{
             current: page,
             pageSize,
