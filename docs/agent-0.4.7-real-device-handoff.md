@@ -1,6 +1,6 @@
 # Agent 0.4.7 实机验收执行与交接
 
-**当前验收用包在仓库本地 `release-preview/acceptance-7009ebe/`。** 插件 ZIP 来自 `7009ebe`；Agent 安装包原样沿用 `0a21250` 的 [构建 45770424816](https://github.com/npcink/npcink-device-inventory/actions/runs/45770424816)。Windows/macOS 实机仍待执行；先按[最终候选与验收证据](audit-candidate-closeout-2026-11-26.md#最终候选与验收证据)及包内 `SHA256SUMS.txt` 核对三份文件，再用下方执行矩阵记录结果。
+**当前验收文件以[主线集成交接](mainline-integration-2026-11-27.md)为准。** Windows/macOS 实机仍待执行；先用对应目录的 `SHA256SUMS.txt` 核对三份文件，再用下方执行矩阵记录结果。历史包与哈希只适用于对应批次。
 
 本清单可用于指定 macOS 与 Windows 测试电脑。旧候选 `3b55a64` 的 M4 Docker 上传、原 CI 安装包安装、原生启动采集和空闲退出是[历史验收证据](agent-0.4.7-acceptance-2026-11-17.md)，不算作本轮实机通过。不要用原生探针、空闲退出或 CI 源码采集 smoke 替代当前安装版验收。
 
@@ -87,6 +87,6 @@ UI 是否响应 / 最终提示 / 是否有残留 toast：
 
 ## 验收后的交接
 
-本轮审计候选完成后，将逐项结论回填到[最终候选待办](audit-candidate-closeout-2026-11-26.md#实机验收待办)，并链接脱敏证据，不覆盖[旧预览验收记录](agent-0.4.7-acceptance-2026-11-17.md)。任一实机失败项先调查，保留安装包哈希和脱敏证据，不把偶发故障写成已确认的服务器或代理根因。
+完成后，将逐项结论回填到[主线集成交接](mainline-integration-2026-11-27.md#候选文件与实机待办)，并链接脱敏证据，不覆盖[旧预览验收记录](agent-0.4.7-acceptance-2026-11-17.md)。任一实机失败项先调查，保留安装包哈希和脱敏证据，不把偶发故障写成已确认的服务器或代理根因。
 
 预览包通过后，按[正式候选流程](github-release.md)准备平台签名、公证和 updater 签名。签名后字节变化，必须重新记录哈希，并对最终包重新验收安装/升级和签名，不能继承预览包的字节验收结论。最终使用[候选验收模板](release-candidate-verification-template.md)汇总；发布既有 draft 仍是单独的人工动作。

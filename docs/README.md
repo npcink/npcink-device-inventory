@@ -5,7 +5,7 @@
 | 需要了解的内容 | 当前入口 |
 | --- | --- |
 | 产品范围与开发约束 | [开发手册](development-playbook.md) |
-| 当前安装包与电脑更新 | [Agent 0.4.7 验收与安装包](agent-0.4.7-acceptance-2026-11-17.md)、[前序 0.4.6 与插件交接](simplification-implementation-2026-11-17.md) |
+| 当前候选与电脑更新 | [主线集成交接](mainline-integration-2026-11-27.md)、[Windows / macOS 实机清单](agent-0.4.7-real-device-handoff.md) |
 | 上传可靠性开发与收尾 | [长期规范与经验](upload-reliability-and-closeout-standard.md)、[11 月 18 日状态与交接](upload-session-closeout-2026-11-18.md) |
 | 审计修复候选与待办 | [11 月 26 日最终候选收尾记录](audit-candidate-closeout-2026-11-26.md)、[Windows / macOS 实机待办](audit-candidate-closeout-2026-11-26.md#实机验收待办) |
 | 源码精简收尾 | [11 月 17 日实施状态](simplification-implementation-2026-11-17.md)、[审计依据](remaining-work-and-redundancy-audit-2026-11-17.md) |
