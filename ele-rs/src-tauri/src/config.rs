@@ -34,18 +34,25 @@ pub(crate) fn validate_config(config: &AgentConfig) -> Result<(), String> {
 
 pub(crate) fn read_config() -> Result<AgentConfig> {
     let path = config_path()?;
+    read_config_from_path(&path)
+}
+
+fn read_config_from_path(path: &Path) -> Result<AgentConfig> {
     if !path.exists() {
         return Ok(AgentConfig::default());
     }
-    let raw = fs::read_to_string(&path)
+    let raw = fs::read_to_string(path)
         .with_context(|| format!("failed to read config {}", path.display()))?;
     let mut config: AgentConfig = serde_json::from_str(&raw).context("failed to parse config")?;
     if uses_system_credential_store() && !config.token.is_empty() {
         store_token(&config.token)?;
         config.token.clear();
-        write_public_config(&path, &config)?;
+        write_public_config(path, &config)?;
     }
-    config.token = read_token()?;
+    // File-backed platforms have no credential store to hydrate the token from.
+    if uses_system_credential_store() {
+        config.token = read_token()?;
+    }
     Ok(config)
 }
 
@@ -174,4 +181,89 @@ fn restrict_file_permissions(path: &Path) -> Result<()> {
 #[cfg(not(unix))]
 fn restrict_file_permissions(_path: &Path) -> Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct TestConfigPath(PathBuf);
+
+    impl TestConfigPath {
+        fn new() -> Self {
+            static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+            let directory = std::env::temp_dir().join(format!(
+                "npcink-config-{}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            ));
+            fs::create_dir(&directory).unwrap();
+            Self(directory.join("config.json"))
+        }
+    }
+
+    impl Drop for TestConfigPath {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(self.0.parent().unwrap());
+        }
+    }
+
+    #[test]
+    fn missing_config_returns_empty_defaults() {
+        let path = TestConfigPath::new();
+        let config = read_config_from_path(&path.0).unwrap();
+        assert!(config.site.is_empty());
+        assert!(config.token.is_empty());
+    }
+
+    #[test]
+    fn malformed_config_reports_parse_failure() {
+        let path = TestConfigPath::new();
+        fs::write(&path.0, "{broken").unwrap();
+        assert!(read_config_from_path(&path.0)
+            .unwrap_err()
+            .to_string()
+            .contains("failed to parse config"));
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[test]
+    fn file_credentials_survive_repeated_config_reads() {
+        let path = TestConfigPath::new();
+        let saved = AgentConfig {
+            site: "https://example.invalid".into(),
+            name: "Fixture".into(),
+            token: "mda_fixture_local-test-secret".into(),
+            preset_label: "Local fixture".into(),
+        };
+        write_public_config(&path.0, &saved).unwrap();
+        for _ in 0..2 {
+            let loaded = read_config_from_path(&path.0).unwrap();
+            assert_eq!(loaded.site, saved.site);
+            assert_eq!(loaded.name, saved.name);
+            assert_eq!(loaded.token, saved.token);
+            assert_eq!(loaded.preset_label, saved.preset_label);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path.0).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            assert_eq!(
+                fs::metadata(path.0.parent().unwrap())
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+    }
 }

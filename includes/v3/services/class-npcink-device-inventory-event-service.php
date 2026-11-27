@@ -28,6 +28,11 @@ class Npcink_Device_Inventory_Event_Service
 		);
 	}
 
+	public function invalidate_cache()
+	{
+		$this->events->invalidate_cache();
+	}
+
 	private function actor_name()
 	{
 		$user = wp_get_current_user();

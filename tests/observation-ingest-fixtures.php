@@ -12,10 +12,14 @@ function sanitize_text_field($value)
 	return trim((string) $value);
 }
 
+function wp_json_encode($value) { return json_encode($value); }
+
 function current_time()
 {
 	return '2026-07-15 12:00:00';
 }
+
+function is_wp_error($value) { return $value instanceof WP_Error; }
 
 class WP_Error
 {
@@ -45,6 +49,8 @@ class Npcink_Device_Inventory_Asset_Repository
 	{
 		$this->assets = $assets;
 	}
+
+	public function find_by_id_for_update($id) { return $this->find_by_id($id); }
 
 	public function find_by_id($id)
 	{
@@ -90,6 +96,8 @@ class Npcink_Device_Inventory_Identity_Repository
 	public $claimed_identities = array();
 	public $matched_asset_id;
 	public $matched_asset_ids = array();
+	public $cache_invalidations = 0;
+	public function invalidate_cache() { $this->cache_invalidations++; }
 
 	public function find_asset_id_by_identity($type = '', $value = '')
 	{
@@ -134,6 +142,7 @@ class Npcink_Device_Inventory_Identity_Repository
 
 class Npcink_Device_Inventory_Observation_Repository
 {
+	public $fail_create = false;
 	public $created_asset_ids = array();
 	public $cache_invalidations = 0;
 	public $rows = array();
@@ -143,20 +152,27 @@ class Npcink_Device_Inventory_Observation_Repository
 		$this->rows = $rows;
 	}
 
-	public function create($asset_id)
+	public $receipt = null;
+	public $last_created;
+	public function find_by_upload_id($uuid) { return $this->receipt; }
+	public function create($asset_id, $input)
 	{
+		if ($this->fail_create) { return null; }
 		$this->created_asset_ids[] = intval($asset_id);
-		return array(
+		$this->last_created = array(
 			'id' => 501,
 			'asset_id' => intval($asset_id),
 			'source' => 'fixture',
-			'schema_version' => 3,
+			'schema_version' => 5,
+			'observation_uuid' => $input['observation_uuid'],
+			'payload_hash' => $input['payload_hash'],
 			'observed_at' => '2026-07-15 12:00:00',
 			'received_at' => '2026-07-15 12:00:01',
 			'summary_json' => '{}',
 			'hardware_json' => '{}',
 			'raw_json' => '{}',
 		);
+		return $this->last_created;
 	}
 
 	public function invalidate_cache()
@@ -174,6 +190,8 @@ class Npcink_Device_Inventory_Event_Service
 {
 	public $events = array();
 	public $fail_type = '';
+	public $cache_invalidations = 0;
+	public function invalidate_cache() { $this->cache_invalidations++; }
 
 	public function record($asset_id, $source, $type)
 	{
@@ -201,10 +219,6 @@ class Npcink_Device_Inventory_Device_Identity_Service
 		return array($this->primary_identity());
 	}
 
-	public function legacy_primary_identity()
-	{
-		return array('type' => '', 'value' => '');
-	}
 }
 
 class Npcink_Missing_Device_Identity_Service extends Npcink_Device_Inventory_Device_Identity_Service
@@ -242,40 +256,15 @@ class Npcink_Repeated_Board_Identity_Service extends Npcink_Device_Inventory_Dev
 	}
 }
 
-class Npcink_Legacy_Match_Device_Identity_Service extends Npcink_Device_Inventory_Device_Identity_Service
-{
-	public function legacy_primary_identity()
-	{
-		return array('type' => 'device_uuid_v1', 'value' => 'device-v1-existing');
-	}
-}
-
-class Npcink_Conflicting_Legacy_Match_Device_Identity_Service extends Npcink_Legacy_Match_Device_Identity_Service
-{
-	public function identities($payload = array())
-	{
-		$hardware = isset($payload['asset']['hardware']) && is_array($payload['asset']['hardware']) ? $payload['asset']['hardware'] : array();
-		$value = !empty($hardware['identityFixture']) && $hardware['identityFixture'] === 'existing'
-			? 'system-v2-existing'
-			: 'system-v2-fixture';
-		return array(
-			array(
-				'type' => self::TYPE,
-				'value' => $value,
-				'confidence' => 100,
-				'source' => 'server_recomputed',
-			),
-		);
-	}
-}
-
 class Npcink_Ingest_Transaction_Fake_Wpdb
 {
 	public $commands = array();
+	public $on_start;
 
 	public function query($command)
 	{
 		$this->commands[] = $command;
+		if ($command === 'START TRANSACTION' && $this->on_start) { ($this->on_start)(); }
 		return 1;
 	}
 }
@@ -323,9 +312,10 @@ function npcink_ingest_assert($condition, $message)
 
 function npcink_ingest_payload()
 {
-	return array(
+	return array('observation' => array(
 		'_npcink_device' => array(
-			'schema_version' => 3,
+			'schema_version' => 5,
+			'observation_id' => 'cdb0d10b-858d-49aa-a8d4-bcb29f0cdd0e',
 			'collector' => array('name' => 'fixture', 'collected_at' => '2026-07-15T12:00:00Z'),
 		),
 		'asset' => array(
@@ -333,7 +323,7 @@ function npcink_ingest_payload()
 			'hardware' => array(),
 			'upload' => array('reported_user' => ''),
 		),
-	);
+	));
 }
 
 require_once __DIR__ . '/../includes/v3/services/class-npcink-device-inventory-observation-ingest-service.php';
@@ -362,7 +352,7 @@ npcink_ingest_assert(count($identities->claimed_identities[0]) === 1, 'an upload
 npcink_ingest_assert($identities->claimed_identities[0][0]['source'] === 'server_recomputed', 'client-declared identities must not be persisted');
 npcink_ingest_assert($observations->created_asset_ids === array(11), 'the observation must only be stored on the winning asset');
 npcink_ingest_assert($wpdb->commands === array('START TRANSACTION', 'ROLLBACK', 'START TRANSACTION', 'COMMIT'), 'the losing asset write set must be rolled back before retry');
-npcink_ingest_assert($assets->cache_invalidations === 1 && $observations->cache_invalidations === 1, 'the losing transaction must invalidate rows read before rollback');
+npcink_ingest_assert($assets->cache_invalidations === 2 && $observations->cache_invalidations === 2 && $identities->cache_invalidations === 2 && $events->cache_invalidations === 2, 'both rollback and commit must invalidate all transactional caches');
 
 $wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
 $assets = new Npcink_Device_Inventory_Asset_Repository(array());
@@ -461,71 +451,57 @@ npcink_ingest_assert($identities->claimed_asset_ids === array(11), 'a repeated b
 npcink_ingest_assert(count($identities->claimed_identities[0]) === 1, 'a conflicting board serial must be skipped when a stronger identity is present');
 
 $wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
-$assets = new Npcink_Device_Inventory_Asset_Repository(array(11 => npcink_ingest_asset_row(11, 'legacy-owner')));
+$assets = new Npcink_Device_Inventory_Asset_Repository(array(11 => npcink_ingest_asset_row(11, 'archive-race')));
+$wpdb->on_start = function () use ($assets) { $assets->assets[11]['status'] = 'deleted'; };
 $identities = new Npcink_Device_Inventory_Identity_Repository();
-$identities->matched_asset_ids = array('device_uuid_v1:device-v1-existing' => 11);
-$service = new Npcink_Device_Inventory_Observation_Ingest_Service(
-	$assets,
-	$identities,
-	new Npcink_Device_Inventory_Observation_Repository(),
-	new Npcink_Device_Inventory_Event_Service(),
-	new Npcink_Legacy_Match_Device_Identity_Service()
-);
+$identities->matched_asset_id = 11;
+$observations = new Npcink_Device_Inventory_Observation_Repository();
+$service = new Npcink_Device_Inventory_Observation_Ingest_Service($assets, $identities, $observations, new Npcink_Device_Inventory_Event_Service(), new Npcink_Device_Inventory_Device_Identity_Service());
 $result = $service->ingest(npcink_ingest_payload());
-npcink_ingest_assert(is_array($result) && $result['data']['mode'] === 'matched', 'a v2 upload must attach to an existing v1 asset during the transition');
-npcink_ingest_assert($identities->claimed_asset_ids === array(11), 'the v2 identity must be backfilled onto the legacy asset');
+npcink_ingest_assert(is_wp_error($result) && $result->code === 'asset_archived', 'an archive committed after initial lookup must prevent upload');
+npcink_ingest_assert($observations->created_asset_ids === array(), 'an archived asset must not receive an observation');
+npcink_ingest_assert($wpdb->commands === array('START TRANSACTION', 'ROLLBACK'), 'archive race must roll back');
 
 $wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
-$legacy_asset = npcink_ingest_asset_row(11, 'legacy-owner-with-shared-v2');
-$legacy_asset['latest_observation_id'] = 700;
-$assets = new Npcink_Device_Inventory_Asset_Repository(array(11 => $legacy_asset));
-$identities = new Npcink_Device_Inventory_Identity_Repository();
-$identities->matched_asset_ids = array('device_uuid_v1:device-v1-existing' => 11);
-$observations = new Npcink_Device_Inventory_Observation_Repository(
-	array(
-		700 => array(
-			'id' => 700,
-			'asset_id' => 11,
-			'hardware_json' => json_encode(array('identityFixture' => 'incoming')),
-		),
-	)
-);
-$service = new Npcink_Device_Inventory_Observation_Ingest_Service(
-	$assets,
-	$identities,
-	$observations,
-	new Npcink_Device_Inventory_Event_Service(),
-	new Npcink_Conflicting_Legacy_Match_Device_Identity_Service()
-);
+$observations->fail_create = true;
+$assets->assets[11]['status'] = 'active';
 $result = $service->ingest(npcink_ingest_payload());
-npcink_ingest_assert(is_array($result) && $result['data']['mode'] === 'matched', 'legacy migration must continue when the latest observation shares a v2 identity');
-npcink_ingest_assert($identities->claimed_asset_ids === array(11), 'shared v2 evidence must allow the legacy asset to receive the backfill');
+npcink_ingest_assert(is_wp_error($result) && $result->code === 'observation_create_failed', 'a repository write failure must fail the upload');
+npcink_ingest_assert($wpdb->commands === array('START TRANSACTION', 'ROLLBACK'), 'a failed latest pointer must never commit partial data');
 
+foreach (array('2099-01-01T00:00:00Z', '2026-02-30T12:00:00Z', 'tomorrow', 'not-a-date') as $invalid_time) {
+	$wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
+	$payload = npcink_ingest_payload();
+	$payload['observation']['_npcink_device']['collector']['collected_at'] = $invalid_time;
+	$result = $service->ingest($payload);
+	npcink_ingest_assert(is_wp_error($result) && $result->code === 'invalid_observation_time', 'invalid or future collection time must fail');
+	npcink_ingest_assert($wpdb->commands === array(), 'invalid time must be rejected before any write');
+}
 $wpdb = new Npcink_Ingest_Transaction_Fake_Wpdb();
-$legacy_asset = npcink_ingest_asset_row(11, 'legacy-owner-conflict');
-$legacy_asset['latest_observation_id'] = 701;
-$assets = new Npcink_Device_Inventory_Asset_Repository(array(11 => $legacy_asset));
+$assets = new Npcink_Device_Inventory_Asset_Repository(array(11 => npcink_ingest_asset_row(11, 'existing-asset')));
 $identities = new Npcink_Device_Inventory_Identity_Repository();
-$identities->matched_asset_ids = array('device_uuid_v1:device-v1-existing' => 11);
-$observations = new Npcink_Device_Inventory_Observation_Repository(
-	array(
-		701 => array(
-			'id' => 701,
-			'asset_id' => 11,
-			'hardware_json' => json_encode(array('identityFixture' => 'existing')),
-		),
-	)
-);
-$service = new Npcink_Device_Inventory_Observation_Ingest_Service(
-	$assets,
-	$identities,
-	$observations,
-	new Npcink_Device_Inventory_Event_Service(),
-	new Npcink_Conflicting_Legacy_Match_Device_Identity_Service()
-);
-$result = $service->ingest(npcink_ingest_payload());
-npcink_ingest_assert($result instanceof WP_Error && $result->code === 'legacy_identity_migration_conflict', 'legacy migration must fail when the target latest hardware has no shared v2 evidence');
-npcink_ingest_assert($wpdb->commands === array(), 'legacy migration conflicts must fail before starting a transaction');
-npcink_ingest_assert($identities->claimed_asset_ids === array(), 'legacy migration conflicts must not backfill incoming v2 identities');
-
+$identities->matched_asset_id = 11;
+$observations = new Npcink_Device_Inventory_Observation_Repository();
+$events = new Npcink_Device_Inventory_Event_Service();
+$service = new Npcink_Device_Inventory_Observation_Ingest_Service($assets, $identities, $observations, $events, new Npcink_Device_Inventory_Device_Identity_Service());
+$payload = npcink_ingest_payload();
+$first = $service->ingest($payload);
+npcink_ingest_assert(!is_wp_error($first), 'current wrapped contract must be accepted');
+$observations->receipt = $observations->last_created;
+$event_count = count($events->events);
+$payload['observation']['asset']['upload']['uploaded_at'] = '2026-10-27T12:00:00Z';
+$retry = $service->ingest($payload);
+npcink_ingest_assert($retry['data']['mode'] === 'duplicate' && $retry['data']['observation']['id'] === $first['data']['observation']['id'], 'retry must return the original receipt');
+npcink_ingest_assert(count($observations->created_asset_ids) === 1 && count($events->events) === $event_count, 'retry must not insert another observation or event');
+npcink_ingest_assert(!isset($retry['data']['observation']['hardware']) && !isset($retry['data']['identities']), 'upload receipt must not echo full hardware and identity payloads');
+$payload['observation']['asset']['summary']['device_model'] = 'different facts';
+$conflict = $service->ingest($payload);
+npcink_ingest_assert(is_wp_error($conflict) && $conflict->code === 'observation_id_conflict', 'same ID with different facts must be rejected');
+$unsupported = npcink_ingest_payload();
+$unsupported['observation']['_npcink_device']['schema_version'] = 999;
+npcink_ingest_assert($service->ingest($unsupported)->code === 'unsupported_observation_schema', 'unsupported versions must be rejected');
+npcink_ingest_assert($service->ingest(npcink_ingest_payload()['observation'])->code === 'invalid_payload', 'unwrapped legacy payloads must be rejected');
+$bad_type = npcink_ingest_payload();
+$bad_type['observation']['asset']['summary']['memory_bytes'] = '16 GB';
+npcink_ingest_assert($service->ingest($bad_type)->code === 'invalid_observation_field', 'summary units and field types must be checked');
 echo "Observation ingest fixture checks passed.\n";

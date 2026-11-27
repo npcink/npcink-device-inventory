@@ -20,7 +20,6 @@ export interface HardwareIssue {
   duplicateGroupKey?: string;
 }
 
-export type CollectionFreshness = "fresh" | "aging" | "stale" | "missing";
 export type CollectionAgeBand = "fresh" | "aging" | "stale_31_60" | "stale_61_90" | "stale_90_plus" | "missing";
 export type CollectionOverdueLevel = "warning" | "error" | null;
 
@@ -66,6 +65,58 @@ export const firstText = (...values: unknown[]) => {
   }
   return "";
 };
+
+const hardwareMemoryRecords = (hardware: JsonRecord): JsonRecord[] =>
+  [getRecord(hardware.memory).modules, hardware.memory, hardware.mem, hardware.memLayout]
+    .map(getArray).find((items) => items.length) || [];
+
+// Uploads store module facts under memory.modules; aggregate RAM is not a DIMM.
+export const hardwareMemoryModules = (hardware: JsonRecord): JsonRecord[] => {
+  const kind = getRecord(hardware.memory).kind;
+  if (kind === "unified") return [];
+  const modules = hardwareMemoryRecords(hardware);
+  return modules.filter((item) => toNumber(item.size) > 0 && (
+    kind === "dimm" ||
+    modules.length > 1 ||
+    (firstText(item.bank).toLowerCase() !== "unified memory" && Boolean(firstText(item.bank, item.partNum, item.serialNum, item.formFactor))) ||
+    /^(?:DDR|LPDDR)/i.test(firstText(item.type))
+  ));
+};
+
+export const hardwareDiskRecords = (hardware: JsonRecord): JsonRecord[] =>
+  [hardware.disks, hardware.disk, hardware.diskLayout].map(getArray).find((items) => items.length) || [];
+
+export const isDiskVolume = (disk: JsonRecord) => Boolean(disk.mount || disk.fsType) &&
+  !firstText(disk.model, disk.serialNum, disk.serial, disk.interfaceType, disk.pnpDeviceId);
+
+const componentText = (...values: unknown[]) => {
+  const text = firstText(...values).trim();
+  return /^(?:unknown|undefined|none|n\/a|not specified|0)$/i.test(text) ? "" : text;
+};
+
+export const memoryModuleRows = (hardware: JsonRecord) => hardwareMemoryModules(hardware).map((item, index) => ({
+  key: `memory-${index}`,
+  label: `内存 ${index + 1}`,
+  slot: componentText(item.bank),
+  capacity: formatBytes(item.size),
+  size: toNumber(item.size),
+  type: componentText(item.type, item.memoryType),
+  brand: /^[0-9a-f]{4,8}$/i.test(componentText(item.manufacturer)) ? `厂商代码 ${componentText(item.manufacturer)}` : componentText(item.manufacturer),
+  model: componentText(item.partNum),
+  frequency: toNumber(item.clockSpeed || item.clock) > 0 ? `${toNumber(item.clockSpeed || item.clock)} ${firstText(item.speedUnit) || "（单位未记录）"}` : "",
+}));
+
+export const diskComponentRows = (hardware: JsonRecord) => hardwareDiskRecords(hardware).map((item, index) => ({
+  key: `disk-${index}`,
+  label: `${isDiskVolume(item) ? "卷" : "硬盘"} ${index + 1}`,
+  isVolume: isDiskVolume(item),
+  model: componentText(item.model, item.name),
+  capacity: formatBytes(item.size),
+  type: componentText(item.type, item.mediaType),
+  brand: componentText(item.vendor, item.manufacturer),
+  interface: componentText(item.interfaceType),
+  mount: componentText(item.mount),
+}));
 
 const VIRTUAL_GRAPHICS_PATTERN = /(?:orayidd|virtual\s+(?:display|graphics|monitor)|remote\s+display|iddsample|parsec.*display|microsoft\s+remote\s+display)/i;
 
@@ -113,16 +164,8 @@ export const hardwareSummary = (summary: JsonRecord, hardware: JsonRecord) => {
   const system = getRecord(hardware.system);
   const baseboard = getRecord(hardware.baseboard);
   const displays = getArray(graphics.displays);
-  const disks = getArray(hardware.disks).length
-    ? getArray(hardware.disks)
-    : getArray(hardware.disk).length
-      ? getArray(hardware.disk)
-      : getArray(hardware.diskLayout);
-  const memory = getArray(hardware.memory).length
-    ? getArray(hardware.memory)
-    : getArray(hardware.mem).length
-      ? getArray(hardware.mem)
-      : getArray(hardware.memLayout);
+  const disks = diskComponentRows(hardware);
+  const memory = memoryModuleRows(hardware);
   const net = getRecord(hardware.net);
 
   return {
@@ -134,17 +177,14 @@ export const hardwareSummary = (summary: JsonRecord, hardware: JsonRecord) => {
     ),
     deviceModel: firstText(summary.device_model, system.model),
     baseboard: firstText(baseboard.model, baseboard.serial, system.model),
-    memoryLines: memory.map((item) =>
-      [
-        item.clockSpeed || item.clock ? `频率: ${item.clockSpeed || item.clock} MHz` : "",
-        item.size ? `大小: ${formatBytes(item.size)}` : "",
-      ].filter(Boolean).join(" ")
-    ).filter(Boolean),
+    memoryLines: memory.map((item) => [
+      item.slot || item.label, item.capacity, item.type, item.brand, item.model, item.frequency,
+    ].filter(Boolean).join(" · ")),
     display: displays[0] && displayResolution(displays[0])
       ? `${displayResolution(displays[0])}${displays[0].currentRefreshRate ? ` (${displays[0].currentRefreshRate} 赫兹)` : ""}`
       : "",
     displayModel: firstText(displays[0]?.model),
-    primaryDisk: firstText(disks[0]?.name, disks[0]?.device, disks[0]?.serialNum),
+    primaryDisk: disks[0] ? [disks[0].model, disks[0].capacity, disks[0].type, disks[0].interface, disks[0].mount].filter(Boolean).join(" · ") : "",
     primaryIp: firstText(summary.primary_ip, net.ip4, net.defaultGateway),
   };
 };
@@ -180,12 +220,9 @@ export const hardwareMemoryBytes = (asset: Asset) => {
   if (summaryBytes > 0) {
     return summaryBytes;
   }
-  const memory = getArray(hardware.memory).length
-    ? getArray(hardware.memory)
-    : getArray(hardware.mem).length
-      ? getArray(hardware.mem)
-      : getArray(hardware.memLayout);
-  return memory.reduce((total, item) => total + toNumber(item.size), 0);
+  const records = hardwareMemoryRecords(hardware);
+  const moduleBytes = records.reduce((total, item) => total + toNumber(item.size), 0);
+  return moduleBytes || toNumber(getRecord(getRecord(hardware.memory).system).total) || toNumber(getRecord(hardware.mem).total);
 };
 
 export const hardwareDiskBytes = (asset: Asset) => {
@@ -274,14 +311,6 @@ export const collectionAgeBand = (asset: Asset, now = Date.now()): CollectionAge
   return "stale_90_plus";
 };
 
-export const collectionFreshness = (asset: Asset, now = Date.now()): CollectionFreshness => {
-  const band = collectionAgeBand(asset, now);
-  if (band === "fresh" || band === "aging" || band === "missing") {
-    return band;
-  }
-  return "stale";
-};
-
 /**
  * The collection-health dashboard can still show short-term freshness, but it
  * becomes a remediation task only after the agreed operational thresholds.
@@ -292,11 +321,6 @@ export const collectionOverdueLevel = (asset: Asset, now = Date.now()): Collecti
     return null;
   }
   return days >= COLLECTION_DANGER_DAYS ? "error" : "warning";
-};
-
-const ignoredAuditFields = (asset: Asset) => {
-  const audit = getRecord(getRecord(asset.metadata).audit);
-  return Array.isArray(audit.ignoredFields) ? new Set(audit.ignoredFields.map(String)) : new Set<string>();
 };
 
 const normalizeDuplicateValue = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
@@ -432,7 +456,6 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
   const issues: HardwareIssue[] = [];
 
   assets.forEach((asset) => {
-    const ignored = ignoredAuditFields(asset);
     const context = assetHardwareContext(asset);
     const assetLabel = asset.assetNumber || asset.name || asset.uuid;
     const extracted = context.extracted;
@@ -451,7 +474,7 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
     }
     const ip = context.extracted.primaryIp;
     const ipKey = normalizeDuplicateValue(ip);
-    if (isDuplicateCandidate(ip, "ip") && !ignored.has("primary_ip") && (byIp.get(ipKey)?.length || 0) > 1) {
+    if (isDuplicateCandidate(ip, "ip") && (byIp.get(ipKey)?.length || 0) > 1) {
       const relatedAssets = relatedDuplicateAssets(byIp.get(ipKey), asset);
       issues.push({
         key: `${asset.uuid}-duplicate-ip`,
@@ -508,7 +531,7 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
         message: `${assetLabel} 未设置责任人`,
       });
     }
-    if (!ignored.has("cpu") && missingHardwareValue(extracted.cpu)) {
+    if (missingHardwareValue(extracted.cpu)) {
       issues.push({
         key: `${asset.uuid}-missing-cpu`,
         level: "warning",
@@ -517,7 +540,7 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
         message: `${assetLabel} 缺少 CPU 型号`,
       });
     }
-    if (!ignored.has("graphics") && missingHardwareValue(extracted.graphics)) {
+    if (missingHardwareValue(extracted.graphics)) {
       issues.push({
         key: `${asset.uuid}-missing-graphics`,
         level: "warning",
@@ -526,7 +549,7 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
         message: `${assetLabel} 缺少显卡型号`,
       });
     }
-    if (!ignored.has("memory_bytes") && hardwareMemoryBytes(asset) <= 0 && missingHardwareValue(String(context.manualHardware.memory || ""))) {
+    if (hardwareMemoryBytes(asset) <= 0 && missingHardwareValue(String(context.manualHardware.memory || ""))) {
       issues.push({
         key: `${asset.uuid}-missing-memory`,
         level: "warning",
@@ -535,7 +558,7 @@ export const detectHardwareIssues = (assets: Asset[], now = Date.now()) => {
         message: `${assetLabel} 缺少内存信息`,
       });
     }
-    if (!ignored.has("disk_bytes") && hardwareDiskBytes(asset) <= 0 && missingHardwareValue(String(context.manualHardware.disk || ""))) {
+    if (hardwareDiskBytes(asset) <= 0 && missingHardwareValue(String(context.manualHardware.disk || ""))) {
       issues.push({
         key: `${asset.uuid}-missing-disk`,
         level: "warning",

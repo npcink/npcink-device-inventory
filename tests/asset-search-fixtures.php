@@ -87,7 +87,9 @@ require_once __DIR__ . '/../includes/v3/repositories/class-npcink-device-invento
 $wpdb = new Npcink_Asset_Search_Wpdb();
 $repository = new Npcink_Device_Inventory_Asset_Repository();
 $method = new ReflectionMethod($repository, 'should_search_extended_asset_data');
-$method->setAccessible(true);
+if (PHP_VERSION_ID < 80100) {
+	$method->setAccessible(true);
+}
 
 npcink_asset_search_assert($method->invoke($repository, '') === false, 'empty search should not trigger extended search');
 npcink_asset_search_assert($method->invoke($repository, 'it') === false, 'short keyword should not trigger extended search');
@@ -138,22 +140,28 @@ require_once __DIR__ . '/../includes/v3/repositories/class-npcink-device-invento
 $wpdb->queries = array();
 $wpdb->args = array();
 $observations = new Npcink_Device_Inventory_Observation_Repository();
-$observations->list_all(
-	array(
-		'page' => 1,
-		'pageSize' => 20,
-		'source' => '',
-		'search' => '',
-	)
-);
-npcink_asset_search_assert(count($wpdb->queries) === 2, 'global observation list should run count and select queries');
-npcink_asset_search_assert(strpos($wpdb->queries[0], "a.status <> 'deleted'") !== false, 'global observation count must exclude archived assets');
-npcink_asset_search_assert(strpos($wpdb->queries[1], "a.status <> 'deleted'") !== false, 'global observation rows must exclude archived assets');
-
 $wpdb->queries = array();
 $wpdb->args = array();
 $observations->daily_counts_between('2026-07-01 00:00:00', '2026-08-01 00:00:00');
 npcink_asset_search_assert(count($wpdb->queries) === 1, 'collection trend aggregate should run one query');
 npcink_asset_search_assert(strpos($wpdb->queries[0], "a.status <> 'deleted'") !== false, 'collection trend aggregate must exclude archived assets');
+
+npcink_asset_search_assert(strpos($select_query, 'latest_hardware_json') === false, 'default list must omit full hardware json');
+
+$wpdb->queries = array();
+$wpdb->args = array();
+$repository->list_assets(
+	array(
+		'page' => 1,
+		'pageSize' => 10,
+		'search' => 'it',
+		'include_hardware' => true,
+	)
+);
+npcink_asset_search_assert(count($wpdb->queries) === 2, 'include_hardware list should run count and select queries');
+$full_select_query = $wpdb->queries[1];
+preg_match_all('/%(?:i|s|d|f)/', $full_select_query, $full_select_placeholders);
+npcink_asset_search_assert(count($full_select_placeholders[0]) === count($wpdb->args[1]), 'include_hardware select placeholders must match prepared arguments');
+npcink_asset_search_assert(strpos($full_select_query, 'latest_hardware_json') !== false, 'include_hardware list must select full hardware json');
 
 echo "Asset search fixture checks passed.\n";

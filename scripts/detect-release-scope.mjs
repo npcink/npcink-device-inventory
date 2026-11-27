@@ -9,7 +9,7 @@ if (!releaseRef) {
   process.exit(1);
 }
 
-const previousTag = previousReleaseTag(releaseRef);
+const previousTag = process.env.PREVIOUS_RELEASE_TAG || previousReleaseTag(releaseRef);
 const changedPaths = previousTag ? changedFiles(previousTag, releaseRef) : [];
 const desktop = !previousTag || needsDesktopRelease(changedPaths);
 const mode = desktop ? "desktop" : "plugin";

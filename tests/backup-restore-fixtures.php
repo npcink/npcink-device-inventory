@@ -110,6 +110,10 @@ class Npcink_Test_Wpdb
 	public $commands = array();
 	public $inserts = array();
 	public $fail_command = '';
+	public $last_error = '';
+	public $fail_read = '';
+	public $fail_read_in_transaction = false;
+	private $in_transaction = false;
 	private $last_query = '';
 	private $last_args = array();
 
@@ -122,7 +126,11 @@ class Npcink_Test_Wpdb
 
 	public function get_row($query, $format = null)
 	{
+		if ($this->read_failed($query)) {
+			return null;
+		}
 		$key = isset($this->last_args[1]) ? (string) $this->last_args[1] : '';
+		if (strpos($query, 'observation_uuid =') !== false) { return isset($this->rows['receipts'][$key]) ? $this->rows['receipts'][$key] : null; }
 		if (strpos($query, 'uuid =') !== false && isset($this->rows['assets_by_uuid'][$key])) {
 			return $this->rows['assets_by_uuid'][$key];
 		}
@@ -134,6 +142,9 @@ class Npcink_Test_Wpdb
 
 	public function get_var($query)
 	{
+		if ($this->read_failed($query)) {
+			return null;
+		}
 		if (strpos($query, 'COUNT(*)') !== false) {
 			$table = isset($this->last_args[0]) ? (string) $this->last_args[0] : '';
 			if (isset($this->count_overrides[$table])) {
@@ -150,6 +161,10 @@ class Npcink_Test_Wpdb
 
 	public function get_results($query, $format = null)
 	{
+		if ($this->read_failed($query)) {
+			// wpdb returns an empty array for ARRAY_A even when the query failed.
+			return array();
+		}
 		$table = isset($this->last_args[0]) ? (string) $this->last_args[0] : '';
 		return isset($this->export_rows[$table]) ? $this->export_rows[$table] : array();
 	}
@@ -169,10 +184,26 @@ class Npcink_Test_Wpdb
 	public function query($query)
 	{
 		$this->commands[] = $query;
+		$this->last_error = '';
+		if ($query === 'START TRANSACTION') {
+			$this->in_transaction = true;
+		} elseif ($query === 'COMMIT' || $query === 'ROLLBACK') {
+			$this->in_transaction = false;
+		}
 		if ($this->fail_command !== '' && $query === $this->fail_command) {
 			return false;
 		}
 		return true;
+	}
+
+	private function read_failed($query)
+	{
+		$this->last_error = '';
+		if ($this->fail_read !== '' && strpos($query, $this->fail_read) !== false && (!$this->fail_read_in_transaction || $this->in_transaction)) {
+			$this->last_error = 'Injected database read failure';
+			return true;
+		}
+		return false;
 	}
 }
 
@@ -225,12 +256,26 @@ function rest_ensure_response($value)
 
 function get_option($name, $fallback = false)
 {
+	global $npcink_current_options;
+	if (class_exists('Npcink_Device_Inventory_V3_Tables') && $name === Npcink_Device_Inventory_V3_Tables::OPTION && is_array($npcink_current_options)) {
+		return $npcink_current_options;
+	}
 	return $fallback;
 }
 
-function update_option($name, $value)
+function update_option($name, $value, $autoload = null)
 {
 	global $npcink_updated_options;
+	$npcink_updated_options[$name] = $value;
+	return true;
+}
+
+function add_option($name, $value, $deprecated = '', $autoload = true)
+{
+	global $npcink_updated_options;
+	if (array_key_exists($name, $npcink_updated_options)) {
+		return false;
+	}
 	$npcink_updated_options[$name] = $value;
 	return true;
 }
@@ -264,19 +309,19 @@ require_once __DIR__ . '/../includes/v3/rest/class-npcink-device-inventory-backu
 $wpdb = new Npcink_Test_Wpdb();
 $npcink_updated_options = array();
 
-function npcink_request($backup, $dry_run)
+function npcink_request($backup, $dry_run, $extra = array())
 {
 	$request = new WP_REST_Request();
-	$body = wp_json_encode(array('backup' => $backup, 'dryRun' => $dry_run));
+	$body = wp_json_encode(array_merge(array('backup' => $backup, 'dryRun' => $dry_run), $extra));
 	$request->set_body($body);
 	$request->set_header('content-length', strlen($body));
 	return $request;
 }
 
-function npcink_restore($backup, $dry_run = true)
+function npcink_restore($backup, $dry_run = true, $extra = array())
 {
 	$controller = new Npcink_Device_Inventory_Backup_Restore_Controller();
-	return $controller->restore_backup(npcink_request($backup, $dry_run));
+	return $controller->restore_backup(npcink_request($backup, $dry_run, $extra));
 }
 
 function npcink_export($sections)
@@ -327,8 +372,8 @@ $wpdb->export_rows = array(
 			'asset_id' => 10,
 			'asset_uuid' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 			'asset_number' => 'RESTORE-FIXTURE-001',
-			'identity_type' => 'device_uuid_v1',
-			'identity_value' => 'device-v1-backup-fixture',
+			'identity_type' => 'system_uuid_v2',
+			'identity_value' => 'system-v2-backup-fixture',
 			'confidence' => '100.00',
 			'is_primary' => 1,
 			'source' => 'fixture',
@@ -378,6 +423,7 @@ npcink_assert($exported_backup['assets'][0]['secondHandMarketValue'] === 100.0, 
 npcink_assert($exported_backup['assets'][0]['financialResidualValue'] === 50.0, 'backup must export financial residual value independently');
 npcink_assert(count($exported_backup['identities'][0]['identities']) === 1, 'server export must group identities by asset');
 npcink_assert($export_result['meta']['counts']['observations'] === 1, 'server export must report restorable section counts');
+npcink_assert(!array_key_exists('countAvailableAssetsOnly', $exported_backup['settings']), 'exports must omit the unused counting setting');
 npcink_assert($exported_backup['settings']['renewalAgeYears'] === 5, 'server export must include the renewal age threshold');
 npcink_assert($exported_backup['settings']['renewalMinMemoryGb'] === 8, 'server export must include the renewal memory threshold');
 npcink_assert($exported_backup['settings']['renewalMinDiskGb'] === 256, 'server export must include the renewal disk threshold');
@@ -389,10 +435,25 @@ $round_trip_summary = npcink_data($round_trip)['data']['summary'];
 npcink_assert($round_trip_summary['available']['assets'] === 1, 'an exported backup must pass restore preview');
 npcink_assert($round_trip_summary['available']['identities'] === 1, 'restore preview must count exported nested identities');
 
+foreach (array('assets' => 'SELECT id, uuid', 'identities' => 'SELECT i.*', 'events' => 'SELECT e.*', 'observations' => 'SELECT o.*') as $section => $query) {
+	$wpdb->commands = array();
+	$wpdb->fail_read = $query;
+	$failed_export = npcink_export(array($section));
+	npcink_assert($failed_export instanceof WP_Error && $failed_export->get_error_code() === 'backup_export_failed', $section . ' read failure must not produce an empty successful backup');
+	npcink_assert(end($wpdb->commands) === 'ROLLBACK' && !in_array('COMMIT', $wpdb->commands, true), 'failed export must roll back its snapshot');
+}
+$wpdb->fail_read = '';
+$saved_export_rows = $wpdb->export_rows;
+$wpdb->export_rows = array();
+$empty_export = npcink_data(npcink_export(array('assets')))['data'];
+npcink_assert($empty_export['backup']['assets'] === array(), 'a successful empty query must remain a valid backup');
+$wpdb->export_rows = $saved_export_rows;
+
 $settings_backup = array(
 	'schema' => 'npcink-device-inventory/v3-admin-export',
 	'exportedAt' => '2026-07-06T00:00:00+00:00',
 	'settings' => array(
+		'countAvailableAssetsOnly' => false,
 		'renewalAgeYears' => 7,
 		'renewalMinMemoryGb' => 16,
 		'renewalMinDiskGb' => 512,
@@ -403,10 +464,42 @@ $npcink_updated_options = array();
 $settings_restore = npcink_restore($settings_backup, false);
 npcink_assert($settings_restore instanceof WP_REST_Response, 'renewal settings restore should succeed');
 $restored_options = $npcink_updated_options[Npcink_Device_Inventory_V3_Tables::OPTION];
+npcink_assert(!array_key_exists('count_available_assets_only', $restored_options), 'legacy counting keys must be ignored without rejecting other settings');
 npcink_assert($restored_options['renewal_age_years'] === 7, 'restore must apply the renewal age threshold');
 npcink_assert($restored_options['renewal_min_memory_gb'] === 16, 'restore must apply the renewal memory threshold');
 npcink_assert($restored_options['renewal_min_disk_gb'] === 512, 'restore must apply the renewal disk threshold');
 npcink_assert($restored_options['renewal_max_residual_rate'] === 15.0, 'restore must apply the renewal residual threshold');
+
+$uninstall_backup = array(
+	'schema' => 'npcink-device-inventory/v3-admin-export',
+	'exportedAt' => '2026-07-06T00:00:00+00:00',
+	'settings' => array(
+		'renewalAgeYears' => 8,
+		'deleteDataOnUninstall' => true,
+	),
+);
+$npcink_current_options = array('delete_data_on_uninstall' => false);
+$npcink_updated_options = array();
+$uninstall_preview = npcink_data(npcink_restore($uninstall_backup, true));
+npcink_assert($uninstall_preview['data']['dryRun'] === true, 'uninstall-switch preview must remain a dry run');
+npcink_assert($npcink_updated_options === array(), 'uninstall-switch preview must not write options');
+$preview_change = $uninstall_preview['data']['summary']['deleteDataOnUninstall'];
+npcink_assert($preview_change['current'] === false && $preview_change['incoming'] === true && $preview_change['changed'] === true, 'preview must compare current and incoming deleteDataOnUninstall values');
+npcink_assert($preview_change['applied'] === false, 'preview must not mark the uninstall switch as applied');
+
+$npcink_updated_options = array();
+$unconfirmed = npcink_data(npcink_restore($uninstall_backup, false));
+$unconfirmed_options = $npcink_updated_options[Npcink_Device_Inventory_V3_Tables::OPTION];
+npcink_assert($unconfirmed_options['renewal_age_years'] === 8, 'unconfirmed import must still apply other settings');
+npcink_assert($unconfirmed_options['delete_data_on_uninstall'] === false, 'unconfirmed import must leave deleteDataOnUninstall unchanged');
+npcink_assert($unconfirmed['data']['summary']['deleteDataOnUninstall']['applied'] === false, 'unconfirmed import must report that the uninstall switch was not applied');
+
+$npcink_updated_options = array();
+$confirmed = npcink_data(npcink_restore($uninstall_backup, false, array('confirmDeleteDataOnUninstallChange' => true)));
+$confirmed_options = $npcink_updated_options[Npcink_Device_Inventory_V3_Tables::OPTION];
+npcink_assert($confirmed_options['delete_data_on_uninstall'] === true, 'confirmed import must apply the incoming deleteDataOnUninstall value');
+npcink_assert($confirmed['data']['summary']['deleteDataOnUninstall']['applied'] === true, 'confirmed import must report that the uninstall switch was applied');
+$npcink_current_options = null;
 
 $wpdb->commands = array();
 $wpdb->fail_command = 'COMMIT';
@@ -436,14 +529,34 @@ $base_backup = array(
 	),
 );
 
-$legacy_type_backup = $base_backup;
-$legacy_type_backup['assets'][0]['assetType'] = 'network';
+// 3.2.3 exports carried the canonical market field plus a redundant old alias.
+$release_backup = $exported_backup;
+$release_backup['assets'][0]['residualValue'] = 999;
+$release_backup['identities'][0]['identities'][] = array('identityType' => 'device_uuid_v1', 'identityValue' => 'device-v1-obsolete');
+$release_backup['identities'][0]['identities'][] = array('identityType' => 'fallback_device_v1', 'identityValue' => 'fallback-v1-obsolete');
+$wpdb->commands = array();
+$release_preview = npcink_data(npcink_restore($release_backup, true))['data']['summary'];
+npcink_assert($release_preview['planned']['assetsCreated'] === 1 && $release_preview['planned']['identitiesCreated'] === 1, '3.2.3 exports must preview current assets and identities');
+npcink_assert($release_preview['skipped']['identities'] === 2 && count(array_filter($release_preview['warnings'], function ($warning) { return strpos($warning, 'v1') !== false; })) === 1, 'obsolete v1 identity rows must be explicitly counted and explained');
+npcink_assert($wpdb->commands === array(), '3.2.3 preview must not start a write transaction');
 $wpdb->inserts = array();
-$response = npcink_restore($legacy_type_backup, false);
-npcink_assert($response instanceof WP_REST_Response, 'legacy asset type restore should succeed');
-$asset_insert = end($wpdb->inserts);
-npcink_assert($asset_insert['data']['asset_type'] === 'custom', 'legacy non-computer asset type should restore as custom');
-npcink_assert($asset_insert['data']['category'] === 'network', 'legacy non-computer asset type should be preserved as category');
+$release_import = npcink_data(npcink_restore($release_backup, false))['data']['summary'];
+$restored_assets = array_values(array_filter($wpdb->inserts, function ($item) { return $item['table'] === 'wp_npcink_assets'; }));
+$restored_identities = array_values(array_filter($wpdb->inserts, function ($item) { return $item['table'] === 'wp_npcink_asset_identities'; }));
+npcink_assert($restored_assets[0]['data']['residual_value'] === 100.0, 'canonical market value must win over the redundant alias');
+npcink_assert($restored_assets[0]['data']['financial_residual_value'] === 50.0, 'financial value must remain independent');
+npcink_assert(count($restored_identities) === 1 && $restored_identities[0]['data']['identity_type'] === 'system_uuid_v2', 'restore must never insert obsolete v1 identities');
+npcink_assert($release_import['skipped']['identities'] === 2, 'actual import must report the same obsolete identity count as preview');
+npcink_assert(!array_key_exists('residualValue', $exported_backup['assets'][0]), 'current exports must omit the obsolete alias');
+
+$invalid_type_backup = $base_backup;
+$invalid_type_backup['assets'][0]['assetType'] = 'network';
+$response = npcink_restore($invalid_type_backup, false);
+npcink_assert($response instanceof WP_Error && $response->get_error_code() === 'invalid_backup_asset_type', 'historical asset types must not be silently converted');
+$invalid_field_backup = $base_backup;
+$invalid_field_backup['assets'][0]['residualValue'] = 10;
+$response = npcink_restore($invalid_field_backup, false);
+npcink_assert($response instanceof WP_Error && $response->get_error_code() === 'invalid_backup_field', 'historical financial fields must not be silently accepted');
 
 $wpdb->commands = array();
 $wpdb->fail_command = 'COMMIT';
@@ -474,7 +587,7 @@ $oversized_identities = $base_backup;
 $oversized_identities['identities'] = array(
 	array(
 		'assetNumber' => 'RESTORE-FIXTURE-001',
-		'identities' => array_fill(0, 10001, array('identityType' => 'fallback_device_v1', 'identityValue' => 'FALLBACK')),
+		'identities' => array_fill(0, 10001, array('identityType' => 'pci_permanent_mac_v2', 'identityValue' => 'FALLBACK')),
 	),
 );
 $response = npcink_restore($oversized_identities, true);
@@ -486,8 +599,8 @@ $duplicate_identity['identities'] = array(
 	array(
 		'assetNumber' => 'RESTORE-FIXTURE-001',
 		'identities' => array(
-			array('identityType' => 'fallback_device_v1', 'identityValue' => 'DUPLICATE-FALLBACK'),
-			array('identityType' => 'fallback_device_v1', 'identityValue' => 'DUPLICATE-FALLBACK'),
+			array('identityType' => 'pci_permanent_mac_v2', 'identityValue' => 'DUPLICATE-FALLBACK'),
+			array('identityType' => 'pci_permanent_mac_v2', 'identityValue' => 'DUPLICATE-FALLBACK'),
 		),
 	),
 );
@@ -508,13 +621,13 @@ $cross_asset_identity['identities'] = array(
 	array(
 		'assetNumber' => 'RESTORE-FIXTURE-001',
 		'identities' => array(
-			array('identityType' => 'device_uuid_v1', 'identityValue' => 'CROSS-ASSET-IDENTITY'),
+			array('identityType' => 'system_uuid_v2', 'identityValue' => 'CROSS-ASSET-IDENTITY'),
 		),
 	),
 	array(
 		'assetNumber' => 'RESTORE-FIXTURE-002',
 		'identities' => array(
-			array('identityType' => 'device_uuid_v1', 'identityValue' => 'CROSS-ASSET-IDENTITY'),
+			array('identityType' => 'system_uuid_v2', 'identityValue' => 'CROSS-ASSET-IDENTITY'),
 		),
 	),
 );
@@ -538,9 +651,11 @@ $obsolete_identity['identities'] = array(
 	),
 );
 $response = npcink_restore($obsolete_identity, true);
-$summary = npcink_data($response)['data']['summary'];
-npcink_assert($summary['planned']['identitiesCreated'] === 0, 'removed identity types must not be restored');
-npcink_assert($summary['skipped']['identities'] === 1, 'removed identity types must be counted as skipped');
+npcink_assert($response instanceof WP_Error && $response->get_error_code() === 'invalid_backup_identity_type', 'removed identity types must be rejected before restore');
+$flat_identity = $base_backup;
+$flat_identity['identities'] = array(array('assetNumber' => 'RESTORE-FIXTURE-001', 'identityType' => 'system_uuid_v2', 'identityValue' => 'flat'));
+$response = npcink_restore($flat_identity, true);
+npcink_assert($response instanceof WP_Error && $response->get_error_code() === 'invalid_backup_identity_group', 'historical flat identity rows must be rejected');
 
 $obsolete_event = $base_backup;
 $obsolete_event['events'] = array(
@@ -563,7 +678,7 @@ $missing_uuid['identities'] = array(
 	array(
 		'assetNumber' => 'RESTORE-FIXTURE-001',
 		'identities' => array(
-			array('identityType' => 'fallback_device_v1', 'identityValue' => 'MISSING-UUID-FALLBACK'),
+			array('identityType' => 'pci_permanent_mac_v2', 'identityValue' => 'MISSING-UUID-FALLBACK'),
 		),
 	),
 );
@@ -573,10 +688,50 @@ npcink_assert($summary['planned']['assetsCreated'] === 1, 'missing UUID asset sh
 npcink_assert($summary['planned']['identitiesCreated'] === 1, 'identity should attach to missing-UUID asset by asset number during dry-run');
 npcink_assert(!empty($summary['warnings']), 'missing UUID should produce a warning');
 
+$lookup_backup = $base_backup;
+$lookup_backup['identities'] = array(array(
+	'assetNumber' => 'RESTORE-FIXTURE-001',
+	'identities' => array(array('identityType' => 'system_uuid_v2', 'identityValue' => 'LOOKUP-FAILURE')),
+));
+$lookup_backup['observations'] = array(array('assetNumber' => 'RESTORE-FIXTURE-001', 'observedAt' => '2026-07-06 00:00:00'));
+$lookup_backup['events'] = array(array('assetNumber' => 'RESTORE-FIXTURE-001', 'createdAt' => '2026-07-06 00:00:00', 'message' => 'Lookup failure'));
+$existing_asset = array('id' => 10, 'uuid' => $base_backup['assets'][0]['uuid'], 'asset_number' => 'RESTORE-FIXTURE-001');
+$wpdb->rows['assets_by_uuid'][$existing_asset['uuid']] = $existing_asset;
+$wpdb->rows['assets_by_number'][$existing_asset['asset_number']] = $existing_asset;
+foreach (array('WHERE uuid =', 'WHERE asset_number =', 'SELECT asset_id', 'AND schema_version =', 'AND event_source =') as $lookup) {
+	$wpdb->fail_read = $lookup;
+	foreach (array(true, false) as $dry_run) {
+		$wpdb->commands = array();
+		$wpdb->inserts = array();
+		$wpdb->fail_read_in_transaction = false;
+		$failed_preview = npcink_restore($lookup_backup, $dry_run);
+		npcink_assert($failed_preview instanceof WP_Error && $failed_preview->get_error_code() === 'backup_restore_failed', 'restore must report lookup failure instead of planning a missing row: ' . $lookup);
+		npcink_assert($wpdb->commands === array() && $wpdb->inserts === array(), 'a failed preview lookup must prevent all writes');
+	}
+	$wpdb->commands = array();
+	$wpdb->inserts = array();
+	$wpdb->fail_read_in_transaction = true;
+	$failed_import = npcink_restore($lookup_backup, false);
+	npcink_assert($failed_import instanceof WP_Error && $failed_import->get_error_code() === 'backup_restore_failed', 'import must fail when a lookup breaks after a successful preview: ' . $lookup);
+	npcink_assert(reset($wpdb->commands) === 'START TRANSACTION' && end($wpdb->commands) === 'ROLLBACK' && !in_array('COMMIT', $wpdb->commands, true), 'failed import lookup must roll back without committing: ' . $lookup);
+}
+$wpdb->fail_read = '';
+$wpdb->fail_read_in_transaction = false;
+
 $bad_schema = $base_backup;
 $bad_schema['schema'] = 'wrong';
 $response = npcink_restore($bad_schema, true);
 npcink_assert($response instanceof WP_Error, 'bad schema should fail validation');
 npcink_assert(isset($response->get_error_data()['status']) && $response->get_error_data()['status'] === 422, 'bad schema should return 422');
+
+$receipt_backup = $base_backup;
+$receipt_backup['observations'] = array(array('assetNumber' => 'RESTORE-FIXTURE-001', 'observedAt' => '2026-07-06 00:00:00', 'observationId' => 'cdb0d10b-858d-49aa-a8d4-bcb29f0cdd0e', 'payloadHash' => str_repeat('a', 64)));
+$wpdb->rows['receipts'] = array('cdb0d10b-858d-49aa-a8d4-bcb29f0cdd0e' => array('asset_id' => 10, 'payload_hash' => str_repeat('b', 64)));
+$conflicting_receipt = npcink_restore($receipt_backup, false);
+npcink_assert($conflicting_receipt instanceof WP_Error && $conflicting_receipt->get_error_code() === 'backup_conflicts', 'receipt with different facts must block restore');
+$wpdb->rows['receipts'] = array();
+$receipt_backup['observations'][] = $receipt_backup['observations'][0];
+$duplicate_receipt = npcink_restore($receipt_backup, true);
+npcink_assert($duplicate_receipt instanceof WP_Error && $duplicate_receipt->get_error_code() === 'invalid_backup_receipt', 'duplicate backup receipt IDs must be rejected');
 
 echo "Backup restore fixture checks passed.\n";

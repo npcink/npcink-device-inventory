@@ -50,9 +50,8 @@ The current admin UI is a single v3 asset workspace. It supports:
 ## Legacy Data Import
 The old export JSON files were imported locally through a one-off WP-CLI script:
 
-```text
-.github/scripts/import-device-export-v3.php
-```
+The one-off importer was removed on 2026-10-27 under ADR-017. Current backups
+use the admin JSON restore contract; historical exports require offline conversion.
 
 The import result was:
 

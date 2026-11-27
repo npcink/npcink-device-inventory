@@ -1,3 +1,4 @@
+import { HelpLabel } from "@/components/HelpLabel";
 import { SearchOutlined } from "@ant-design/icons";
 import { Button, Empty, Input, Radio, Table, Typography } from "antd";
 import type { HardwareInventoryKey, HardwareInventoryRow } from "./analysisTypes";
@@ -36,8 +37,7 @@ export const HardwareInventoryView = ({
     <section className="npcink-v3-analysis-panel is-wide">
       <div className="npcink-v3-analysis-panel-head">
         <div>
-          <Title level={4}>硬件型号盘点</Title>
-          <Text type="secondary">按未归档电脑的当前有效硬件事实统计（优先最新观测，兼容已有导入数据）；CPU、内存和主板按设备计数，硬盘同时统计物理块数与涉及设备数。</Text>
+          <Title level={4}><HelpLabel label="硬件型号盘点" description="按未归档电脑的当前有效硬件事实统计（优先最新观测，兼容已有导入数据）；CPU、内存和主板按设备计数，硬盘同时统计物理块数与涉及设备数。" /></Title>
         </div>
         <Input
           allowClear
@@ -65,7 +65,7 @@ export const HardwareInventoryView = ({
     </section>
     <section className="npcink-v3-analysis-panel is-wide">
       <div className="npcink-v3-analysis-panel-head">
-        <div><Title level={4}>{HARDWARE_INVENTORY_OPTIONS.find((item) => item.key === inventoryKey)?.label}统计明细</Title><Text type="secondary">点击型号或“查看设备”可下钻到对应电脑的只读列表。</Text></div>
+        <div><Title level={4}><HelpLabel label={`${HARDWARE_INVENTORY_OPTIONS.find((item) => item.key === inventoryKey)?.label}统计明细`} description="点击型号或“查看设备”可下钻到对应电脑的只读列表。" /></Title></div>
         <Text type="secondary">显示 {visibleRows.length} 项</Text>
       </div>
       <Table<HardwareInventoryRow>
@@ -73,7 +73,7 @@ export const HardwareInventoryView = ({
         size="middle"
         loading={loading}
         dataSource={visibleRows}
-        pagination={{ pageSize: 20, showTotal: (total) => `共 ${total} 项` }}
+        pagination={{ defaultPageSize: 20, responsive: true, showTotal: (total) => `共 ${total} 项` }}
         columns={[
           { title: inventoryKey === "memory" ? "整机容量" : "型号", dataIndex: "label", render: (value, row) => <Button type="link" className="npcink-v3-link npcink-v3-inventory-model-link" onClick={() => onOpenDrillDown(`${value} 设备`, row.assets)}>{value}</Button> },
           { title: "补充信息", dataIndex: "detail", width: 220, render: (value) => value || <Text type="secondary">-</Text> },

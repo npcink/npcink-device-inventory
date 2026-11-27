@@ -46,6 +46,7 @@ class Npcink_Identity_Claim_Fake_Wpdb
 {
 	public $rows = array();
 	public $fail_next_query = false;
+	public $fail_primary_update = false;
 	public $found_rows = false;
 	public $last_insert_sql = '';
 
@@ -75,6 +76,7 @@ class Npcink_Identity_Claim_Fake_Wpdb
 			return 1;
 		}
 		if (strpos($query, 'UPDATE') === 0) {
+			if ($this->fail_primary_update) { return false; }
 			$key = $args[1] . ':' . $args[2];
 			$asset_id = intval($args[3]);
 			$changed = 0;
@@ -114,8 +116,8 @@ require_once __DIR__ . '/../includes/v3/repositories/class-npcink-device-invento
 
 $repository = new Npcink_Device_Inventory_Identity_Repository();
 $identity = array(
-	'type' => 'device_uuid_v1',
-	'value' => 'device-v1-example',
+	'type' => 'baseboard_serial_v2',
+	'value' => 'board-v2-example',
 	'confidence' => 100,
 	'source' => 'fixture',
 );
@@ -125,6 +127,11 @@ npcink_claim_assert($invalid['status'] === Npcink_Device_Inventory_Identity_Repo
 $legacy = $repository->claim(11, array('type' => 'stable_device_id_v3', 'value' => 'legacy-value'));
 npcink_claim_assert($legacy['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_INVALID, 'removed identity types must be rejected');
 
+foreach (array('device_uuid_v1', 'fallback_device_v1') as $removed_type) {
+	$removed = $repository->claim(11, array('type' => $removed_type, 'value' => 'removed-identity'));
+	npcink_claim_assert($removed['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_INVALID, 'historical identity writes must be rejected');
+}
+
 $inserted = $repository->claim(11, $identity);
 npcink_claim_assert($inserted['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_INSERTED, 'the first claim must insert the identity');
 npcink_claim_assert(strpos($wpdb->last_insert_sql, 'ON DUPLICATE KEY UPDATE') !== false, 'the claim must be atomic at the unique database key');
@@ -132,12 +139,12 @@ npcink_claim_assert(strpos($wpdb->last_insert_sql, 'INSERT IGNORE') === false, '
 
 $owned = $repository->claim(11, $identity, true);
 npcink_claim_assert($owned['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_OWNED, 'repeating a claim for the owner must be idempotent');
-npcink_claim_assert($wpdb->rows['device_uuid_v1:device-v1-example']['is_primary'] === 1, 'an owned identity can be promoted to primary');
+npcink_claim_assert($wpdb->rows['baseboard_serial_v2:board-v2-example']['is_primary'] === 1, 'an owned identity can be promoted to primary');
 
 $v2_primary = array('type' => 'system_uuid_v2', 'value' => 'system-v2-example', 'confidence' => 100, 'source' => 'fixture');
 $repository->claim(11, $v2_primary, true);
 npcink_claim_assert($wpdb->rows['system_uuid_v2:system-v2-example']['is_primary'] === 1, 'the new v2 identity must become primary');
-npcink_claim_assert($wpdb->rows['device_uuid_v1:device-v1-example']['is_primary'] === 0, 'promoting v2 must demote the legacy primary identity');
+npcink_claim_assert($wpdb->rows['baseboard_serial_v2:board-v2-example']['is_primary'] === 0, 'promoting the system identity must demote the previous primary identity');
 
 $conflict = $repository->claim(22, $identity);
 npcink_claim_assert($conflict['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_CONFLICT, 'another asset must receive an explicit conflict');
@@ -152,7 +159,7 @@ $wpdb->found_rows = false;
 $many = $repository->claim_many(
 	22,
 	array(
-		array('type' => 'fallback_device_v1', 'value' => 'fallback-v1-example'),
+		array('type' => 'pci_permanent_mac_v2', 'value' => 'pci-v2-example'),
 		$identity,
 	)
 );
@@ -160,7 +167,13 @@ npcink_claim_assert($many[0]['status'] === Npcink_Device_Inventory_Identity_Repo
 npcink_claim_assert($many[1]['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_CONFLICT, 'claim_many must preserve secondary conflicts');
 
 $wpdb->fail_next_query = true;
-$failed = $repository->claim(33, array('type' => 'device_uuid_v1', 'value' => 'database-error'));
+$failed = $repository->claim(33, array('type' => 'baseboard_serial_v2', 'value' => 'database-error'));
 npcink_claim_assert($failed['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_ERROR, 'database failures must not be reported as successful claims');
 
+$wpdb->fail_primary_update = true;
+$failed = $repository->claim(11, $identity, true);
+npcink_claim_assert($failed['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_ERROR, 'primary identity update failures must not be reported as successful claims');
+$wpdb->fail_primary_update = false;
+$unchanged = $repository->claim(11, $v2_primary, true);
+npcink_claim_assert($unchanged['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_OWNED, 'an already-primary identity with zero changed rows must succeed');
 echo "Identity claim fixture checks passed.\n";

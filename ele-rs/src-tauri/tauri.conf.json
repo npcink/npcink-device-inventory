@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Npcink Device Agent",
-  "version": "0.4.4",
+  "version": "0.4.7",
   "identifier": "ink.npc.npcink-device-agent",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -37,7 +37,10 @@
       "icons/icon.ico"
     ],
     "shortDescription": "Device collection and upload tool",
-    "longDescription": "Collects local hardware and runtime information and submits it to Npcink Device Inventory.",
+    "longDescription": "Collects local hardware inventory and submits it to Npcink Device Inventory.",
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "windows": {
       "nsis": {
         "languages": ["SimpChinese"],

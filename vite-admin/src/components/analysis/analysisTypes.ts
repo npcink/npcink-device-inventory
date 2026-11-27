@@ -10,7 +10,6 @@ export type HardwareTextMatchMode = "contains" | "exact";
 
 export interface AssetCompletenessRow {
   asset: Asset;
-  score: number;
   missing: string[];
 }
 

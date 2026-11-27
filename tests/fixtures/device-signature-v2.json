@@ -1,0 +1,26 @@
+[
+  {
+    "method": "POST",
+    "route": "/npcink-device-inventory/v1/device-observations",
+    "token_id": "golden-agent",
+    "secret": "synthetic-golden-secret",
+    "timestamp": "1793095200",
+    "nonce": "fixture_nonce_0123456789",
+    "body": "{\"observation\":{\"name\":\"中文\", \"literal\":\"<USB> & A  B\"}}",
+    "body_hash": "41e2805271abb1fdba5350c0a5c2a0557bc19bca4e9b40965a89ced358919e9b",
+    "payload": "npcink-device-upload-v2\nPOST\n/npcink-device-inventory/v1/device-observations\ngolden-agent\n1793095200\nfixture_nonce_0123456789\n41e2805271abb1fdba5350c0a5c2a0557bc19bca4e9b40965a89ced358919e9b",
+    "signature": "sha256=587f8d7c8e6228a0a3a7ff4e4b8a5bb59da0a6d15bcb832daf7bd248aca71024"
+  },
+  {
+    "method": "GET",
+    "route": "/npcink-device-inventory/v1/device-observations/verify",
+    "token_id": "golden-agent",
+    "secret": "synthetic-golden-secret",
+    "timestamp": "1793095200",
+    "nonce": "fixture_nonce_0123456789",
+    "body": "{}",
+    "body_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "payload": "npcink-device-upload-v2\nGET\n/npcink-device-inventory/v1/device-observations/verify\ngolden-agent\n1793095200\nfixture_nonce_0123456789\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "signature": "sha256=bc469ac8a0075e8dbf916c71865594210e4d342cdd7a09aac3aef11ddb4ffeb9"
+  }
+]

@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${ROOT_DIR}/docker-compose.test.yml"
 PROJECT_NAME="npcink-device-inventory-check-$$-${RANDOM}"
-PLUGIN_CHECK_VERSION="${NPCINK_PLUGIN_CHECK_VERSION:-2.0.0}"
+PLUGIN_CHECK_VERSION="${NPCINK_PLUGIN_CHECK_VERSION:-2.2.0}"
 PLUGIN_ZIP="${ROOT_DIR}/release/npcink-device-inventory.zip"
 SUBMISSION_ZIP="${ROOT_DIR}/sj/npcink-device-inventory.zip"
 SUBMISSION_MANIFEST="${ROOT_DIR}/sj/package-manifest.json"
@@ -76,7 +76,7 @@ node --input-type=module --eval '
   console.log(`Submission package synchronized: ${actual.sha256}`);
 ' "${PLUGIN_ZIP}" "${SUBMISSION_ZIP}" "${SUBMISSION_MANIFEST}"
 
-echo "Starting isolated WordPress PHP 8.3 and MariaDB 11 services..."
+echo "Starting isolated WordPress and MariaDB services..."
 "${COMPOSE[@]}" up --detach --wait database wordpress
 
 run_wp() {
@@ -93,10 +93,17 @@ run_wp core install \
   --skip-email
 run_wp plugin install /workspace/release/npcink-device-inventory.zip --activate
 
+echo "Verifying admin labels with and without WordPress plugin language packs..."
+run_wp eval-file /workspace/tests/wordpress-admin-translations.php install-fixtures
+for locale in en_US fr_FR zh_CN zh_TW; do
+  run_wp --user=npcink-e2e-admin eval-file /workspace/tests/wordpress-admin-translations.php "${locale}"
+done
+
 wordpress_version="$(run_wp core version)"
 php_version="$(run_wp eval 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')"
-if [ "${php_version}" != "8.3" ]; then
-  echo "Expected PHP 8.3, found ${php_version}." >&2
+expected_php="${NPCINK_DOCKER_PHP_VERSION:-8.3}"
+if [ "${php_version}" != "${expected_php}" ]; then
+  echo "Expected PHP ${expected_php}, found ${php_version}." >&2
   exit 1
 fi
 echo "WordPress ${wordpress_version}, PHP ${php_version}."
@@ -117,6 +124,14 @@ if ! grep -Fq "Checks complete. No errors found." <<<"${plugin_check_output}"; t
   exit 1
 fi
 
+if [ "${NPCINK_DOCKER_SEARCH_BENCHMARK:-0}" = 1 ]; then
+  echo "Running synthetic asset search benchmark on the empty database..."
+  run_wp eval-file /workspace/tests/wordpress-asset-search-benchmark.php
+fi
+
+echo "Running WordPress/MariaDB integration regressions..."
+run_wp eval-file /workspace/tests/wordpress-integration.php
+
 echo "Verifying real MariaDB nonce replay and rate-limit boundaries..."
 run_wp eval '
   $options = get_option("npcink_device_inventory_v3_options");
@@ -130,9 +145,10 @@ run_wp eval '
   $body = "{\"summary\":{\"hostname\":\"docker\"}}";
   $timestamp = (string) time();
   $verify = static function ($nonce) use ($auth, $body, $timestamp) {
-    $payload = $timestamp . "\n" . $nonce . "\n" . hash("sha256", $body);
-    $request = new WP_REST_Request("POST", "/");
+    $payload = "npcink-device-upload-v2\nPOST\n/npcink-device-inventory/v1/device-observations\ndocker-agent\n" . $timestamp . "\n" . $nonce . "\n" . hash("sha256", $body);
+    $request = new WP_REST_Request("POST", "/npcink-device-inventory/v1/device-observations");
     $request->set_body($body);
+    $request->set_header("x-npcink-device-signature-version", "2");
     $request->set_header("x-npcink-device-token-id", "docker-agent");
     $request->set_header("x-npcink-device-timestamp", $timestamp);
     $request->set_header("x-npcink-device-nonce", $nonce);
@@ -244,6 +260,78 @@ run_wp eval '
     }
   }
   echo "Multisite upgrade migration verified.\n";
+'
+
+echo "Verifying multisite uninstall honors per-site data deletion flags..."
+run_wp eval '
+  require_once WP_PLUGIN_DIR . "/npcink-device-inventory/admin/partials/npcink-device-inventory-admin-uninstall.php";
+  $origin = get_current_blog_id();
+  $sites = get_sites(array("fields" => "ids", "number" => 0));
+  if (count($sites) < 2) {
+    throw new RuntimeException("Expected at least two sites for uninstall verification.");
+  }
+  $kept_id = (int) $sites[0];
+  $deleted_id = (int) $sites[1];
+  $suffixes = array("npcink_assets", "npcink_asset_identities", "npcink_asset_observations", "npcink_asset_events");
+  $table_exists = static function ($prefix, $suffix) {
+    global $wpdb;
+    $table = $prefix . $suffix;
+    return $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $wpdb->esc_like($table))) === $table;
+  };
+  // Security rows bypass the options cache in production, including during uninstall.
+  $security_row_exists = static function ($name) {
+    global $wpdb;
+    return (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM %i WHERE option_name = %s", $wpdb->options, $name)) === 1;
+  };
+
+  switch_to_blog($kept_id);
+  global $wpdb;
+  $kept_prefix = $wpdb->prefix;
+  $kept = Npcink_Device_Inventory_V3_Tables::options();
+  $kept["delete_data_on_uninstall"] = false;
+  Npcink_Device_Inventory_V3_Tables::update_options($kept);
+  update_option("npcink_v3_upload_nonce_keep", "1");
+  restore_current_blog();
+
+  switch_to_blog($deleted_id);
+  $deleted_prefix = $wpdb->prefix;
+  $deleted = Npcink_Device_Inventory_V3_Tables::options();
+  $deleted["delete_data_on_uninstall"] = true;
+  Npcink_Device_Inventory_V3_Tables::update_options($deleted);
+  Npcink_Device_Inventory_V3_Tables::update_client_tokens(array(array("id" => "site-token", "secret" => "docker-secret")));
+  update_option("npcink_v3_upload_nonce_drop", "1");
+  restore_current_blog();
+
+  Npcink_Device_Inventory_Admin_Uninstall::run();
+  if (get_current_blog_id() !== $origin) {
+    throw new RuntimeException("Multisite uninstall did not restore the original blog.");
+  }
+  foreach ($suffixes as $suffix) {
+    if (!$table_exists($kept_prefix, $suffix)) {
+      throw new RuntimeException("Uninstall deleted tables on a site that opted to keep data: " . $kept_prefix . $suffix);
+    }
+    if ($table_exists($deleted_prefix, $suffix)) {
+      throw new RuntimeException("Uninstall left tables on a site that opted to delete data: " . $deleted_prefix . $suffix);
+    }
+  }
+
+  switch_to_blog($kept_id);
+  $kept_revision = get_option("npcink_device_inventory_schema_revision");
+  $kept_nonce = $security_row_exists("npcink_v3_upload_nonce_keep");
+  restore_current_blog();
+  if ($kept_revision === false || !$kept_nonce) {
+    throw new RuntimeException("Uninstall cleared data on a site that opted to keep it.");
+  }
+
+  switch_to_blog($deleted_id);
+  $deleted_revision = get_option("npcink_device_inventory_schema_revision");
+  $deleted_tokens = get_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION, false);
+  $deleted_nonce = $security_row_exists("npcink_v3_upload_nonce_drop");
+  restore_current_blog();
+  if ($deleted_revision !== false || $deleted_tokens !== false || $deleted_nonce) {
+    throw new RuntimeException("Uninstall retained options on a site that opted to delete data.");
+  }
+  echo "Multisite uninstall flags verified.\n";
 '
 
 echo "Isolated Docker verification passed."

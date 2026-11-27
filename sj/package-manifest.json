@@ -4,36 +4,34 @@
   "plugin": {
     "name": "Npcink Device Inventory",
     "slug": "npcink-device-inventory",
-    "version": "3.2.0",
+    "version": "3.2.4",
     "requires_at_least": "6.5",
-    "tested_up_to": "7.0",
+    "tested_up_to": "7.1",
     "requires_php": "7.4",
-    "license": "GPLv2 or later"
+    "license": "GPL-2.0+"
   },
   "package": {
     "upload_file": "sj/npcink-device-inventory.zip",
     "source_file": "release/npcink-device-inventory.zip",
     "zip_root": "npcink-device-inventory/",
-    "sha256": "8efadab87292c7bb4bca17aed8b6b6f47ce528f8350737e28a2811cea3140186",
-    "entry_count": 90,
-    "file_count": 71,
-    "uncompressed_bytes": 3291672,
-    "compressed_bytes": 942412
+    "sha256": "55f12e01abfa833edd47fcc57681fcd6a354f82a7ba3679190a8093e888fdaaf",
+    "entry_count": 158,
+    "file_count": 132,
+    "uncompressed_bytes": 3167827,
+    "compressed_bytes": 975717
   },
   "verification": {
-    "plugin_check": "passed_official_2.0.0_wordpress_7.0.2_php_8.3",
-    "phpcs": "passed",
-    "phpstan": "passed",
-    "vite_admin_build": "passed",
-    "all_php_regression_fixtures": "passed",
-    "desktop_fmt_clippy_tests_and_rustsec_audit": "passed_with_18_allowed_transitive_warnings",
-    "version_contract": "passed",
-    "release_package_check": "passed",
-    "wordpress_org_review_rules": "passed",
-    "activation_smoke": "passed_wordpress_7_0_php_8_3_mariadb_11",
-    "unsigned_upload_fixture_status": 401,
-    "screenshots": "stale_do_not_publish_until_recaptured",
-    "i18n_pot": "updated"
+    "status": "locally_verified",
+    "package_sha256": "55f12e01abfa833edd47fcc57681fcd6a354f82a7ba3679190a8093e888fdaaf",
+    "date": "2026-11-17",
+    "checks": [
+      "check:submission",
+      "check:docker",
+      "M4 WordPress production UI acceptance"
+    ],
+    "plugin_check_version": "2.2.0",
+    "evidence_document": "docs/simplification-implementation-2026-11-17.md",
+    "formal_release_approved": false
   },
   "official_references": [
     "https://wordpress.org/plugins/developers/add/",

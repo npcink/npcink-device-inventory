@@ -8,7 +8,16 @@ class Npcink_Device_Inventory_Asset_Repository
 {
 	const CACHE_GROUP = 'npcink_device_inventory_assets';
 	const CACHE_TTL = 60;
+	const GENERATED_ASSET_NUMBER_ATTEMPTS = 5;
 	private $last_write_error = '';
+
+	/** Read current state under the caller's transaction, bypassing shared caches. */
+	public function find_by_id_for_update($id)
+	{
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Upload and archive must serialize on the current asset row.
+		return $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE id = %d FOR UPDATE', Npcink_Device_Inventory_V3_Tables::assets(), intval($id)), ARRAY_A);
+	}
 
 	public function find_by_uuid($uuid)
 	{
@@ -125,11 +134,29 @@ class Npcink_Device_Inventory_Asset_Repository
 		return $row;
 	}
 
+	public function find_import_matches($numbers)
+	{
+		if (!$numbers) {
+			return array();
+		}
+		global $wpdb;
+		$placeholders = implode(', ', array_fill(0, count($numbers), '%s'));
+		$args = array_merge(array(Npcink_Device_Inventory_V3_Tables::assets()), $numbers);
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Import needs fresh rows. Only placeholder tokens are interpolated.
+		$rows = $wpdb->get_results(
+			$wpdb->prepare("SELECT * FROM %i WHERE asset_number IN ({$placeholders})", $args),
+			ARRAY_A
+		);
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		return $wpdb->last_error === '' && is_array($rows) ? $rows : null;
+	}
+
 	public function list_assets($args)
 	{
 		global $wpdb;
 		$page = max(1, intval($args['page']));
 		$page_size = max(1, min(100, intval($args['pageSize'])));
+		$include_hardware = !empty($args['include_hardware']);
 		$offset = ($page - 1) * $page_size;
 		$cache_key = $this->build_cache_key(
 			'list',
@@ -191,7 +218,7 @@ class Npcink_Device_Inventory_Asset_Repository
 						SELECT 1
 						FROM %i si
 						WHERE si.asset_id = a.id
-						AND si.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1')
+						AND si.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2')
 						AND si.identity_value LIKE %s
 					))
 					OR (%s = '1' AND EXISTS (
@@ -245,11 +272,14 @@ class Npcink_Device_Inventory_Asset_Repository
 			)
 		);
 
+		$hardware_select = $include_hardware ? "\n\t\t\t\tlo.hardware_json AS latest_hardware_json," : '';
+		// phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- Only a fixed projection fragment is composed; prepare binds all external input.
 		$items = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT a.*,
-				lo.summary_json AS latest_summary_json,
-				lo.hardware_json AS latest_hardware_json,
+				lo.summary_json AS latest_summary_json," .
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The projection is one of two fixed strings; every external value is bound below.
+				$hardware_select . "
 				lo.observed_at AS latest_observed_at,
 				lo.source AS latest_observation_source
 			FROM %i a
@@ -271,7 +301,7 @@ class Npcink_Device_Inventory_Asset_Repository
 					SELECT 1
 					FROM %i si
 					WHERE si.asset_id = a.id
-					AND si.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1')
+					AND si.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2')
 					AND si.identity_value LIKE %s
 				))
 				OR (%s = '1' AND EXISTS (
@@ -300,7 +330,7 @@ class Npcink_Device_Inventory_Asset_Repository
 						SELECT 1
 						FROM %i oi
 						WHERE oi.asset_id = a.id
-						AND oi.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1')
+						AND oi.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2')
 						AND oi.identity_value = %s
 					) THEN 4
 					WHEN %s = '1' AND lo.summary_json LIKE %s THEN 5
@@ -312,7 +342,7 @@ class Npcink_Device_Inventory_Asset_Repository
 						SELECT 1
 						FROM %i pi
 						WHERE pi.asset_id = a.id
-						AND pi.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2', 'device_uuid_v1', 'fallback_device_v1')
+						AND pi.identity_type IN ('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2')
 						AND pi.identity_value LIKE %s
 					) THEN 10
 					WHEN %s = '1' AND lo.summary_json LIKE %s THEN 11
@@ -402,37 +432,46 @@ class Npcink_Device_Inventory_Asset_Repository
 	{
 		global $wpdb;
 		$uuid = !empty($data['uuid']) ? sanitize_text_field($data['uuid']) : wp_generate_uuid4();
-		$asset_number = !empty($data['asset_number']) ? sanitize_text_field($data['asset_number']) : $this->next_asset_number();
-		$row = array(
-			'uuid' => $uuid,
-			'asset_type' => sanitize_key($data['asset_type']),
-			'asset_number' => $asset_number,
-			'name' => sanitize_text_field($data['name']),
-			'owner_name' => sanitize_text_field($data['owner_name']),
-			'department' => Npcink_Device_Inventory_V3_Tables::normalize_department($data['department']),
-			'status' => sanitize_key($data['status']),
-			'category' => sanitize_text_field($data['category']),
-			'purchase_price' => floatval($data['purchase_price']),
-			'residual_value' => floatval($data['residual_value']),
-			'financial_residual_value' => floatval($data['financial_residual_value']),
-			'metadata_json' => Npcink_Device_Inventory_V3_Sanitizer::json_encode($data['metadata']),
-		);
+		$generated_number = empty($data['asset_number']);
+		$attempts = $generated_number ? self::GENERATED_ASSET_NUMBER_ATTEMPTS : 1;
+		$metadata_json = Npcink_Device_Inventory_V3_Sanitizer::json_encode(isset($data['metadata']) ? $data['metadata'] : array());
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin-owned asset table write invalidates repository object-cache version after success.
-		$result = $wpdb->insert(
-			Npcink_Device_Inventory_V3_Tables::assets(),
-			$row,
-			array('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%f', '%s')
-		);
-		$this->last_write_error = $result === false ? (string) $wpdb->last_error : '';
-		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+			$row = array(
+				'uuid' => $uuid,
+				'asset_type' => sanitize_key($data['asset_type']),
+				'asset_number' => $generated_number ? $this->next_asset_number() : sanitize_text_field($data['asset_number']),
+				'name' => sanitize_text_field($data['name']),
+				'owner_name' => sanitize_text_field($data['owner_name']),
+				'department' => Npcink_Device_Inventory_V3_Tables::normalize_department($data['department']),
+				'status' => sanitize_key($data['status']),
+				'category' => sanitize_text_field($data['category']),
+				'purchase_price' => floatval($data['purchase_price']),
+				'residual_value' => floatval($data['residual_value']),
+				'financial_residual_value' => floatval($data['financial_residual_value']),
+				'metadata_json' => $metadata_json,
+			);
 
-		if ($result === false) {
-			return null;
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin-owned asset table write invalidates repository object-cache version after success.
+			$result = $wpdb->insert(
+				Npcink_Device_Inventory_V3_Tables::assets(),
+				$row,
+				array('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%f', '%s')
+			);
+			$this->last_write_error = $result === false ? (string) $wpdb->last_error : '';
+			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+
+			if ($result !== false) {
+				$version = $this->get_list_cache_version();
+				wp_cache_set('list_version', $version + 1, self::CACHE_GROUP);
+				return $this->find_by_id($wpdb->insert_id);
+			}
+			if (!$generated_number || $attempt === $attempts || !$this->last_write_was_duplicate_asset_number()) {
+				return null;
+			}
 		}
-		$version = $this->get_list_cache_version();
-		wp_cache_set('list_version', $version + 1, self::CACHE_GROUP);
-		return $this->find_by_id($wpdb->insert_id);
+
+		return null;
 	}
 
 	public function update($uuid, $data)
@@ -549,6 +588,7 @@ class Npcink_Device_Inventory_Asset_Repository
 		foreach (array('asset_type', 'status', 'department', 'category', 'asset_scope', 'search', 'purchase_platform', 'financial_data_status', 'sort_by', 'include_deleted') as $field) {
 			$result[$field] = isset($args[$field]) ? sanitize_text_field((string) $args[$field]) : '';
 		}
+		$result['include_hardware'] = !empty($args['include_hardware']) ? '1' : '';
 		return $result;
 	}
 

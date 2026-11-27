@@ -7,7 +7,6 @@ if (!defined('ABSPATH')) {
 class Npcink_Device_Inventory_Assets_Controller
 {
 	const ASSET_TYPES = array('computer', 'custom');
-	const IDENTITY_TYPES = array('system_uuid_v2', 'baseboard_serial_v2', 'pci_permanent_mac_v2');
 	const ASSET_STATUSES = array('active', 'inactive', 'maintenance', 'retired', 'deleted');
 	const MAX_BATCH_SIZE = 100;
 
@@ -69,6 +68,17 @@ class Npcink_Device_Inventory_Assets_Controller
 				'permission_callback' => array($this, 'admin_permissions_check'),
 			)
 		);
+		register_rest_route('npcink-device-inventory/v1', '/assets/import/lookup', array(
+			'methods' => WP_REST_Server::CREATABLE,
+			'callback' => array($this, 'lookup_import_assets'),
+			'permission_callback' => array($this, 'admin_permissions_check'),
+			'args' => array(
+				'assetNumbers' => array(
+					'type' => 'array', 'required' => true, 'minItems' => 1, 'maxItems' => self::MAX_BATCH_SIZE,
+					'items' => array('type' => 'string', 'minLength' => 1, 'maxLength' => 64),
+				),
+			),
+		));
 
 		register_rest_route(
 			'npcink-device-inventory/v1',
@@ -99,11 +109,6 @@ class Npcink_Device_Inventory_Assets_Controller
 				array(
 					'methods' => WP_REST_Server::READABLE,
 					'callback' => array($this, 'get_identities'),
-					'permission_callback' => array($this, 'admin_permissions_check'),
-				),
-				array(
-					'methods' => WP_REST_Server::CREATABLE,
-					'callback' => array($this, 'create_identity'),
 					'permission_callback' => array($this, 'admin_permissions_check'),
 				),
 			)
@@ -148,16 +153,6 @@ class Npcink_Device_Inventory_Assets_Controller
 
 		register_rest_route(
 			'npcink-device-inventory/v1',
-			'/observations',
-			array(
-				'methods' => WP_REST_Server::READABLE,
-				'callback' => array($this, 'get_all_observations'),
-				'permission_callback' => array($this, 'admin_permissions_check'),
-			)
-		);
-
-		register_rest_route(
-			'npcink-device-inventory/v1',
 			'/analysis/collection-trends',
 			array(
 				'methods' => WP_REST_Server::READABLE,
@@ -165,6 +160,36 @@ class Npcink_Device_Inventory_Assets_Controller
 				'permission_callback' => array($this, 'admin_permissions_check'),
 			)
 		);
+		register_rest_route('npcink-device-inventory/v1', '/analysis/hardware-observations', array(
+			'methods' => WP_REST_Server::READABLE,
+			'callback' => array($this, 'get_comparison_observations'),
+			'permission_callback' => array($this, 'admin_permissions_check'),
+			'args' => array(
+				'afterAssetId' => array('type' => 'integer', 'minimum' => 0, 'default' => 0),
+				'throughAssetId' => array('type' => 'integer', 'minimum' => 0, 'default' => 0),
+				'pageSize' => array('type' => 'integer', 'minimum' => 1, 'maximum' => 25, 'default' => 25),
+			),
+		));
+	}
+
+	public function get_comparison_observations($request)
+	{
+		$result = $this->observations->comparison_page($request->get_param('afterAssetId'), $request->get_param('throughAssetId'), $request->get_param('pageSize') ?: 25);
+		if ($result === null) {
+			return Npcink_Device_Inventory_V3_Response::error('analysis_query_failed', 'Failed to read comparison observations.', 500);
+		}
+		return rest_ensure_response(array(
+			'data' => array_map(function ($row) {
+				return array(
+					'id' => intval($row['id']),
+					'assetId' => intval($row['asset_id']),
+					'observedAt' => $this->format_utc_datetime($row['observed_at']),
+					'summary' => $this->decode_json($row['summary_json'], array()),
+					'hardware' => $this->decode_json($row['hardware_json'], array()),
+				);
+			}, $result['items']),
+			'pagination' => $result['pagination'],
+		));
 	}
 
 	public function admin_permissions_check()
@@ -182,10 +207,12 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (!in_array($financial_data_status, $allowed_financial_statuses, true)) {
 			return Npcink_Device_Inventory_V3_Response::error('invalid_financial_data_status', 'Financial data status is not supported.', 422);
 		}
+		$include_hardware = $this->wants_full_hardware($request);
 		$result = $this->assets->list_assets(
 			array(
 				'page' => $request->get_param('page') ?: 1,
 				'pageSize' => $request->get_param('pageSize') ?: 20,
+				'include_hardware' => $include_hardware,
 				'search' => $request->get_param('search'),
 				'asset_type' => $request->get_param('assetType'),
 				'asset_scope' => $request->get_param('assetScope'),
@@ -312,7 +339,6 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (!$this->commit_transaction()) {
 			return $this->rollback_error('transaction_commit_failed', 'Failed to commit asset transaction.');
 		}
-		$this->observations->invalidate_cache();
 		return rest_ensure_response(array('data' => $this->format_asset($updated)));
 	}
 
@@ -399,9 +425,6 @@ class Npcink_Device_Inventory_Assets_Controller
 		if (!$this->commit_transaction()) {
 			return $this->rollback_error('transaction_commit_failed', 'Failed to commit batch transaction.');
 		}
-		if ($operation === 'archive') {
-			$this->observations->invalidate_cache();
-		}
 		return rest_ensure_response(
 			array(
 				'data' => array(
@@ -411,6 +434,18 @@ class Npcink_Device_Inventory_Assets_Controller
 				),
 			)
 		);
+	}
+
+	public function lookup_import_assets($request)
+	{
+		$numbers = array_values(array_unique(array_filter(array_map('sanitize_text_field', $request->get_param('assetNumbers')), static function ($number) {
+			return $number !== '';
+		})));
+		$rows = $this->assets->find_import_matches($numbers);
+		if ($rows === null) {
+			return Npcink_Device_Inventory_V3_Response::error('import_lookup_failed', 'Could not check asset numbers.', 500);
+		}
+		return rest_ensure_response(array('data' => array_map(array($this, 'format_asset'), $rows)));
 	}
 
 	public function import_items($request)
@@ -508,64 +543,6 @@ class Npcink_Device_Inventory_Assets_Controller
 		return rest_ensure_response(array('data' => array_map(array($this, 'format_identity'), $items)));
 	}
 
-	public function create_identity($request)
-	{
-		$asset = $this->asset_from_request($request);
-		if (is_wp_error($asset)) {
-			return $asset;
-		}
-		$params = $request->get_json_params();
-		if (!is_array($params) || !isset($params['type'], $params['value']) || !is_scalar($params['type']) || !is_scalar($params['value'])) {
-			return Npcink_Device_Inventory_V3_Response::error('invalid_identity', 'Identity type and value are required.', 422);
-		}
-		$type = sanitize_key((string) $params['type']);
-		$value = sanitize_text_field((string) $params['value']);
-		$confidence = isset($params['confidence']) && is_numeric($params['confidence']) ? floatval($params['confidence']) : 100;
-		if (!in_array($type, self::IDENTITY_TYPES, true) || $value === '' || $this->text_length($value) > 191 || $confidence < 0 || $confidence > 100) {
-			return Npcink_Device_Inventory_V3_Response::error('invalid_identity', 'Identity fields are invalid.', 422);
-		}
-		if (!$this->begin_transaction()) {
-			return Npcink_Device_Inventory_V3_Response::error('transaction_start_failed', 'Failed to start identity transaction.', 500);
-		}
-		$claim = $this->identities->claim(
-			intval($asset['id']),
-			array(
-				'type' => $type,
-				'value' => $value,
-				'confidence' => $confidence,
-				'source' => 'manual',
-			),
-			!empty($params['isPrimary'])
-		);
-		if ($claim['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_CONFLICT) {
-			$this->rollback_transaction();
-			return Npcink_Device_Inventory_V3_Response::error(
-				'identity_conflict',
-				'Identity is already owned by another asset.',
-				409,
-				array('ownerAssetId' => $claim['ownerAssetId'])
-			);
-		}
-		if ($claim['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_INVALID) {
-			$this->rollback_transaction();
-			return Npcink_Device_Inventory_V3_Response::error('invalid_identity', 'Identity type and value are required.', 422);
-		}
-		if ($claim['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_ERROR) {
-			$this->rollback_transaction();
-			return Npcink_Device_Inventory_V3_Response::error('identity_claim_failed', 'Failed to claim identity.', 500);
-		}
-		if ($claim['status'] === Npcink_Device_Inventory_Identity_Repository::CLAIM_INSERTED) {
-			if (!$this->event_service->record(intval($asset['id']), 'manual', 'identity_added', 'Asset identity added in admin.')) {
-				return $this->rollback_error('event_create_failed', 'Failed to record identity claim.');
-			}
-		}
-		if (!$this->commit_transaction()) {
-			return $this->rollback_error('transaction_commit_failed', 'Failed to commit identity transaction.');
-		}
-		$items = $this->identities->list_for_asset(intval($asset['id']));
-		return rest_ensure_response(array('data' => array_map(array($this, 'format_identity'), $items)));
-	}
-
 	public function get_observations($request)
 	{
 		$asset = $this->asset_from_request($request);
@@ -610,37 +587,54 @@ class Npcink_Device_Inventory_Assets_Controller
 		);
 	}
 
-	public function get_all_observations($request)
+	public function get_collection_trends($request)
 	{
-		$result = $this->observations->list_all(
-			array(
-				'page' => $request->get_param('page') ?: 1,
-				'pageSize' => $request->get_param('pageSize') ?: 20,
-				'source' => $request->get_param('source'),
-				'search' => $request->get_param('search'),
-			)
-		);
-		$items = array_map(array($this, 'format_observation'), $result['items']);
+		$timezone = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
 		return rest_ensure_response(
-			Npcink_Device_Inventory_V3_Response::paginated($items, $result['page'], $result['pageSize'], $result['total'])
+			array(
+				'data' => $this->collection_trends_for_date(current_time('Y-m-d'), $timezone),
+			)
 		);
 	}
 
-	public function get_collection_trends($request)
+	/**
+	 * Build the 30-day collection trend in the site timezone.
+	 * $today is a Y-m-d local calendar date; stored observed_at values stay UTC.
+	 */
+	public function collection_trends_for_date($today, $timezone)
 	{
 		$days = 30;
-		$today = current_time('Y-m-d');
-		$today_date = DateTimeImmutable::createFromFormat('!Y-m-d', $today);
-		if (!$today_date) {
-			$today_date = new DateTimeImmutable($today);
+		if (!$timezone instanceof DateTimeZone) {
+			$timezone = new DateTimeZone('UTC');
+		}
+		$utc = new DateTimeZone('UTC');
+		$today = is_string($today) ? $today : '';
+		$today_date = DateTimeImmutable::createFromFormat('!Y-m-d', $today, $utc);
+		if (!$today_date || $today_date->format('Y-m-d') !== $today) {
+			$today = (new DateTimeImmutable('now', $timezone))->format('Y-m-d');
+			$today_date = new DateTimeImmutable($today, $utc);
 		}
 		$start = $today_date->modify('-' . ($days - 1) . ' days');
-		$end = $today_date->modify('+1 day');
-		$start_date = $start->format('Y-m-d');
-		$end_date = $end->format('Y-m-d');
+		// Enumerate calendar labels separately so a skipped midnight cannot shift later boundaries.
+		$boundaries = array();
+		for ($offset = 0; $offset <= $days; $offset++) {
+			$label = $start->modify('+' . $offset . ' days')->format('Y-m-d');
+			$boundary = new DateTimeImmutable($label . ' 00:00:00', $timezone);
+			$boundaries[] = array($label, $boundary->setTimezone($utc)->format('Y-m-d H:i:s'));
+		}
+		$day_ranges = array();
+		for ($offset = 0; $offset < $days; $offset++) {
+			$day_ranges[] = array(
+				'date' => $boundaries[$offset][0],
+				'start_utc' => $boundaries[$offset][1],
+				'end_utc' => $boundaries[$offset + 1][1],
+			);
+		}
+		$start_utc = $boundaries[0][1];
+		$end_utc = $boundaries[$days][1];
 		$counts_by_day = array();
 
-		foreach ($this->observations->daily_counts_between($start_date . ' 00:00:00', $end_date . ' 00:00:00') as $row) {
+		foreach ($this->observations->daily_counts_between($start_utc, $end_utc, $day_ranges) as $row) {
 			$day = isset($row['day']) ? sanitize_text_field((string) $row['day']) : '';
 			if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $day)) {
 				$counts_by_day[$day] = intval(isset($row['count']) ? $row['count'] : 0);
@@ -648,23 +642,19 @@ class Npcink_Device_Inventory_Assets_Controller
 		}
 
 		$collection = array();
-		for ($offset = 0; $offset < $days; $offset++) {
-			$day = $start->modify('+' . $offset . ' days')->format('Y-m-d');
+		foreach ($day_ranges as $range) {
+			$day = $range['date'];
 			$collection[] = array(
 				'date' => $day,
 				'count' => isset($counts_by_day[$day]) ? $counts_by_day[$day] : 0,
 			);
 		}
 
-		return rest_ensure_response(
-			array(
-				'data' => array(
-					'days' => $days,
-					'startDate' => $start_date,
-					'endDate' => $today,
-					'collection' => $collection,
-				),
-			)
+		return array(
+			'days' => $days,
+			'startDate' => $start->format('Y-m-d'),
+			'endDate' => $today,
+			'collection' => $collection,
 		);
 	}
 
@@ -752,15 +742,15 @@ class Npcink_Device_Inventory_Assets_Controller
 			$data[$definition[0]] = $value;
 		}
 
+		if (array_key_exists('residualValue', $params)) {
+			return Npcink_Device_Inventory_V3_Response::error('invalid_asset_field', 'Use secondHandMarketValue for asset market values.', 422);
+		}
+
 		$number_fields = array(
 			'purchasePrice' => 'purchase_price',
 			'secondHandMarketValue' => 'residual_value',
 			'financialResidualValue' => 'financial_residual_value',
 		);
-		// residualValue remains a write-compatible alias for older admin clients.
-		if (!array_key_exists('secondHandMarketValue', $params) && array_key_exists('residualValue', $params)) {
-			$params['secondHandMarketValue'] = $params['residualValue'];
-		}
 		foreach ($number_fields as $input_key => $storage_key) {
 			if (!$creating && !array_key_exists($input_key, $params)) {
 				continue;
@@ -873,7 +863,11 @@ class Npcink_Device_Inventory_Assets_Controller
 	{
 		global $wpdb;
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Asset mutations and audit events must commit together.
-		return $wpdb->query('COMMIT') !== false;
+		if ($wpdb->query('COMMIT') === false) {
+			return false;
+		}
+		$this->invalidate_transaction_caches();
+		return true;
 	}
 
 	private function rollback_transaction()
@@ -881,7 +875,16 @@ class Npcink_Device_Inventory_Assets_Controller
 		global $wpdb;
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Roll back every partial asset mutation.
 		$wpdb->query('ROLLBACK');
+		$this->invalidate_transaction_caches();
+	}
+
+	private function invalidate_transaction_caches()
+	{
+		// A separate connection may have cached old committed state during the write.
 		$this->assets->invalidate_cache();
+		$this->identities->invalidate_cache();
+		$this->observations->invalidate_cache();
+		$this->events->invalidate_cache();
 	}
 
 	private function rollback_error($code, $message, $status = 500)
@@ -908,25 +911,8 @@ class Npcink_Device_Inventory_Assets_Controller
 
 	private function configured_departments()
 	{
-		$raw_options = get_option(Npcink_Device_Inventory_V3_Tables::OPTION);
-		if (is_array($raw_options) && array_key_exists('departments', $raw_options)) {
-			return Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($raw_options['departments']);
-		}
-		return Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($this->asset_departments());
-	}
-
-	private function asset_departments()
-	{
-		global $wpdb;
-		$table = Npcink_Device_Inventory_V3_Tables::assets();
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- One-time fallback reads current departments from the plugin-owned assets table when no department setting exists; caching would require invalidation on every asset write.
-		$rows = $wpdb->get_col(
-			$wpdb->prepare('SELECT DISTINCT department FROM %i WHERE department <> %s ORDER BY department ASC', $table, '')
-		);
-		if (!is_array($rows)) {
-			return array();
-		}
-		return Npcink_Device_Inventory_V3_Tables::normalize_departments($rows);
+		$options = Npcink_Device_Inventory_V3_Tables::options();
+		return Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($options['departments']);
 	}
 
 	private function asset_from_request($request)
@@ -937,6 +923,15 @@ class Npcink_Device_Inventory_Assets_Controller
 			return Npcink_Device_Inventory_V3_Response::error('asset_not_found', 'Asset not found.', 404);
 		}
 		return $asset;
+	}
+
+	private function wants_full_hardware($request)
+	{
+		$value = $request->get_param('includeHardware');
+		if (function_exists('rest_sanitize_boolean')) {
+			return (bool) rest_sanitize_boolean($value);
+		}
+		return $value === true || $value === 1 || $value === '1' || $value === 'true';
 	}
 
 	public function format_asset($row)
@@ -957,19 +952,20 @@ class Npcink_Device_Inventory_Assets_Controller
 			'category' => (string) $row['category'],
 			'purchasePrice' => floatval($row['purchase_price']),
 			'secondHandMarketValue' => floatval($row['residual_value']),
-			'financialResidualValue' => floatval(isset($row['financial_residual_value']) ? $row['financial_residual_value'] : 0),
-			'residualValue' => floatval($row['residual_value']),
+			'financialResidualValue' => floatval($row['financial_residual_value']),
 			'metadata' => $this->decode_json(isset($row['metadata_json']) ? $row['metadata_json'] : '', array()),
 			'createdAt' => (string) $row['created_at'],
 			'updatedAt' => (string) $row['updated_at'],
 		);
-		if (array_key_exists('latest_summary_json', $row)) {
+		if (array_key_exists('latest_summary_json', $row) || array_key_exists('latest_observed_at', $row)) {
 			$item['latestObservation'] = array(
 				'summary' => $this->decode_json(isset($row['latest_summary_json']) ? $row['latest_summary_json'] : '', array()),
-				'hardware' => $this->decode_json(isset($row['latest_hardware_json']) ? $row['latest_hardware_json'] : '', array()),
 				'observedAt' => $this->format_utc_datetime(isset($row['latest_observed_at']) ? $row['latest_observed_at'] : ''),
 				'source' => isset($row['latest_observation_source']) ? (string) $row['latest_observation_source'] : '',
 			);
+			if (array_key_exists('latest_hardware_json', $row)) {
+				$item['latestObservation']['hardware'] = $this->decode_json($row['latest_hardware_json'], array());
+			}
 		}
 		return $item;
 	}
@@ -996,7 +992,7 @@ class Npcink_Device_Inventory_Assets_Controller
 			'source' => (string) $row['source'],
 			'schemaVersion' => intval($row['schema_version']),
 			'observedAt' => $this->format_utc_datetime(isset($row['observed_at']) ? $row['observed_at'] : ''),
-			'receivedAt' => (string) $row['received_at'],
+			'receivedAt' => $this->format_utc_datetime(isset($row['received_at']) ? $row['received_at'] : ''),
 			'summary' => $this->decode_json(isset($row['summary_json']) ? $row['summary_json'] : '', array()),
 			'hardware' => $this->decode_json(isset($row['hardware_json']) ? $row['hardware_json'] : '', array()),
 			'raw' => $this->decode_json(isset($row['raw_json']) ? $row['raw_json'] : '', array()),
@@ -1035,7 +1031,11 @@ class Npcink_Device_Inventory_Assets_Controller
 		if ($value === '') {
 			return '';
 		}
-		return str_replace(' ', 'T', $value) . 'Z';
+		$value = str_replace(' ', 'T', $value);
+		if (preg_match('/(?:Z|[+-]\d{2}:\d{2})$/', $value)) {
+			return $value;
+		}
+		return $value . 'Z';
 	}
 
 	private function format_asset_reference($row)

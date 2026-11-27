@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "author": {
     "name": "Npcink",
-    "email": "1355471563@qq.com"
+    "url": "https://www.npc.ink"
   },
   "description": "后台管理界面项目",
   "type": "module",
@@ -13,7 +13,8 @@
     "build": "tsc && vite build",
     "check:hardware-audit": "node scripts/check-hardware-audit-fixture.mjs",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:analysis-pagination": "node scripts/check-analysis-pagination.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^4.36.1",
@@ -21,17 +22,14 @@
     "axios": "^1.5.0",
     "dayjs": "^1.11.13",
     "exceljs": "^4.4.0",
-    "fuse.js": "^7.0.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-window": "^1.8.10"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^20.6.1",
     "@types/react": "^18.2.15",
     "@types/react-dom": "^18.2.7",
-    "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^6.0.3",
     "autoprefixer": "^10.4.15",
     "esbuild": "^0.28.1",
@@ -39,9 +37,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.7.0",
-    "less": "^4.8.1",
     "postcss": "^8.5.26",
-    "tailwindcss": "^3.3.3",
     "typescript": "^5.0.2",
     "typescript-eslint": "^8.62.1",
     "vite": "^8.2.1"
@@ -53,10 +49,6 @@
     "exceljs": {
       "uuid": "^11.1.1"
     },
-    "eslint": {
-      "minimatch": {
-        "brace-expansion": "^5.0.12"
-      }
-    }
+    "minimatch@10": "11.0.5"
   }
 }

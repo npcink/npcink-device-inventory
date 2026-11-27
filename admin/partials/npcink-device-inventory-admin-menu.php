@@ -60,38 +60,14 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Menu')) {
 
         private static function admin_page_title()
         {
-            $locale = function_exists('determine_locale') ? determine_locale() : get_locale();
-            if (0 === strpos($locale, 'zh_')) {
+            $title = __('Device Inventory', 'npcink-device-inventory');
+            if ('Device Inventory' === $title && 0 === strpos(determine_locale(), 'zh_')) {
                 return '设备资产管理';
             }
 
-            return __('Device Inventory', 'npcink-device-inventory');
+            return $title;
         }
 
-        /**
-         * Admin labels used by the bundled React app.
-         *
-         * WordPress.org will handle gettext translations for PHP strings after release.
-         * The bundled app receives a small locale-aware label map so the first admin
-         * screen is usable in both English and Simplified Chinese immediately.
-         */
-        private static function admin_labels()
-        {
-            $locale = function_exists('determine_locale') ? determine_locale() : get_locale();
-            if (0 === strpos($locale, 'zh_')) {
-                return array(
-                    'assets' => '资产台账',
-                    'client_tokens' => '客户端令牌',
-                    'settings' => '设置',
-                );
-            }
-
-            return array(
-                'assets' => __('Assets', 'npcink-device-inventory'),
-                'client_tokens' => __('Client Tokens', 'npcink-device-inventory'),
-                'settings' => __('Settings', 'npcink-device-inventory'),
-            );
-        }
         /**
          * 加载资源
          */
@@ -112,7 +88,7 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Menu')) {
 	            $app_js_ver = file_exists($app_js_path) ? (string) filemtime($app_js_path) : $ver;
 	            wp_enqueue_style($name, $plugin_url . 'admin/css/npcink-device-inventory-admin.css', array(), $ver, false);
 	            wp_enqueue_style($name . '-app', $plugin_url . 'vite-admin/dist/index.css', array(), $app_css_ver, false);
-	            wp_enqueue_script($name, $plugin_url . 'vite-admin/dist/index.js', array(), $app_js_ver, true);
+	            wp_enqueue_script($name, $plugin_url . 'vite-admin/dist/index.js', array('wp-element'), $app_js_ver, true);
 	            wp_localize_script(
 	                $name,
 	                'npcinkDeviceInventoryData',
@@ -121,8 +97,6 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Menu')) {
 	                    'rest_url' => esc_url_raw(rest_url('npcink-device-inventory/v1')),
 	                    'rest_nonce' => wp_create_nonce('wp_rest'),
 	                    'ajax_url' => esc_url_raw(admin_url('admin-ajax.php')),
-	                    'locale' => function_exists('determine_locale') ? determine_locale() : get_locale(),
-	                    'labels' => self::admin_labels(),
 	                    'initial_assets' => self::initial_assets_payload(),
 	                )
 	            );

@@ -16,9 +16,8 @@
  * Plugin Name:       Npcink Device Inventory
  * Plugin URI:        https://www.npc.ink/277900.html
  * Description:       设备资产管理插件，提供设备录入、客户端上报、后台台账和变更记录。
- * Version:           3.2.3
+ * Version:           3.2.4
  * Requires at least: 6.5
- * Tested up to:      7.1
  * Requires PHP:      7.4
  * Author:            Npcink
  * Author URI:        https://www.npc.ink
@@ -38,7 +37,8 @@ if (!defined('WPINC')) {
  * Start at version 1.0.0 and use SemVer - https://semver.org
  * Rename this for your plugin and update it as you release new versions.
  */
-define('NPCINK_DEVICE_INVENTORY_VERSION', '3.2.3');
+define('NPCINK_DEVICE_INVENTORY_VERSION', '3.2.4');
+define('NPCINK_DEVICE_INVENTORY_MIN_AGENT_VERSION', '0.4.6');
 
 /**
  * The code that runs during plugin activation.
@@ -125,7 +125,11 @@ npcink_device_inventory_run();
 
 //设置按钮
 add_filter('plugin_action_links_' . plugin_basename(__FILE__), function ($links) {
-	$links[] = '<a href="' . esc_url(get_admin_url(null, 'plugins.php?page=npcink_device_inventory_settings')) . '">' . esc_html__('设置', 'npcink-device-inventory') . '</a>';
+	$label = __('Settings', 'npcink-device-inventory');
+	if ('Settings' === $label && 0 === strpos(determine_locale(), 'zh_')) {
+		$label = '设置';
+	}
+	$links[] = '<a href="' . esc_url(get_admin_url(null, 'plugins.php?page=npcink_device_inventory_settings')) . '">' . esc_html($label) . '</a>';
 	return $links;
 });
 

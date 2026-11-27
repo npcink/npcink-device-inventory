@@ -1,6 +1,6 @@
 [package]
 name = "npcink-device-agent"
-version = "0.4.4"
+version = "0.4.7"
 edition = "2021"
 description = "Rust hardware collector and uploader for Npcink Device Inventory"
 license = "GPL-3.0-or-later"
@@ -9,11 +9,21 @@ license = "GPL-3.0-or-later"
 anyhow = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 hmac = "0.12"
+# Reuse reqwest's proxy matcher for safe route diagnostics (never log proxy URLs).
+hyper-util = { version = "0.1", features = ["client-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["std"] }
 local-ip-address = "0.6"
 rand = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 sysinfo = "0.30"
 url = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# Keep Windows/Linux proxy behavior unchanged; use the native macOS HTTP(S) settings.
+[target.'cfg(target_os = "macos")'.dependencies]
+reqwest = { version = "0.12.28", default-features = false, features = ["system-proxy"] }

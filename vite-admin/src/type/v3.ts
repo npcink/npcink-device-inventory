@@ -16,12 +16,10 @@ export interface Asset {
   purchasePrice: number;
   secondHandMarketValue: number;
   financialResidualValue: number;
-  /** @deprecated Backward-compatible alias of secondHandMarketValue. */
-  residualValue: number;
   metadata: JsonRecord;
   latestObservation?: {
     summary: JsonRecord;
-    hardware: JsonRecord;
+    hardware?: JsonRecord;
     observedAt: string;
     source: string;
   };
@@ -40,8 +38,6 @@ export interface AssetInput {
   purchasePrice?: number;
   secondHandMarketValue?: number;
   financialResidualValue?: number;
-  /** @deprecated Use secondHandMarketValue. */
-  residualValue?: number;
   metadata?: JsonRecord;
 }
 
@@ -142,6 +138,13 @@ export interface CollectionTrends {
   collection: Array<{ date: string; count: number }>;
 }
 
+export type ComparisonObservation = Pick<AssetObservation, "id" | "assetId" | "observedAt" | "summary" | "hardware">;
+
+export interface ComparisonObservationPage {
+  data: ComparisonObservation[];
+  pagination: { nextAfterAssetId: number | null; throughAssetId: number };
+}
+
 export interface AssetListParams {
   page?: number;
   pageSize?: number;
@@ -155,6 +158,7 @@ export interface AssetListParams {
   financialDataStatus?: "missing_purchase_price" | "missing_second_hand_market_value" | "missing_both" | "complete";
   sortBy?: "latestUpload" | "latestObserved" | "updated";
   includeDeleted?: boolean;
+  includeHardware?: boolean;
 }
 
 export interface EventListParams {
@@ -164,13 +168,6 @@ export interface EventListParams {
   eventMode?: "manual" | "auto";
   eventSource?: string;
   eventType?: string;
-}
-
-export interface ObservationListParams {
-  page?: number;
-  pageSize?: number;
-  source?: string;
-  search?: string;
 }
 
 export interface ClientToken {
@@ -194,7 +191,6 @@ export interface InventorySettings {
   renewalMinMemoryGb: number;
   renewalMinDiskGb: number;
   renewalMaxResidualRate: number;
-  countAvailableAssetsOnly: boolean;
   departments: string[];
   deleteDataOnUninstall: boolean;
   clientTokens: ClientToken[];
@@ -242,6 +238,12 @@ export interface BackupRestoreSummary {
   };
   conflicts: string[];
   warnings: string[];
+  deleteDataOnUninstall?: {
+    current: boolean;
+    incoming: boolean | null;
+    changed: boolean;
+    applied: boolean;
+  };
 }
 
 export interface BackupRestoreResult {

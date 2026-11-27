@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,13 +11,19 @@ const submissionZip = path.join(repoRoot, "sj/npcink-device-inventory.zip");
 const submissionManifest = path.join(repoRoot, "sj/package-manifest.json");
 const shouldCheckSubmissionPackage = process.argv.includes("--submission");
 const slug = "npcink-device-inventory";
-const builtAssetFiles = [
-  "vite-admin/dist/index.html",
-  "vite-admin/dist/index.css",
-  "vite-admin/dist/index.js",
-];
-
 const steps = [
+  {
+    title: "Release tooling regression tests",
+    command: "npm",
+    args: ["run", "check:release-tools"],
+    cwd: repoRoot,
+  },
+  {
+    title: "Admin production and development dependency audit",
+    command: "npm",
+    args: ["audit", "--audit-level=moderate"],
+    cwd: viteAdminDir,
+  },
   {
     title: "Version contract",
     command: "npm",
@@ -37,6 +43,12 @@ const steps = [
     cwd: viteAdminDir,
   },
   {
+    title: "Analysis cursor pagination fixture",
+    command: "npm",
+    args: ["run", "check:analysis-pagination"],
+    cwd: viteAdminDir,
+  },
+  {
     title: "Frontend lint",
     command: "npm",
     args: ["run", "lint"],
@@ -47,6 +59,12 @@ const steps = [
     command: "npm",
     args: ["run", "build"],
     cwd: viteAdminDir,
+  },
+  {
+    title: "Frontend bundle budgets",
+    command: "npm",
+    args: ["run", "check:bundle-budget"],
+    cwd: repoRoot,
   },
   {
     title: "WordPress.org review rules",
@@ -155,6 +173,10 @@ function sha256(filePath) {
 }
 
 async function compareBuiltAssets(zipPath) {
+  // Verify every generated chunk, including dynamic imports and the build manifest.
+  const builtAssetFiles = (await readdir(path.join(viteAdminDir, "dist"), { recursive: true, withFileTypes: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.relative(repoRoot, path.join(entry.parentPath, entry.name)));
   for (const relativeFile of builtAssetFiles) {
     const localPath = path.join(repoRoot, relativeFile);
     if (!existsSync(localPath)) {

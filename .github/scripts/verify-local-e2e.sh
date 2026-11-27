@@ -141,16 +141,19 @@ fi
 
 echo "Collecting the current device identity..."
 pushd "${ROOT_DIR}/ele-rs" >/dev/null
-cargo check >/dev/null
-DEVICE_ID="$(cargo run --quiet -- device-id)"
+cargo check --locked >/dev/null
+DEVICE_ID="$(cargo run --locked --quiet -- device-id)"
 popd >/dev/null
 
 case "${DEVICE_ID}" in
-  device-v1-*)
-    IDENTITY_TYPE="device_uuid_v1"
+  system-v2-*)
+    IDENTITY_TYPE="system_uuid_v2"
     ;;
-  fallback-v1-*)
-    IDENTITY_TYPE="fallback_device_v1"
+  board-v2-*)
+    IDENTITY_TYPE="baseboard_serial_v2"
+    ;;
+  pci-v2-*)
+    IDENTITY_TYPE="pci_permanent_mac_v2"
     ;;
   *)
     echo "Generated device identity has an unexpected format." >&2
@@ -205,7 +208,7 @@ if [[ ! "${TOKEN}" =~ ^mda_[a-z0-9]{12}_[a-f0-9]{64}$ ]]; then
 fi
 TOKEN_ID="$(echo "${TOKEN}" | cut -d _ -f 2)"
 
-echo "Submitting a signed v3 device observation..."
+echo "Submitting a schema-5 device observation with request signature v2..."
 pushd "${ROOT_DIR}/ele-rs" >/dev/null
 SUBMIT_RESPONSE="$(
   cargo run --quiet -- submit \
@@ -264,11 +267,11 @@ WP_E2E_ASSET_ID="${ASSET_ID}" WP_E2E_DEVICE_ID="${DEVICE_ID}" WP_E2E_IDENTITY_TY
       exit(1);
   }
   $raw = json_decode($row["raw_json"], true);
-  if ((int) $row["schema_version"] !== 4 || !is_array($raw) || empty($raw["_npcink_device"]) || empty($raw["asset"])) {
-      fwrite(STDERR, "Stored observation does not match schema version 4\n");
+  if ((int) $row["schema_version"] !== 5 || !is_array($raw) || empty($raw["_npcink_device"]) || empty($raw["asset"])) {
+      fwrite(STDERR, "Stored observation does not match schema version 5\n");
       exit(1);
   }
-  echo "Verified schema version 4 for asset {$asset_id} and identity type {$identity_type}.\n";
+  echo "Verified schema version 5 for asset {$asset_id} and identity type {$identity_type}.\n";
 '
 
 echo "Local e2e verification passed."

@@ -74,7 +74,7 @@ class Npcink_Device_Inventory_Settings_Controller
 
 	public function get_settings()
 	{
-		return rest_ensure_response(array('data' => $this->public_options(Npcink_Device_Inventory_V3_Tables::options())));
+		return rest_ensure_response(array('data' => $this->public_options()));
 	}
 
 	public function update_settings($request)
@@ -112,9 +112,6 @@ class Npcink_Device_Inventory_Settings_Controller
 		if (array_key_exists('renewalMaxResidualRate', $params)) {
 			$options['renewal_max_residual_rate'] = min(100, max(0, floatval($params['renewalMaxResidualRate'])));
 		}
-		if (array_key_exists('countAvailableAssetsOnly', $params)) {
-			$options['count_available_assets_only'] = (bool) $params['countAvailableAssetsOnly'];
-		}
 		if (array_key_exists('departments', $params)) {
 			$options['departments'] = Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($params['departments']);
 		}
@@ -122,8 +119,8 @@ class Npcink_Device_Inventory_Settings_Controller
 			$options['delete_data_on_uninstall'] = (bool) $params['deleteDataOnUninstall'];
 		}
 
-		update_option(Npcink_Device_Inventory_V3_Tables::OPTION, $options);
-		return rest_ensure_response(array('data' => $this->public_options($options)));
+		Npcink_Device_Inventory_V3_Tables::update_options($options);
+		return rest_ensure_response(array('data' => $this->public_options()));
 	}
 
 	public function cleanup_observations()
@@ -145,7 +142,7 @@ class Npcink_Device_Inventory_Settings_Controller
 	{
 		$params = $request->get_json_params();
 		$name = is_array($params) && !empty($params['name']) ? sanitize_text_field($params['name']) : 'Device token';
-		$options = Npcink_Device_Inventory_V3_Tables::options();
+		$tokens = Npcink_Device_Inventory_V3_Tables::client_tokens();
 		$secret = $this->random_secret();
 		$token = array(
 			'id' => strtolower(substr(wp_generate_password(16, false, false), 0, 12)),
@@ -154,8 +151,10 @@ class Npcink_Device_Inventory_Settings_Controller
 			'enabled' => true,
 			'created_at' => current_time('mysql'),
 		);
-		$options['client_tokens'][] = $token;
-		update_option(Npcink_Device_Inventory_V3_Tables::OPTION, $options);
+		$tokens[] = $token;
+		if (!Npcink_Device_Inventory_V3_Tables::update_client_tokens($tokens)) {
+			return Npcink_Device_Inventory_V3_Response::error('token_write_failed', 'Could not save device tokens.', 500);
+		}
 
 		$public = $this->public_token($token);
 		$public['secret'] = $secret;
@@ -165,16 +164,16 @@ class Npcink_Device_Inventory_Settings_Controller
 	public function delete_token($request)
 	{
 		$id = sanitize_key((string) $request['id']);
-		$options = Npcink_Device_Inventory_V3_Tables::options();
 		$tokens = array();
-		foreach ($options['client_tokens'] as $token) {
+		foreach (Npcink_Device_Inventory_V3_Tables::client_tokens() as $token) {
 			if (!is_array($token) || !isset($token['id']) || $token['id'] === $id) {
 				continue;
 			}
 			$tokens[] = $token;
 		}
-		$options['client_tokens'] = $tokens;
-		update_option(Npcink_Device_Inventory_V3_Tables::OPTION, $options);
+		if (!Npcink_Device_Inventory_V3_Tables::update_client_tokens($tokens)) {
+			return Npcink_Device_Inventory_V3_Response::error('token_write_failed', 'Could not save device tokens.', 500);
+		}
 		return rest_ensure_response(array('data' => array('success' => true)));
 	}
 
@@ -186,10 +185,9 @@ class Npcink_Device_Inventory_Settings_Controller
 			return Npcink_Device_Inventory_V3_Response::error('invalid_token_update', 'Token enabled state is required.', 400);
 		}
 
-		$options = Npcink_Device_Inventory_V3_Tables::options();
 		$tokens = array();
 		$updated = null;
-		foreach ($options['client_tokens'] as $token) {
+		foreach (Npcink_Device_Inventory_V3_Tables::client_tokens() as $token) {
 			if (!is_array($token)) {
 				continue;
 			}
@@ -204,19 +202,19 @@ class Npcink_Device_Inventory_Settings_Controller
 			return Npcink_Device_Inventory_V3_Response::error('token_not_found', 'Client token not found.', 404);
 		}
 
-		$options['client_tokens'] = $tokens;
-		update_option(Npcink_Device_Inventory_V3_Tables::OPTION, $options);
+		if (!Npcink_Device_Inventory_V3_Tables::update_client_tokens($tokens)) {
+			return Npcink_Device_Inventory_V3_Response::error('token_write_failed', 'Could not save device tokens.', 500);
+		}
 		return rest_ensure_response(array('data' => $this->public_token($updated)));
 	}
 
-	private function public_options($options)
+	private function public_options()
 	{
+		$options = Npcink_Device_Inventory_V3_Tables::options();
 		$tokens = array();
-		if (!empty($options['client_tokens']) && is_array($options['client_tokens'])) {
-			foreach ($options['client_tokens'] as $token) {
-				if (is_array($token)) {
-					$tokens[] = $this->public_token($token);
-				}
+		foreach (Npcink_Device_Inventory_V3_Tables::client_tokens() as $token) {
+			if (is_array($token)) {
+				$tokens[] = $this->public_token($token);
 			}
 		}
 
@@ -230,35 +228,12 @@ class Npcink_Device_Inventory_Settings_Controller
 			'renewalMinMemoryGb' => intval($options['renewal_min_memory_gb']),
 			'renewalMinDiskGb' => intval($options['renewal_min_disk_gb']),
 			'renewalMaxResidualRate' => floatval($options['renewal_max_residual_rate']),
-			'countAvailableAssetsOnly' => !empty($options['count_available_assets_only']),
-			'departments' => $this->settings_departments($options),
+			'departments' => Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($options['departments']),
 			'deleteDataOnUninstall' => !empty($options['delete_data_on_uninstall']),
 			'clientTokens' => $tokens,
 		);
 	}
 
-	private function settings_departments($options)
-	{
-		$raw_options = get_option(Npcink_Device_Inventory_V3_Tables::OPTION);
-		if (is_array($raw_options) && array_key_exists('departments', $raw_options)) {
-			return Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($raw_options['departments']);
-		}
-		return Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($this->asset_departments());
-	}
-
-	private function asset_departments()
-	{
-		global $wpdb;
-		$table = Npcink_Device_Inventory_V3_Tables::assets();
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- One-time fallback reads current departments from the plugin-owned assets table when no department setting exists; caching would require invalidation on every asset write.
-		$rows = $wpdb->get_col(
-			$wpdb->prepare('SELECT DISTINCT department FROM %i WHERE department <> %s ORDER BY department ASC', $table, '')
-		);
-		if (!is_array($rows)) {
-			return array();
-		}
-		return Npcink_Device_Inventory_V3_Tables::normalize_departments($rows);
-	}
 
 	private function public_token($token)
 	{

@@ -9,14 +9,66 @@ class Npcink_Device_Inventory_Observation_Repository
 	const CACHE_GROUP = 'npcink_device_inventory_observations';
 	const CACHE_TTL = 60;
 
+	/** Cursor pages contain at most two observations per active computer, never raw payloads. */
+	public function comparison_page($after_asset_id, $through_asset_id, $page_size)
+	{
+		global $wpdb;
+		$assets = Npcink_Device_Inventory_V3_Tables::assets();
+		$observations = Npcink_Device_Inventory_V3_Tables::observations();
+		$page_size = max(1, min(25, intval($page_size)));
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded cursor reads use indexed asset IDs and the existing asset/observed index; each request reads current archive state.
+		if (!$through_asset_id) {
+			$through_asset_id = intval($wpdb->get_var($wpdb->prepare("SELECT MAX(id) FROM %i WHERE asset_type = 'computer' AND status <> 'deleted'", $assets)));
+			if ($wpdb->last_error) {
+				return null;
+			}
+		}
+		$ids = $wpdb->get_col($wpdb->prepare(
+			"SELECT id FROM %i WHERE id > %d AND id <= %d AND asset_type = 'computer' AND status <> 'deleted' ORDER BY id ASC LIMIT %d",
+			$assets, intval($after_asset_id), intval($through_asset_id), $page_size + 1
+		));
+		if ($wpdb->last_error) {
+			return null;
+		}
+		$has_more = count($ids) > $page_size;
+		$ids = array_slice($ids, 0, $page_size);
+		$items = array();
+		if ($ids) {
+			$placeholders = implode(',', array_fill(0, count($ids), '%d'));
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Only generated numeric placeholders are interpolated; all IDs and table names are prepared.
+			$select = "SELECT o.id, o.asset_id, o.observed_at, o.summary_json, o.hardware_json
+				FROM %i a INNER JOIN %i o ON o.id = (
+					SELECT recent.id FROM %i recent WHERE recent.asset_id = a.id ORDER BY recent.observed_at DESC, recent.id DESC LIMIT 1 OFFSET %d
+				) WHERE a.id IN ($placeholders) AND a.asset_type = 'computer' AND a.status <> 'deleted'";
+			// Separate equality joins let the database look up each observation by its primary key.
+			$query = $select . ' UNION ALL ' . $select . ' ORDER BY asset_id ASC, observed_at DESC, id DESC';
+			$args = array_merge(array($assets, $observations, $observations, 0), $ids, array($assets, $observations, $observations, 1), $ids);
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Both UNION branches contain fixed SQL and generated placeholders; prepare binds every table, offset and asset ID.
+			$items = $wpdb->get_results($wpdb->prepare($query, $args), ARRAY_A);
+			if ($wpdb->last_error) {
+				return null;
+			}
+		}
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		return array('items' => $items ?: array(), 'pagination' => array(
+			'nextAfterAssetId' => $has_more ? intval(end($ids)) : null,
+			'throughAssetId' => intval($through_asset_id),
+		));
+	}
+
 	public function create($asset_id, $observation)
 	{
 		global $wpdb;
 		$row = array(
 			'asset_id' => intval($asset_id),
 			'source' => sanitize_key($observation['source']),
+			'observation_uuid' => isset($observation['observation_uuid']) ? $observation['observation_uuid'] : null,
+			'payload_hash' => isset($observation['payload_hash']) ? $observation['payload_hash'] : null,
 			'schema_version' => intval($observation['schema_version']),
 			'observed_at' => sanitize_text_field($observation['observed_at']),
+			'received_at' => isset($observation['received_at']) && $observation['received_at'] !== ''
+				? sanitize_text_field($observation['received_at'])
+				: gmdate('Y-m-d H:i:s'),
 			'summary_json' => Npcink_Device_Inventory_V3_Sanitizer::json_encode($observation['summary']),
 			'hardware_json' => Npcink_Device_Inventory_V3_Sanitizer::json_encode($observation['hardware']),
 			'raw_json' => Npcink_Device_Inventory_V3_Sanitizer::json_encode($observation['raw']),
@@ -26,15 +78,30 @@ class Npcink_Device_Inventory_Observation_Repository
 		$result = $wpdb->insert(
 			Npcink_Device_Inventory_V3_Tables::observations(),
 			$row,
-			array('%d', '%s', '%d', '%s', '%s', '%s', '%s')
+			array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s')
 		);
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		if ($result === false) {
 			return null;
 		}
-		$this->update_asset_latest_observation(intval($asset_id), intval($wpdb->insert_id), (string) $row['observed_at']);
+		$observation_id = intval($wpdb->insert_id);
+		if (!$this->update_asset_latest_observation(intval($asset_id), $observation_id, (string) $row['observed_at'])) {
+			return null;
+		}
 		$this->bump_list_cache_version();
-		return $this->find_by_id($wpdb->insert_id);
+		return $this->find_by_id($observation_id);
+	}
+
+	/** Read under the asset lock; the unique UUID also protects concurrent first uploads. */
+	public function find_by_upload_id($uuid)
+	{
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Do not gap-lock unrelated new UUIDs; the unique index arbitrates insert races.
+		$row = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE observation_uuid = %s', Npcink_Device_Inventory_V3_Tables::observations(), $uuid), ARRAY_A);
+		if ($wpdb->last_error) {
+			return Npcink_Device_Inventory_V3_Response::error('observation_lookup_failed', 'Failed to check upload receipt.', 500);
+		}
+		return $row;
 	}
 
 	/**
@@ -76,10 +143,6 @@ class Npcink_Device_Inventory_Observation_Repository
 	private function update_asset_latest_observation($asset_id, $observation_id, $observed_at)
 	{
 		global $wpdb;
-		if (!$this->assets_support_latest_observation_columns()) {
-			return;
-		}
-
 		$assets_table = Npcink_Device_Inventory_V3_Tables::assets();
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Observation ingest denormalizes latest observation metadata onto the plugin-owned asset row.
 		$updated = $wpdb->query(
@@ -106,36 +169,15 @@ class Npcink_Device_Inventory_Observation_Repository
 			$version = wp_cache_get('list_version', Npcink_Device_Inventory_Asset_Repository::CACHE_GROUP);
 			wp_cache_set('list_version', intval($version === false ? 1 : $version) + 1, Npcink_Device_Inventory_Asset_Repository::CACHE_GROUP);
 		}
-	}
-
-	private function assets_support_latest_observation_columns()
-	{
-		static $supported = null;
-		if ($supported !== null) {
-			return $supported;
-		}
-
-		global $wpdb;
-		$table = Npcink_Device_Inventory_V3_Tables::assets();
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema guard prevents upload failures during rolling upgrades.
-		$count = $wpdb->get_var(
-			$wpdb->prepare(
-				'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME IN (%s, %s)',
-				$table,
-				'latest_observation_id',
-				'latest_observed_at'
-			)
-		);
-		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-		$supported = intval($count) === 2;
-		return $supported;
+		// Zero affected rows means an older observation was correctly retained as history.
+		return $updated !== false;
 	}
 
 	public function find_by_id($id)
 	{
 		global $wpdb;
 		$id = intval($id);
-		$cache_key = 'observation:' . $id;
+		$cache_key = $this->build_cache_key('observation', array('id' => $id, 'version' => $this->get_list_cache_version()));
 		$cached = wp_cache_get($cache_key, self::CACHE_GROUP);
 		if ($cached !== false) {
 			return $cached;
@@ -197,169 +239,35 @@ class Npcink_Device_Inventory_Observation_Repository
 		return $result;
 	}
 
-	public function list_all($args)
-	{
-		global $wpdb;
-		$page = max(1, intval($args['page']));
-		$page_size = max(1, min(100, intval($args['pageSize'])));
-		$offset = ($page - 1) * $page_size;
-		$observations_table = Npcink_Device_Inventory_V3_Tables::observations();
-		$assets_table = Npcink_Device_Inventory_V3_Tables::assets();
-		$source = isset($args['source']) ? sanitize_key($args['source']) : '';
-		$search = isset($args['search']) ? sanitize_text_field($args['search']) : '';
-		$cache_key = $this->build_cache_key(
-			'all-list',
-			array(
-				'source' => $source,
-				'search' => $search,
-				'page' => $page,
-				'page_size' => $page_size,
-				'version' => $this->get_list_cache_version(),
-			)
-		);
-		$cached = wp_cache_get($cache_key, self::CACHE_GROUP);
-		if ($cached !== false) {
-			return $cached;
-		}
-
-		$like = '%' . $wpdb->esc_like($search) . '%';
-		if ($source !== '' && $search !== '') {
-			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned observation table queries are wrapped in the object cache.
-			$total = $wpdb->get_var(
-				$wpdb->prepare(
-					'SELECT COUNT(*) FROM %i o INNER JOIN %i a ON a.id = o.asset_id WHERE a.status <> \'deleted\' AND o.source = %s AND (a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s)',
-					$observations_table,
-					$assets_table,
-					$source,
-					$like,
-					$like,
-					$like,
-					$like
-				)
-			);
-			$items = $wpdb->get_results(
-				$wpdb->prepare(
-					"SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
-					FROM %i o
-					INNER JOIN %i a ON a.id = o.asset_id
-					WHERE a.status <> 'deleted' AND o.source = %s AND (a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s)
-					ORDER BY o.observed_at DESC, o.id DESC
-					LIMIT %d OFFSET %d",
-					$observations_table,
-					$assets_table,
-					$source,
-					$like,
-					$like,
-					$like,
-					$like,
-					$page_size,
-					$offset
-				),
-				ARRAY_A
-			);
-			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery
-		} elseif ($source !== '') {
-			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned observation table queries are wrapped in the object cache.
-			$total = $wpdb->get_var(
-				$wpdb->prepare(
-					'SELECT COUNT(*) FROM %i o INNER JOIN %i a ON a.id = o.asset_id WHERE a.status <> \'deleted\' AND o.source = %s',
-					$observations_table,
-					$assets_table,
-					$source
-				)
-			);
-			$items = $wpdb->get_results(
-				$wpdb->prepare(
-					"SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
-					FROM %i o
-					INNER JOIN %i a ON a.id = o.asset_id
-					WHERE a.status <> 'deleted' AND o.source = %s
-					ORDER BY o.observed_at DESC, o.id DESC
-					LIMIT %d OFFSET %d",
-					$observations_table,
-					$assets_table,
-					$source,
-					$page_size,
-					$offset
-				),
-				ARRAY_A
-			);
-			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery
-		} elseif ($search !== '') {
-			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned observation table queries are wrapped in the object cache.
-			$total = $wpdb->get_var(
-				$wpdb->prepare(
-					'SELECT COUNT(*) FROM %i o INNER JOIN %i a ON a.id = o.asset_id WHERE a.status <> \'deleted\' AND (a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s)',
-					$observations_table,
-					$assets_table,
-					$like,
-					$like,
-					$like,
-					$like
-				)
-			);
-			$items = $wpdb->get_results(
-				$wpdb->prepare(
-					"SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
-					FROM %i o
-					INNER JOIN %i a ON a.id = o.asset_id
-					WHERE a.status <> 'deleted' AND (a.asset_number LIKE %s OR a.name LIKE %s OR a.department LIKE %s OR o.summary_json LIKE %s)
-					ORDER BY o.observed_at DESC, o.id DESC
-					LIMIT %d OFFSET %d",
-					$observations_table,
-					$assets_table,
-					$like,
-					$like,
-					$like,
-					$like,
-					$page_size,
-					$offset
-				),
-				ARRAY_A
-			);
-			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery
-		} else {
-			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned observation table queries are wrapped in the object cache.
-			$total = $wpdb->get_var(
-				$wpdb->prepare(
-					'SELECT COUNT(*) FROM %i o INNER JOIN %i a ON a.id = o.asset_id WHERE a.status <> \'deleted\'',
-					$observations_table,
-					$assets_table
-				)
-			);
-			$items = $wpdb->get_results(
-				$wpdb->prepare(
-					"SELECT o.*, a.uuid AS asset_uuid, a.asset_number, a.name AS asset_name, a.asset_type, a.status, a.department, a.owner_name
-					FROM %i o
-					INNER JOIN %i a ON a.id = o.asset_id
-					WHERE a.status <> 'deleted'
-					ORDER BY o.observed_at DESC, o.id DESC
-					LIMIT %d OFFSET %d",
-					$observations_table,
-					$assets_table,
-					$page_size,
-					$offset
-				),
-				ARRAY_A
-			);
-			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery
-		}
-
-		$result = array('items' => $items ?: array(), 'total' => intval($total), 'page' => $page, 'pageSize' => $page_size);
-		wp_cache_set($cache_key, $result, self::CACHE_GROUP, self::CACHE_TTL);
-		return $result;
-	}
-
-	public function daily_counts_between($start_at, $end_at)
+	public function daily_counts_between($start_at, $end_at, $day_ranges = array())
 	{
 		global $wpdb;
 		$start_at = sanitize_text_field((string) $start_at);
 		$end_at = sanitize_text_field((string) $end_at);
+		$normalized_ranges = array();
+		if (is_array($day_ranges)) {
+			foreach ($day_ranges as $range) {
+				if (!is_array($range)) {
+					continue;
+				}
+				$date = isset($range['date']) ? sanitize_text_field((string) $range['date']) : '';
+				$range_start = isset($range['start_utc']) ? sanitize_text_field((string) $range['start_utc']) : '';
+				$range_end = isset($range['end_utc']) ? sanitize_text_field((string) $range['end_utc']) : '';
+				if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) && $range_start !== '' && $range_end !== '') {
+					$normalized_ranges[] = array(
+						'date' => $date,
+						'start_utc' => $range_start,
+						'end_utc' => $range_end,
+					);
+				}
+			}
+		}
 		$cache_key = $this->build_cache_key(
 			'daily-counts',
 			array(
 				'start_at' => $start_at,
 				'end_at' => $end_at,
+				'day_ranges' => $normalized_ranges,
 				'version' => $this->get_list_cache_version(),
 			)
 		);
@@ -370,23 +278,49 @@ class Npcink_Device_Inventory_Observation_Repository
 
 		$observations_table = Npcink_Device_Inventory_V3_Tables::observations();
 		$assets_table = Npcink_Device_Inventory_V3_Tables::assets();
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned aggregate is bounded to the requested date range and cached.
-		$rows = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT DATE(o.observed_at) AS day, COUNT(*) AS count
+		if ($normalized_ranges) {
+			$cases = array();
+			$case_args = array();
+			foreach ($normalized_ranges as $range) {
+				$cases[] = 'WHEN o.observed_at >= %s AND o.observed_at < %s THEN %s';
+				$case_args[] = $range['start_utc'];
+				$case_args[] = $range['end_utc'];
+				$case_args[] = $range['date'];
+			}
+			$case_sql = 'CASE ' . implode(' ', $cases) . ' END';
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Case branches are generated placeholders only; every bound value is passed to prepare.
+			$query = "SELECT {$case_sql} AS day, COUNT(*) AS count
 				FROM %i o
 				INNER JOIN %i a ON a.id = o.asset_id
 				WHERE a.status <> 'deleted' AND o.observed_at >= %s AND o.observed_at < %s
-				GROUP BY DATE(o.observed_at)
-				ORDER BY day ASC",
-				$observations_table,
-				$assets_table,
-				$start_at,
-				$end_at
-			),
-			ARRAY_A
-		);
-		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery
+				GROUP BY 1
+				HAVING day IS NOT NULL
+				ORDER BY day ASC";
+			// phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- The generated CASE contains only placeholders; prepare binds every date, boundary and table name.
+			$rows = $wpdb->get_results(
+				$wpdb->prepare($query, array_merge($case_args, array($observations_table, $assets_table, $start_at, $end_at))),
+				ARRAY_A
+			);
+			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		} else {
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Plugin-owned aggregate is bounded to the requested date range and cached.
+			$rows = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT DATE(o.observed_at) AS day, COUNT(*) AS count
+					FROM %i o
+					INNER JOIN %i a ON a.id = o.asset_id
+					WHERE a.status <> 'deleted' AND o.observed_at >= %s AND o.observed_at < %s
+					GROUP BY DATE(o.observed_at)
+					ORDER BY day ASC",
+					$observations_table,
+					$assets_table,
+					$start_at,
+					$end_at
+				),
+				ARRAY_A
+			);
+			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery
+		}
 
 		$result = $rows ?: array();
 		wp_cache_set($cache_key, $result, self::CACHE_GROUP, self::CACHE_TTL);

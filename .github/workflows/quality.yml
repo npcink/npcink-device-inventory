@@ -27,12 +27,47 @@ jobs:
       - run: composer validate --strict
       - run: composer audit --locked
       - run: npm run check:versions
+      - run: npm run check:release-tools
       - run: |
           find . -maxdepth 1 -name '*.php' -print0 | xargs -0 -n1 php -l
           find admin includes -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: composer run phpcs
       - run: composer run phpstan
       - run: npm run check:fixtures
+
+  php-compatibility:
+    name: PHP runtime compatibility (${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["7.4", "8.5"]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: shivammathur/setup-php@7d04f5ee7ed293aebd9323b465823121cdb7424d
+        with:
+          php-version: ${{ matrix.php }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+      - run: |
+          find admin includes -name '*.php' -print0 | xargs -0 -n1 php -l
+          php -l npcink-device-inventory.php
+          php -l uninstall.php
+      - run: npm run check:fixtures
+
+  wordpress-integration:
+    name: WordPress and MariaDB integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: vite-admin/package-lock.json
+      - run: npm ci --prefix vite-admin
+      - run: npm run check:docker
 
   admin:
     name: Admin frontend quality
@@ -48,22 +83,26 @@ jobs:
           cache: npm
           cache-dependency-path: vite-admin/package-lock.json
       - run: npm ci
-      # Blocking gate: the production dependency tree (what ships). The
-      # full tree is audited separately below because braces (build-time
-      # only, via tailwindcss 3 -> chokidar) has NO patched release in any
-      # version; until the tailwind 4 migration the dev-tree residual is
-      # tracked there without blocking every pull request on it.
-      - run: npm audit --omit=dev --audit-level=high
-      # Dev-tree audit is non-blocking but must stay visible: on findings it
-      # records a warning annotation on the run instead of hiding behind a
-      # green continue-on-error step.
-      - name: Dev dependency-tree audit (non-blocking)
-        run: npm audit --audit-level=high || echo "::warning::dev dependency tree has npm audit findings (non-blocking, see this step's log)"
+      - name: Audit all production and development dependencies
+        run: npm audit --audit-level=moderate
+      - run: npm run check:analysis-pagination
       - run: npm run check:hardware-audit
       - run: npm run lint
       - run: npm run build
       - run: npm run check:bundle-budget
         working-directory: .
+
+  rust-dependency-audit:
+    name: Rust dependency security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: 1.96.0
+      - run: cargo install cargo-audit --version 0.22.2 --locked
+      - run: cargo audit --file ele-rs/Cargo.lock
+      - run: cargo audit --file ele-rs/src-tauri/Cargo.lock
 
   desktop:
     name: Desktop quality (${{ matrix.os }})
@@ -89,18 +128,40 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - run: npm ci --prefix ele-rs
-      - run: npm audit --prefix ele-rs --audit-level=high
+      - run: node --test ele-rs/scripts/windows-command-runner.test.mjs
+      - run: npm audit --prefix ele-rs --audit-level=moderate
       - run: cargo fmt --manifest-path ele-rs/Cargo.toml -- --check
       - run: cargo clippy --manifest-path ele-rs/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo test --manifest-path ele-rs/Cargo.toml --locked
       - run: cargo fmt --manifest-path ele-rs/src-tauri/Cargo.toml -- --check
       - run: cargo clippy --manifest-path ele-rs/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo test --manifest-path ele-rs/src-tauri/Cargo.toml --locked
+      - name: Smoke wrapper on Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./ele-rs/scripts/test-windows-smoke.ps1
+      - name: Smoke wrapper on PowerShell 7
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./ele-rs/scripts/test-windows-smoke.ps1
+      - name: Windows collector smoke (no submission)
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./ele-rs/scripts/windows-smoke-test.ps1 -SkipBuild -SkipCargoTest -SkipSubmit -SkipDiagnostics
+      - name: Save Windows smoke summary
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: windows-collector-smoke-summary
+          path: ele-rs/smoke-reports/**/windows-smoke-report.json
+          if-no-files-found: warn
+          retention-days: 7
 
   package:
     name: Release package checks
     runs-on: ubuntu-latest
-    needs: [plugin, admin]
+    needs: [plugin, php-compatibility, wordpress-integration, admin]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:

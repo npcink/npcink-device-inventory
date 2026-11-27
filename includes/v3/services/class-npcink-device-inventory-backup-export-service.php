@@ -163,7 +163,6 @@ class Npcink_Device_Inventory_Backup_Export_Service
 			'renewalMinMemoryGb' => intval($options['renewal_min_memory_gb']),
 			'renewalMinDiskGb' => intval($options['renewal_min_disk_gb']),
 			'renewalMaxResidualRate' => floatval($options['renewal_max_residual_rate']),
-			'countAvailableAssetsOnly' => !empty($options['count_available_assets_only']),
 			'departments' => Npcink_Device_Inventory_V3_Tables::normalize_departments_with_default($options['departments']),
 			'deleteDataOnUninstall' => !empty($options['delete_data_on_uninstall']),
 		);
@@ -230,7 +229,9 @@ class Npcink_Device_Inventory_Backup_Export_Service
 
 	private function validated_rows($rows)
 	{
-		if (!is_array($rows)) {
+		global $wpdb;
+		// ARRAY_A queries can return an empty array on SQL failure as well as no rows.
+		if ($wpdb->last_error !== '' || !is_array($rows)) {
 			throw new Exception('Failed to read backup rows.');
 		}
 		return $rows;
@@ -250,8 +251,7 @@ class Npcink_Device_Inventory_Backup_Export_Service
 			'category' => (string) $row['category'],
 			'purchasePrice' => floatval($row['purchase_price']),
 			'secondHandMarketValue' => floatval($row['residual_value']),
-			'financialResidualValue' => floatval(isset($row['financial_residual_value']) ? $row['financial_residual_value'] : 0),
-			'residualValue' => floatval($row['residual_value']),
+			'financialResidualValue' => floatval($row['financial_residual_value']),
 			'metadata' => $this->decode_json($row['metadata_json']),
 			'createdAt' => (string) $row['created_at'],
 			'updatedAt' => (string) $row['updated_at'],
@@ -310,12 +310,27 @@ class Npcink_Device_Inventory_Backup_Export_Service
 			'assetNumber' => (string) $row['asset_number'],
 			'source' => (string) $row['source'],
 			'schemaVersion' => intval($row['schema_version']),
+			'observationId' => isset($row['observation_uuid']) ? (string) $row['observation_uuid'] : null,
+			'payloadHash' => isset($row['payload_hash']) ? (string) $row['payload_hash'] : null,
 			'observedAt' => (string) $row['observed_at'],
-			'receivedAt' => (string) $row['received_at'],
+			'receivedAt' => $this->format_utc_datetime(isset($row['received_at']) ? $row['received_at'] : ''),
 			'summary' => $this->decode_json($row['summary_json']),
 			'hardware' => $this->decode_json($row['hardware_json']),
 			'raw' => $this->decode_json($row['raw_json']),
 		);
+	}
+
+	private function format_utc_datetime($value)
+	{
+		$value = trim((string) $value);
+		if ($value === '') {
+			return '';
+		}
+		$value = str_replace(' ', 'T', $value);
+		if (preg_match('/(?:Z|[+-]\d{2}:\d{2})$/', $value)) {
+			return $value;
+		}
+		return $value . 'Z';
 	}
 
 	private function decode_json($value)

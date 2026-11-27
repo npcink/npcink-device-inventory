@@ -4,15 +4,32 @@ if (!defined('ABSPATH')) {
 	exit;
 }
 
-// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- Optional uninstall cleanup drops only plugin-owned custom tables.
+// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- Opt-in cleanup removes only plugin-owned tables and raw SQL security counters.
 
 if (!class_exists('Npcink_Device_Inventory_Admin_Uninstall')) {
 	class Npcink_Device_Inventory_Admin_Uninstall
 	{
 		public static function run()
 		{
-			require plugin_dir_path(dirname(dirname(__FILE__))) . 'includes/v3/class-npcink-device-inventory-v3-tables.php';
+			require_once plugin_dir_path(dirname(dirname(__FILE__))) . 'includes/v3/class-npcink-device-inventory-v3-tables.php';
 
+			if (function_exists('is_multisite') && is_multisite() && function_exists('get_sites') && function_exists('switch_to_blog') && function_exists('restore_current_blog')) {
+				foreach ((array) get_sites(array('fields' => 'ids', 'number' => 0)) as $site_id) {
+					switch_to_blog((int) $site_id);
+					try {
+						self::run_for_current_site();
+					} finally {
+						restore_current_blog();
+					}
+				}
+				return;
+			}
+
+			self::run_for_current_site();
+		}
+
+		private static function run_for_current_site()
+		{
 			$options = Npcink_Device_Inventory_V3_Tables::options();
 			if (empty($options['delete_data_on_uninstall'])) {
 				return;
@@ -27,8 +44,19 @@ if (!class_exists('Npcink_Device_Inventory_Admin_Uninstall')) {
 				)
 			);
 			delete_option(Npcink_Device_Inventory_V3_Tables::OPTION);
+			delete_option(Npcink_Device_Inventory_V3_Tables::CLIENT_TOKENS_OPTION);
 			delete_option('npcink_device_inventory_data_model_version');
 			delete_option('npcink_device_inventory_plugin_version');
+			delete_option('npcink_device_inventory_schema_revision');
+			// These short-lived rows are written/read directly by the auth service,
+			// never through the options cache. Escape underscores in LIKE prefixes.
+			global $wpdb;
+			$wpdb->query($wpdb->prepare(
+				'DELETE FROM %i WHERE option_name LIKE %s OR option_name LIKE %s',
+				$wpdb->options,
+				$wpdb->esc_like('npcink_v3_upload_nonce_') . '%',
+				$wpdb->esc_like('npcink_v3_upload_rate_') . '%'
+			));
 		}
 
 		public static function delete_sql($table_names = array())

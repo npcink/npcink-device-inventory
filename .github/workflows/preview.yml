@@ -70,7 +70,7 @@ jobs:
         working-directory: vite-admin
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --audit-level=moderate
           npm run check:hardware-audit
           npm run lint
           npm run build
@@ -110,7 +110,7 @@ jobs:
         working-directory: ele-rs
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --audit-level=moderate
 
       - name: Use stable Rust
         run: rustup show
@@ -135,13 +135,17 @@ jobs:
 
       - name: Build Tauri bundle
         working-directory: ele-rs
-        run: npm run tauri:build
+        run: npm run tauri:build:macos
+
+      - name: Verify macOS disk image and complete app signature
+        working-directory: ele-rs
+        run: npm run check:macos-bundle -- src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
 
       - name: Upload macOS DMG
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: preview-npcink-device-agent-macos
-          path: ele-rs/src-tauri/target/release/bundle/dmg/*.dmg
+          path: ele-rs/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
           retention-days: 7
 
@@ -164,10 +168,24 @@ jobs:
         working-directory: ele-rs
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --audit-level=moderate
+
+      - name: Check paired product and Tauri dependency versions
+        run: npm run check:versions
 
       - name: Use stable Rust
         run: rustup show
+
+      - name: Check command runner and Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          node --test ele-rs/scripts/windows-command-runner.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./ele-rs/scripts/test-windows-smoke.ps1
+
+      - name: Check PowerShell 7 wrapper
+        shell: pwsh
+        run: ./ele-rs/scripts/test-windows-smoke.ps1
 
       - name: Check Rust collector
         working-directory: ele-rs
@@ -190,6 +208,20 @@ jobs:
       - name: Build Tauri bundle
         working-directory: ele-rs
         run: npm run tauri:build
+
+      - name: Windows collector smoke (no submission)
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./ele-rs/scripts/windows-smoke-test.ps1 -SkipBuild -SkipCargoTest -SkipSubmit -SkipDiagnostics
+
+      - name: Save Windows smoke summary
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: preview-windows-collector-smoke-summary
+          path: ele-rs/smoke-reports/**/windows-smoke-report.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f

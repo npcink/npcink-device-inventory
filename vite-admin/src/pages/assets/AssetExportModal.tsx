@@ -1,0 +1,287 @@
+import { HelpLabel } from "@/components/HelpLabel";
+import { getAsset, getAssets, getSettings } from "@/services/v3";
+import type { Asset, AssetListParams } from "@/type/v3";
+import { useQuery } from "@tanstack/react-query";
+import { Alert, Button, Checkbox, Empty, Modal, Radio, Space, Typography, message } from "antd";
+import { useEffect, useState } from "react";
+import { fetchAllAssets, MAX_FULL_HARDWARE_ASSETS, FULL_HARDWARE_PAGE_SIZE } from "@/pages/shared/assets";
+import {
+  AssetExportFieldKey,
+  AssetExportFormat,
+  AssetExportScope,
+  exportFieldsNeedHardware,
+} from "@/pages/shared/options";
+import {
+  ASSET_EXPORT_STATUS_COLORS,
+  ASSET_EXPORT_FIELDS,
+  DEFAULT_ASSET_EXPORT_FIELD_KEYS,
+  assetsToCsv,
+  downloadCsvFile,
+  exportAssetWorkbook,
+  exportableAssets,
+  selectedAssetExportFields,
+} from "@/pages/shared/tabular";
+
+const { Text } = Typography;
+
+const fetchExportAssetDetails = async (assets: Asset[]) => {
+  const details: Asset[] = [];
+  const batchSize = 5;
+  for (let index = 0; index < assets.length; index += batchSize) {
+    details.push(...await Promise.all(assets.slice(index, index + batchSize).map((asset) => getAsset(asset.uuid))));
+  }
+  return details;
+};
+
+export interface AssetExportModalProps {
+  open: boolean;
+  currentScopeLabel: string;
+  currentQueryParams: AssetListParams;
+  currentTotal?: number;
+  selectedAssets?: Asset[];
+  onClose: () => void;
+}
+
+export const AssetExportModal = ({
+  open,
+  currentScopeLabel,
+  currentQueryParams,
+  currentTotal,
+  selectedAssets = [],
+  onClose,
+}: AssetExportModalProps) => {
+  const settingsQuery = useQuery(["v3-settings"], getSettings, { enabled: open, staleTime: 60_000 });
+  const [scope, setScope] = useState<AssetExportScope>("current-filter");
+  const [fieldKeys, setFieldKeys] = useState<AssetExportFieldKey[]>(DEFAULT_ASSET_EXPORT_FIELD_KEYS);
+  const [format, setFormat] = useState<AssetExportFormat>("xlsx");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLeftOffset, setPreviewLeftOffset] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const exportParams: Record<Exclude<AssetExportScope, "current-filter" | "selected">, AssetListParams> = {
+    computer: { assetScope: "computer" },
+    custom: { assetScope: "other" },
+    all: { assetScope: "all" },
+  };
+
+  useEffect(() => {
+    if (open) {
+      setScope(selectedAssets.length ? "selected" : "current-filter");
+      setFieldKeys(DEFAULT_ASSET_EXPORT_FIELD_KEYS);
+      setFormat("xlsx");
+      setPreviewOpen(false);
+    }
+  }, [open, selectedAssets.length]);
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    const updatePreviewOffset = () => {
+      const menu = document.getElementById("adminmenuwrap");
+      const right = menu?.getBoundingClientRect().right || 0;
+      setPreviewLeftOffset(right > 0 && right < window.innerWidth * 0.4 ? Math.round(right) : 0);
+    };
+    updatePreviewOffset();
+    window.addEventListener("resize", updatePreviewOffset);
+    return () => window.removeEventListener("resize", updatePreviewOffset);
+  }, [previewOpen]);
+
+  const needsHardware = exportFieldsNeedHardware(fieldKeys);
+  const previewParams = scope === "current-filter" ? currentQueryParams : scope === "selected" ? undefined : exportParams[scope];
+  const previewQuery = useQuery(
+    ["v3-export-preview", scope, previewParams, needsHardware],
+    () => getAssets({ ...previewParams, page: 1, pageSize: needsHardware ? FULL_HARDWARE_PAGE_SIZE : 30, includeHardware: needsHardware }),
+    { enabled: open && previewOpen && scope !== "selected", staleTime: 30_000 }
+  );
+  const selectedExportAssets = exportableAssets(selectedAssets);
+  const selectedPreviewQuery = useQuery(
+    ["v3-export-selected-preview", selectedExportAssets.map((asset) => asset.uuid), needsHardware],
+    () => fetchExportAssetDetails(selectedExportAssets.slice(0, FULL_HARDWARE_PAGE_SIZE)),
+    { enabled: open && previewOpen && scope === "selected" && needsHardware, staleTime: 30_000 }
+  );
+  const previewLoading = scope === "selected"
+    ? needsHardware && selectedPreviewQuery.isFetching
+    : previewQuery.isFetching;
+  const previewError = scope === "selected"
+    ? Boolean(needsHardware && selectedPreviewQuery.isError)
+    : previewQuery.isError;
+  const previewSource = scope === "selected"
+    ? (needsHardware ? (previewError || previewLoading ? [] : selectedPreviewQuery.data || []) : selectedAssets)
+    : (previewError || previewLoading ? [] : previewQuery.data?.data || []);
+  const previewAssets = exportableAssets(previewSource).slice(0, 30);
+  const previewFields = selectedAssetExportFields(fieldKeys);
+  const knownScopeTotal = scope === "selected" ? selectedExportAssets.length : previewQuery.data?.pagination.totalItems;
+  const exceedsHardwareLimit = needsHardware && (knownScopeTotal ?? 0) > MAX_FULL_HARDWARE_ASSETS;
+  const hardwareLimitMessage = `含硬件字段的单次导出最多 ${MAX_FULL_HARDWARE_ASSETS} 条，请缩小范围或取消硬件字段。`;
+  const needsSettings = fieldKeys.includes("financialResidualValue");
+  const settingsReady = !needsSettings || Boolean(settingsQuery.data) && !settingsQuery.isError;
+
+  const toggleField = (key: AssetExportFieldKey, checked: boolean) => {
+    setFieldKeys((keys) => checked ? [...keys, key] : keys.filter((item) => item !== key));
+  };
+  const exportAssets = async () => {
+    if (!settingsReady || exporting) return;
+    if (!fieldKeys.length) {
+      message.warning("请至少选择一个导出字段");
+      return;
+    }
+    if (exceedsHardwareLimit) {
+      message.warning(hardwareLimitMessage);
+      return;
+    }
+    setExporting(true);
+    try {
+      const assets = exportableAssets(scope === "selected"
+        ? (needsHardware
+          ? await fetchExportAssetDetails(selectedExportAssets)
+          : selectedAssets)
+        : await fetchAllAssets({
+            ...(scope === "current-filter" ? currentQueryParams : exportParams[scope]),
+            includeHardware: needsHardware,
+          }));
+      if (!assets.length) {
+        message.warning("当前范围没有可导出的未归档资产");
+        return;
+      }
+      if (format === "xlsx") {
+        await exportAssetWorkbook(assets, fieldKeys, settingsQuery.data);
+      } else {
+        downloadCsvFile(`资产台账-${Date.now()}.csv`, assetsToCsv(assets, fieldKeys, settingsQuery.data));
+      }
+      message.success(`已导出 ${assets.length} 条资产`);
+      setPreviewOpen(false);
+      onClose();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "表格导出失败，请稍后重试");
+    } finally {
+      setExporting(false);
+    }
+  };
+  const currentFilterCountText =
+    typeof currentTotal === "number" ? `${currentTotal} 条` : "导出时计算";
+  const previewTotalText = previewError ? "数量暂不可用" : previewLoading ? "正在加载" : scope === "current-filter"
+    ? currentFilterCountText
+    : scope === "selected"
+      ? `${selectedExportAssets.length} 条`
+      : previewQuery.data
+        ? `${previewQuery.data.pagination.totalItems} 条`
+        : "计算中";
+  const previewScopeLabel = scope === "current-filter"
+    ? `${currentScopeLabel}（当前筛选）`
+    : scope === "selected"
+      ? "已勾选资产"
+      : scope === "computer"
+        ? "全部电脑设备"
+        : scope === "custom"
+          ? "全部自定义设备"
+          : "全部资产";
+
+  return (
+    <>
+    <Modal
+      title="资产表格导出"
+      open={open}
+      onCancel={onClose}
+      width={820}
+      destroyOnHidden
+      className="npcink-v3-export-modal"
+      footer={[
+        <Button key="cancel" onClick={onClose}>取消</Button>,
+        <Button key="preview" disabled={!fieldKeys.length || !settingsReady} onClick={() => setPreviewOpen(true)}>预览表格</Button>,
+        <Button key="export" type="primary" loading={exporting} disabled={!fieldKeys.length || !settingsReady || exceedsHardwareLimit} onClick={exportAssets}>{format === "xlsx" ? "导出 Excel" : "导出 CSV"}</Button>,
+      ]}
+    >
+      <div className="npcink-v3-export-config">
+        {exceedsHardwareLimit ? <Alert type="warning" showIcon message={hardwareLimitMessage} /> : null}
+        {needsSettings && settingsQuery.isError ? <Alert
+          type="error"
+          showIcon
+          message="折旧设置加载失败"
+          description="重试成功后才能预览和导出账面净值，也可取消选择该字段。"
+          action={<Button onClick={() => settingsQuery.refetch()}>重试</Button>}
+        /> : needsSettings && !settingsQuery.data ? <Text role="status">正在加载折旧设置…</Text> : null}
+        <section>
+          <Text strong><HelpLabel label="文件格式" description="Excel 按固定配色标记状态单元格；CSV 不保存颜色和单元格样式，预览窗口仅展示数据内容。" /></Text>
+          <Radio.Group
+            value={format}
+            onChange={(event) => setFormat(event.target.value)}
+            options={[
+              { label: "Excel（推荐）", value: "xlsx" },
+              { label: "CSV（通用，无颜色）", value: "csv" },
+            ]}
+          />
+        </section>
+        <section>
+          <Text strong><HelpLabel label="导出范围" description="符合当前筛选条件的数据，就是资产列表里筛选后的全部结果，不只是当前页；已归档设备始终不会导出。" /></Text>
+          <Radio.Group className="npcink-v3-export-scope-grid" value={scope} onChange={(event) => setScope(event.target.value)}>
+            <Radio value="current-filter"><strong>当前筛选结果</strong><small>{currentScopeLabel} · {currentFilterCountText}</small></Radio>
+            {selectedAssets.length ? <Radio value="selected"><strong>已勾选设备</strong><small>可导出 {selectedExportAssets.length} 条（自动排除已归档）</small></Radio> : <div className="npcink-v3-export-scope-empty"><strong>已勾选设备</strong><small>尚未选择设备，请先在资产列表进入批量模式并勾选。</small></div>}
+            <Radio value="computer"><strong>全部电脑设备</strong><small>不受当前筛选条件影响</small></Radio>
+            <Radio value="custom"><strong>全部自定义设备</strong><small>不受当前筛选条件影响</small></Radio>
+            <Radio value="all"><strong>全部资产</strong><small>忽略当前筛选，包含电脑与自定义设备</small></Radio>
+          </Radio.Group>
+        </section>
+        <section>
+          <div className="npcink-v3-export-section-head"><Text strong>导出字段</Text><Text type="secondary">已选 {fieldKeys.length} 个</Text></div>
+          <div className="npcink-v3-export-field-toolbar">
+            <div><Text type="secondary">常用方案</Text><Space wrap size={6}>
+              <Button type="primary" ghost size="small" onClick={() => setFieldKeys(["assetNumber", "ownerName", "department", "status", "purchasePrice", "secondHandMarketValue", "financialResidualValue", "baseboard", "cpu"])}>推荐电脑台账</Button>
+              <Button size="small" onClick={() => setFieldKeys(["assetNumber", "name", "ownerName", "department", "status", "purchasePrice", "secondHandMarketValue", "financialResidualValue", "purchaseDate"])}>财务台账</Button>
+              <Button size="small" onClick={() => setFieldKeys(["assetNumber", "ownerName", "department", "status", "cpu", "memory", "disk", "graphics", "deviceModel", "baseboard", "ip"])}>硬件配置</Button>
+            </Space></div>
+            <Space size={6}><Button size="small" onClick={() => setFieldKeys(ASSET_EXPORT_FIELDS.map((field) => field.key))}>全选</Button><Button danger type="text" size="small" onClick={() => setFieldKeys([])}>清空</Button></Space>
+          </div>
+          <div className="npcink-v3-export-fields">
+            {["基础信息", "财务信息", "硬件信息", "系统信息"].map((group) => (
+              <div key={group}>
+                <div className="npcink-v3-export-field-group-head">
+                  <Text type="secondary">{group} {ASSET_EXPORT_FIELDS.filter((field) => field.group === group && fieldKeys.includes(field.key)).length}/{ASSET_EXPORT_FIELDS.filter((field) => field.group === group).length}</Text>
+                  <Space size={4}><Button type="link" size="small" onClick={() => setFieldKeys((keys) => [...keys, ...ASSET_EXPORT_FIELDS.filter((field) => field.group === group && !keys.includes(field.key)).map((field) => field.key)])}>全选本组</Button><Button type="link" size="small" onClick={() => setFieldKeys((keys) => keys.filter((key) => ASSET_EXPORT_FIELDS.find((field) => field.key === key)?.group !== group))}>清空本组</Button></Space>
+                </div>
+                <div className="npcink-v3-export-field-options">{ASSET_EXPORT_FIELDS.filter((field) => field.group === group).map((field) => <Checkbox key={field.key} checked={fieldKeys.includes(field.key)} onChange={(event) => toggleField(field.key, event.target.checked)}>{field.label}</Checkbox>)}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    </Modal>
+    <Modal
+      title="导出表格预览"
+      open={previewOpen}
+      onCancel={() => setPreviewOpen(false)}
+      width={`calc(100vw - ${previewLeftOffset + 32}px)`}
+      style={{ marginLeft: previewLeftOffset + 16, marginRight: 16 }}
+      className="npcink-v3-export-preview-modal"
+      destroyOnHidden
+      footer={[
+        <Button key="back" onClick={() => setPreviewOpen(false)}>返回修改</Button>,
+        <Button key="export" type="primary" loading={exporting} disabled={!fieldKeys.length || !settingsReady || exceedsHardwareLimit || previewLoading || previewError} onClick={exportAssets}>{format === "xlsx" ? "确认导出 Excel" : "确认导出 CSV"}</Button>,
+      ]}
+    >
+      <div className="npcink-v3-export-preview-summary">
+        <div><Text strong>{previewScopeLabel}</Text>{!previewLoading && !previewError ? <Text type="secondary">预览前 {previewAssets.length} 条。</Text> : null}</div>
+        <Text type="secondary">{previewTotalText} · {fieldKeys.length} 列 · {format === "xlsx" ? "Excel" : "CSV"}{format === "xlsx" ? " · 状态单元格着色" : ""}</Text>
+      </div>
+      {exceedsHardwareLimit ? <Alert type="warning" showIcon message={hardwareLimitMessage} /> : null}
+      {needsSettings && settingsQuery.isError ? <Alert
+        type="error"
+        showIcon
+        message="折旧设置加载失败"
+        action={<Button onClick={() => settingsQuery.refetch()}>重试</Button>}
+      /> : null}
+      {previewError ? <Alert
+        type="error"
+        showIcon
+        message="导出预览加载失败"
+        action={<Button onClick={() => scope === "selected" ? selectedPreviewQuery.refetch() : previewQuery.refetch()}>重试</Button>}
+      /> : previewLoading ? <div className="npcink-v3-export-preview-loading" role="status">正在加载预览…</div> : (
+      <div className="npcink-v3-export-preview-table is-fullscreen">
+        {fieldKeys.length && settingsReady && previewAssets.length ? <table><thead><tr>{previewFields.map((field) => <th key={field.key}>{field.label}</th>)}</tr></thead><tbody>{previewAssets.map((asset) => <tr key={asset.uuid}>{previewFields.map((field) => {
+          const color = format === "xlsx" && field.key === "status" ? ASSET_EXPORT_STATUS_COLORS[asset.status] : undefined;
+          const value = String(field.value(asset, settingsQuery.data) ?? "");
+          return <td key={field.key} style={color ? { backgroundColor: color } : undefined} title={value}>{value || "-"}</td>;
+        })}</tr>)}</tbody></table> : settingsReady ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={fieldKeys.length ? "当前范围没有可导出的未归档资产" : "请选择至少一个导出字段"} /> : null}
+      </div>
+      )}
+    </Modal>
+    </>
+  );
+};

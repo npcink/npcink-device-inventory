@@ -16,10 +16,10 @@ import type {
   BackupRestoreResult,
   ClientToken,
   CollectionTrends,
+  ComparisonObservationPage,
   CreatedClientToken,
   EventListParams,
   InventorySettings,
-  ObservationListParams,
   ObservationCleanupResult,
   PaginatedResult,
 } from "@/type/v3";
@@ -30,11 +30,19 @@ interface DataEnvelope<T> {
 
 const unwrapData = <T>(payload: DataEnvelope<T>): T => payload.data;
 
+export const getComparisonObservations = async (afterAssetId = 0, throughAssetId = 0, signal?: AbortSignal): Promise<ComparisonObservationPage> => {
+  const response = await restInstance.get<ComparisonObservationPage>("/analysis/hardware-observations", {
+    params: { afterAssetId, throughAssetId, pageSize: 25 }, signal, showSuccessMessage: false,
+  } as RequestConfig);
+  return response.data;
+};
+
 export const getAssets = async (
-  params: AssetListParams
+  params: AssetListParams, signal?: AbortSignal
 ): Promise<PaginatedResult<Asset>> => {
   const response = await restInstance.get<PaginatedResult<Asset>>("/assets", {
     params,
+    signal,
     showSuccessMessage: false,
   } as RequestConfig);
   return response.data;
@@ -87,6 +95,18 @@ export const batchAssets = async (
   return unwrapData(response.data);
 };
 
+export const lookupImportAssets = async (assetNumbers: string[], signal?: AbortSignal): Promise<Asset[]> => {
+  const matches: Asset[] = [];
+  for (let offset = 0; offset < assetNumbers.length; offset += 100) {
+    const response = await restInstance.post<DataEnvelope<Asset[]>>(
+      "/assets/import/lookup", { assetNumbers: assetNumbers.slice(offset, offset + 100) },
+      { signal, showSuccessMessage: false } as RequestConfig,
+    );
+    matches.push(...unwrapData(response.data));
+  }
+  return matches;
+};
+
 export const importAssets = async (items: AssetImportWriteItem[]): Promise<AssetImportWriteResult> => {
   const response = await restInstance.post<DataEnvelope<AssetImportWriteResult>>(
     "/assets/import",
@@ -118,16 +138,6 @@ export const getAssetObservations = async (
       showSuccessMessage: false,
     } as RequestConfig
   );
-  return response.data;
-};
-
-export const getObservations = async (
-  params: ObservationListParams
-): Promise<PaginatedResult<AssetObservation>> => {
-  const response = await restInstance.get<PaginatedResult<AssetObservation>>("/observations", {
-    params,
-    showSuccessMessage: false,
-  } as RequestConfig);
   return response.data;
 };
 
@@ -235,11 +245,16 @@ export const deleteClientToken = async (id: string): Promise<void> => {
 
 export const restoreBackup = async (
   backup: unknown,
-  dryRun = false
+  dryRun = false,
+  options: { confirmDeleteDataOnUninstallChange?: boolean } = {}
 ): Promise<BackupRestoreResult> => {
   const response = await restInstance.post<DataEnvelope<BackupRestoreResult>>(
     "/backup-restore",
-    { backup, dryRun },
+    {
+      backup,
+      dryRun,
+      confirmDeleteDataOnUninstallChange: Boolean(options.confirmDeleteDataOnUninstallChange),
+    },
     { showSuccessMessage: false } as RequestConfig
   );
   return unwrapData(response.data);

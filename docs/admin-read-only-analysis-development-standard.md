@@ -2,7 +2,7 @@
 
 ## 目的
 
-本规范用于新增或修改 WordPress 管理端的分析、汇总、筛选、下钻和设备只读详情。它补充 [`development-playbook.md`](development-playbook.md)；架构边界以 [`ADR-009`](decisions/ADR-009-restore-read-only-analysis.md) 为准。
+本规范用于新增或修改 WordPress 管理端的分析、汇总、筛选、下钻和设备只读详情。它补充 [`development-playbook.md`](development-playbook.md)；架构边界以 [`ADR-009`](decisions/ADR-009-restore-read-only-analysis.md) 为准；评分、财务补齐提醒和更新计划草案的收缩以 [ADR-019](decisions/ADR-019-focus-on-inventory-and-upload.md) 为准。
 
 ## 1. 产品边界
 
@@ -20,7 +20,9 @@
 
 ### 缺失值
 
-- 缺失金额显示“未登记”，不得按零参与总额、折价或残值率。
+- 缺失金额与合法零值分别处理；报废和手动登记的零净值不属于资料缺项。
+- 资料缺项仅检查可行动的业务/硬件字段，不计算综合分数，也不要求普遍填写二手市场价。
+- 更新候选只提供依据和清单导出，不生成更新计划草案或采购预算。
 - 缺少计算所需任一字段时显示“无法计算”，不得猜测。
 - 缺少某次硬件字段不能解释为硬件拆除。
 - 空部门、`未分配` 和历史 `默认` 可在分析中归为待分配，但不得自动改写资产。
@@ -141,3 +143,14 @@
 - 新设置和接口具有契约与备份闭环。
 - 自动检查与真实后台验收均通过。
 - 文档入口已更新，未来维护者能找到当前规则。
+
+## 硬件变更历史接口
+
+`GET /npcink-device-inventory/v1/analysis/hardware-observations` 仅允许拥有 `manage_options` 的管理员调用。
+
+- 参数：`afterAssetId`（默认 0）、`throughAssetId`（首次默认 0，由服务端确定资产 ID 上界）、`pageSize`（1–25，默认 25）。后续请求必须原样传递首次响应的 `throughAssetId`。
+- 每页最多处理 25 台未归档电脑，每台只返回按 `observed_at DESC, id DESC` 排序的最近两次观测。自定义资产和归档资产不参与比较。
+- 响应为 `{ data: [{ id, assetId, observedAt, summary, hardware }], pagination: { nextAfterAssetId, throughAssetId } }`。不返回原始上报 `raw`。
+- `nextAfterAssetId` 为 `null` 表示结束。空 `data` 页也可能有下一页（资产没有观测），不能据此提前终止。
+- 上界固定资产集合的增长范围，不提供跨请求事务快照；正在发生的采集和归档会反映到后续页面。只有进入硬件变更视图时读取，离开后允许取消请求。
+- SQL 使用资产主键游标、每台电脑两次索引定位和观测主键连接，不通过下载全部历史再在浏览器内截取。

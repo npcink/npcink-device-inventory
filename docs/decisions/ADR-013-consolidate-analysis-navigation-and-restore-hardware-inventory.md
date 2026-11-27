@@ -1,5 +1,8 @@
 # ADR-013: Consolidate Analysis Navigation And Restore Hardware Inventory
 
+
+2026-11-10 更新：The completeness score and renewal plan draft were removed by ADR-019; the four-domain navigation and hardware inventory remain current. 见 [ADR-019](ADR-019-focus-on-inventory-and-upload.md)。
+
 ## Status
 
 Accepted
