@@ -120,6 +120,8 @@
 - 共享数据/财务、展示、表格导入导出、缓存和详情转换位于 `pages/shared`；共享层不得反向依赖业务工作区，避免循环依赖。
 - 工作区使用 `React.lazy`；低频弹窗通过 `DeferredPanel` 首次打开时加载，此后保留挂载以运行原有关闭动画及重置逻辑。
 - 不手工拆分 Ant Design vendor chunk。内容哈希 chunk 与 Vite manifest 一起打包；`check:bundle-budget` 同时约束入口、外壳、默认资产页和全部 JS 体积。
+- WordPress 加版本参数的 `dist/index.js` 只导入内容哈希入口。懒加载 chunk 必须和这个加载器走同一个应用模块 URL，避免双重启动和 React Query 上下文丢失。验收时使用生产构建打开真实 WordPress 后台，不能只看 Vite 预览。
+- 后台基础样式限于 `.npcink-v3-app`，不要向 WordPress 壳层注入全局重置。修改后用折叠与展开的 WordPress 菜单回归，并操作挂载在应用容器外的弹窗、下拉菜单及表单校验。
 - 整改依据、测试证据及剩余依赖提示见 [2026-10-26 整改记录](project-remediation-2026-10-26.md)。
 
 ## 写事务与缓存边界

@@ -1,11 +1,7 @@
-#root {
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-#root *,
-#root *::before,
-#root *::after {
+.npcink-v3-app,
+.npcink-v3-app *,
+.npcink-v3-app *::before,
+.npcink-v3-app *::after {
   box-sizing: border-box;
 }
 
@@ -594,6 +590,7 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow-wrap: anywhere;
+  line-height: 1.4;
   white-space: normal;
 }
 
@@ -2406,24 +2403,13 @@
 .npcink-v3-app .ant-btn,
 .npcink-v3-app .ant-input,
 .npcink-v3-app .ant-select-selector,
-.npcink-v3-app .ant-input-number,
-.ant-modal .ant-btn,
-.ant-drawer .ant-btn {
+.npcink-v3-app .ant-input-number {
   border-radius: 8px;
 }
 
-.npcink-v3-app .ant-tag,
-.ant-drawer .ant-tag {
+.npcink-v3-app .ant-tag {
   border-radius: 999px;
   padding-inline: 8px;
-}
-
-.ant-drawer .ant-drawer-header {
-  border-bottom-color: #e4e7ec;
-}
-
-.ant-drawer .ant-tabs-nav {
-  margin-bottom: 14px;
 }
 
 @media (max-width: 1280px) {
